@@ -24,3 +24,4 @@ dove serve, nasconde gli elementi originali.
 | M3 | Barra al posto della taskbar (docs/05-bar.md) | fatto |
 | M4 | Launcher in stile Nothing (docs/06-launcher.md) | fatto |
 | M5 | Impostazioni + plugin widget (docs/07-settings-plugins.md) | fatto |
+| M6 | Notch: avvisi mail e pagine con swipe (docs/08-notch-mail-pages.md) | fatto |

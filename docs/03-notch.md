@@ -1,5 +1,8 @@
 # 03 — Notch (M1)
 
+> Esteso da docs/08-notch-mail-pages.md: stato Alert (mail, timer), notch espanso a 420 × 172
+> con pagine (Home, Posta, Timer, Sistema) e swipe.
+
 Finestra a pillola nera, in alto al centro del monitor principale, sempre in primo piano,
 che non ruba il focus (`WS_EX_NOACTIVATE`, `WS_EX_TOOLWINDOW`: non appare in Alt+Tab).
 

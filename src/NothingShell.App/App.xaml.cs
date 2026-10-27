@@ -6,10 +6,12 @@ using System.Windows.Media.Imaging;
 using NothingShell.App.Bar;
 using NothingShell.App.Launcher;
 using NothingShell.Core.Launcher;
+using NothingShell.App.Notch;
 using NothingShell.App.Plugins;
 using NothingShell.App.Services;
 using NothingShell.App.Settings;
 using NothingShell.App.Widgets;
+using NothingShell.Core.Notch;
 using NothingShell.Core.Plugins;
 using NothingShell.Core.Sensors;
 using NothingShell.Core.Storage;
@@ -41,6 +43,7 @@ public partial class App : Application
                 RenderSnapshots(folder);
                 await RenderLauncherSnapshot(folder);
                 await RenderPluginAndSettingsSnapshots(folder);
+                RenderNotchSnapshots(folder);
                 Shutdown();
                 return;
             case ["--dump-windows", var file]:
@@ -106,6 +109,34 @@ public partial class App : Application
         AppDomain.CurrentDomain.ProcessExit += (_, _) => WindowsTaskbar.ForceShow();
     }
 
+    /// <summary>Notch: avviso mail, ogni pagina espansa e timer in corso. Mail di esempio, solo per l'anteprima.</summary>
+    private static void RenderNotchSnapshots(string folder)
+    {
+        using var media = new MediaService(); // non avviato: nessuna sessione, Home mostra l'ora
+        var notch = new NotchWindow(media);
+        var now = DateTimeOffset.Now;
+        MailItem[] demo =
+        [
+            new("Mario Rossi", "Riunione di domani alle 10: ordine del giorno aggiornato", "Outlook", now),
+            new("Studio Bianchi", "Preventivo convalida", "Outlook", now.AddMinutes(-12)),
+            new("GitHub", "[nothing-shell] Nuova issue aperta", "Brave", now.AddHours(-1)),
+        ];
+        notch.SetTime(DateTime.Now);
+        notch.SetMail(demo, string.Empty);
+        notch.SetSystem(new SystemStats(0.23, SystemMonitor.ReadMemoryLoad()));
+        notch.SetBattery(SystemMonitor.ReadBattery());
+
+        notch.ShowMailAlert(demo[0]);
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "notch-alert.png"));
+        foreach (var page in NotchPager.Pages)
+            SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, page),
+                Path.Combine(folder, $"notch-{page}.png".ToLowerInvariant()));
+
+        notch.StartTimer(TimeSpan.FromMinutes(25));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Timer), Path.Combine(folder, "notch-timer-running.png"));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Activity, NotchPage.Home), Path.Combine(folder, "notch-activity-timer.png"));
+    }
+
     /// <summary>Widget dei plugin installati (dati veri dalle loro sorgenti) e finestra delle impostazioni, in PNG.</summary>
     private static async Task RenderPluginAndSettingsSnapshots(string folder)
     {
@@ -137,6 +168,14 @@ public partial class App : Application
         public bool UseWinKey { get; set; } = true;
 
         public bool WidgetsLocked { get; set; }
+
+        public bool MailInNotch { get; set; } = true;
+
+        public string NotificationAccessText => "Accesso alle notifiche consentito";
+
+        public bool CanRequestNotificationAccess => false;
+
+        public Task RequestNotificationAccessAsync() => Task.CompletedTask;
 
         public IEnumerable<(string Id, string Name)> Widgets =>
             new[] { ("Clock", "Orologio"), ("Battery", "Batteria"), ("System", "Sistema"), ("Calendar", "Calendario") }

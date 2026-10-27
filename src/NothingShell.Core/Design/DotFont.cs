@@ -132,6 +132,9 @@ public static class DotIcons
     public static readonly DotGlyph Wifi = new(
         ".#####.", "#.....#", "..###..", ".#...#.", ".......", "...#...");
 
+    public static readonly DotGlyph Mail = new(
+        "#########", "##.....##", "#.#...#.#", "#..#.#..#", "#...#...#", "#.......#", "#########");
+
     public static readonly DotGlyph Search = new(
         ".###...", "#...#..", "#...#..", "#...#..", ".###...", ".....#.", "......#");
 

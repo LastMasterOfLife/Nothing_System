@@ -13,6 +13,7 @@ using NothingShell.Core.Plugins;
 using NothingShell.Core.Settings;
 using NothingShell.Core.Storage;
 using NothingShell.Core.Widgets;
+using Windows.UI.Notifications.Management;
 
 namespace NothingShell.App;
 
@@ -31,6 +32,7 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
     private readonly WindowsTaskbar _taskbar = new();
     private readonly AppCatalog _catalog = new();
     private readonly PluginHost _plugins = new();
+    private readonly NotificationService _notifications = new();
     private readonly LauncherWindow _launcher;
     private readonly WinKeyHook _winKey;
     private readonly NotchWindow _notch;
@@ -66,6 +68,16 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
         _clock.MinuteChanged += _notch.SetTime;
         _clock.MinuteChanged += _bar.SetTime;
         _monitor.BatteryChanged += _bar.SetBattery;
+        _monitor.BatteryChanged += _notch.SetBattery;
+        _monitor.StatsChanged += _notch.SetSystem;
+
+        _notifications.ExtraMailApps = () => _settings.ExtraMailApps ?? [];
+        _notifications.MailArrived += mail =>
+        {
+            if (_settings.MailInNotch)
+                _notch.ShowMailAlert(mail);
+        };
+        _notifications.RecentChanged += RefreshMailPage;
         _network.Changed += _bar.SetNetwork;
         _bar.SetNetwork(_network.Current);
         _tracker.FullscreenChanged += fullscreen =>
@@ -99,6 +111,36 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
         set => _widgets.SetLocked(value);
     }
 
+    public bool MailInNotch
+    {
+        get => _settings.MailInNotch;
+        set
+        {
+            Update(_settings with { MailInNotch = value });
+            if (value)
+                _notifications.Start();
+            else
+                _notifications.Stop();
+            RefreshMailPage();
+        }
+    }
+
+    public string NotificationAccessText => _notifications.Access switch
+    {
+        UserNotificationListenerAccessStatus.Allowed => "Accesso alle notifiche consentito",
+        UserNotificationListenerAccessStatus.Denied =>
+            "Accesso negato: abilitalo in Impostazioni di Windows › Privacy e sicurezza › Notifiche",
+        _ => "Accesso alle notifiche non ancora richiesto",
+    };
+
+    public bool CanRequestNotificationAccess => _notifications.Access == UserNotificationListenerAccessStatus.Unspecified;
+
+    public async Task RequestNotificationAccessAsync()
+    {
+        await _notifications.RequestAccessAsync();
+        RefreshMailPage();
+    }
+
     public IEnumerable<(string Id, string Name)> Widgets => _widgets.Widgets;
 
     public IReadOnlyList<PluginLoadResult> PluginResults => _plugins.Results;
@@ -118,6 +160,9 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
         _tracker.Start();
         ApplyTopLevelVisibility();
         _winKey.Start();
+        if (_settings.MailInNotch)
+            _notifications.Start();
+        RefreshMailPage();
 
         await _media.StartAsync();
         try
@@ -163,9 +208,18 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
     {
         _taskbar.Show();
         _plugins.Dispose();
+        _notifications.Dispose();
         _winKey.Dispose();
         _tracker.Dispose();
         _media.Dispose();
+    }
+
+    private void RefreshMailPage()
+    {
+        var empty = !_settings.MailInNotch ? "Mail nel notch disattivate (Impostazioni)"
+            : _notifications.Access == UserNotificationListenerAccessStatus.Allowed ? "Nessuna mail recente"
+            : "Consenti l'accesso alle notifiche nelle impostazioni di Nothing Shell";
+        _notch.SetMail(_settings.MailInNotch ? _notifications.Recent : [], empty);
     }
 
     private void LoadPlugins()

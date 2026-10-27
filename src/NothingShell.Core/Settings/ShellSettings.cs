@@ -4,7 +4,12 @@ using NothingShell.Core.Storage;
 namespace NothingShell.Core.Settings;
 
 /// <summary>Preferenze generali della shell (docs/07-settings-plugins.md).</summary>
-public sealed record ShellSettings(bool Notch, bool Bar, IReadOnlyList<string> DisabledWidgets)
+public sealed record ShellSettings(
+    bool Notch,
+    bool Bar,
+    IReadOnlyList<string> DisabledWidgets,
+    bool MailInNotch = true,
+    IReadOnlyList<string>? ExtraMailApps = null)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
 

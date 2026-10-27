@@ -12,7 +12,8 @@ public static class NotchLayout
     {
         NotchState.Idle => new(200, 34),
         NotchState.Activity => new(300, 34),
-        NotchState.Expanded => new(420, 150),
+        NotchState.Alert => new(400, 40),
+        NotchState.Expanded => new(420, 172),
         _ => throw new ArgumentOutOfRangeException(nameof(state), state, null),
     };
 

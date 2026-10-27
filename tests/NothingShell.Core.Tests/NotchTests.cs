@@ -14,9 +14,9 @@ public class NotchStateMachineTests
     public void MediaPlayingShowsActivityAndStoppingReturnsIdle()
     {
         var sm = new NotchStateMachine();
-        Assert.True(sm.OnMediaPlayingChanged(true));
+        Assert.True(sm.OnActivityChanged(true));
         Assert.Equal(NotchState.Activity, sm.State);
-        Assert.True(sm.OnMediaPlayingChanged(false));
+        Assert.True(sm.OnActivityChanged(false));
         Assert.Equal(NotchState.Idle, sm.State);
     }
 
@@ -59,7 +59,7 @@ public class NotchStateMachineTests
     {
         var sm = new NotchStateMachine();
         sm.OnPointerEnter();
-        Assert.False(sm.OnMediaPlayingChanged(true));
+        Assert.False(sm.OnActivityChanged(true));
         Assert.Equal(NotchState.Expanded, sm.State);
 
         sm.OnPointerLeave(T0);

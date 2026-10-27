@@ -18,6 +18,11 @@ Se il processo viene terminato di forza e la taskbar resta nascosta:
 NothingShell.exe --restore-taskbar
 ```
 
+Quando arriva una mail il notch mostra per qualche secondo la busta e l'oggetto (da qualsiasi
+client che manda notifiche di Windows: Outlook, Posta, Thunderbird, Gmail nel browser).
+Sul notch aperto, uno swipe (touchpad a due dita, rotellina o trascinamento) scorre le pagine
+Home · Posta · Timer · Sistema. Dettagli in [docs/08-notch-mail-pages.md](docs/08-notch-mail-pages.md).
+
 Il launcher si apre con il tasto Win (da solo) o con il pulsante ⁘ della barra: si scrive per
 cercare, ↑↓ e Invio per avviare. Le combinazioni Win+qualcosa restano a Windows; lo Start di
 Windows è nel menu col tasto destro della barra, dove si può anche disattivare l'uso del tasto Win.

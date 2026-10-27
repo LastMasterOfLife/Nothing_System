@@ -20,6 +20,14 @@ public interface IShellSettingsActions
 
     bool WidgetsLocked { get; set; }
 
+    bool MailInNotch { get; set; }
+
+    string NotificationAccessText { get; }
+
+    bool CanRequestNotificationAccess { get; }
+
+    Task RequestNotificationAccessAsync();
+
     IEnumerable<(string Id, string Name)> Widgets { get; }
 
     IReadOnlyList<PluginLoadResult> PluginResults { get; }
@@ -80,6 +88,17 @@ public sealed class SettingsWindow : Window
         ToggleRow("Notch", "Orologio e musica in alto al centro", _shell.NotchEnabled, v => _shell.NotchEnabled = v);
         ToggleRow("Barra al posto della taskbar", "Spenta: torna la taskbar di Windows", _shell.BarEnabled, v => _shell.BarEnabled = v);
         ToggleRow("Tasto Win apre il launcher", "Le combinazioni Win+… restano a Windows", _shell.UseWinKey, v => _shell.UseWinKey = v);
+
+        Section("NOTCH");
+        ToggleRow("Mail nel notch", "Mostra l'oggetto delle mail in arrivo", _shell.MailInNotch, v => _shell.MailInNotch = v);
+        Note(_shell.NotificationAccessText, Theme.GreyBrush);
+        if (_shell.CanRequestNotificationAccess)
+            ButtonRow(("CONSENTI ACCESSO", async () =>
+            {
+                await _shell.RequestNotificationAccessAsync();
+                Rebuild();
+            }));
+        Note("Swipe sul notch aperto (touchpad, rotellina o trascinamento) per Posta, Timer e Sistema.", Theme.GreyBrush);
 
         Section("WIDGET");
         foreach (var (id, name) in _shell.Widgets)
@@ -189,7 +208,14 @@ public sealed class SettingsWindow : Window
         _sections.Children.Add(row);
     }
 
-    private void ButtonRow(params (string Text, Action Click)[] buttons)
+    private void ButtonRow(params (string Text, Action Click)[] buttons) =>
+        ButtonRow(buttons.Select(b => (b.Text, (Func<Task>)(() =>
+        {
+            b.Click();
+            return Task.CompletedTask;
+        }))).ToArray());
+
+    private void ButtonRow(params (string Text, Func<Task> Click)[] buttons)
     {
         var row = new WrapPanel { Margin = new Thickness(0, 8, 0, 4) };
         foreach (var (text, click) in buttons)
@@ -207,10 +233,10 @@ public sealed class SettingsWindow : Window
             };
             button.MouseEnter += (_, _) => button.Background = Theme.SurfaceBrush;
             button.MouseLeave += (_, _) => button.Background = Brushes.Transparent;
-            button.MouseLeftButtonUp += (_, e) =>
+            button.MouseLeftButtonUp += async (_, e) =>
             {
                 e.Handled = true;
-                click();
+                await click();
             };
             row.Children.Add(button);
         }
