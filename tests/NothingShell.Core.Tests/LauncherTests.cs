@@ -183,15 +183,23 @@ public class UnpremultiplyTests
     public void RestoresColorFromPremultiplied()
     {
         byte[] px = [50, 100, 0, 128, 10, 20, 30, 255];
-        Monochrome.Unpremultiply(px);
+        IconPixels.Unpremultiply(px);
         Assert.Equal([99, 199, 0, 128, 10, 20, 30, 255], px);
+    }
+
+    [Fact]
+    public void OpaqueColorsAreUntouched()
+    {
+        byte[] px = [0, 0, 255, 255, 30, 140, 230, 255]; // rosso e arancione pieni
+        IconPixels.Unpremultiply(px);
+        Assert.Equal([0, 0, 255, 255, 30, 140, 230, 255], px);
     }
 
     [Fact]
     public void BitmapWithoutAlphaBecomesOpaque()
     {
         byte[] px = [10, 20, 30, 0, 40, 50, 60, 0];
-        Monochrome.Unpremultiply(px);
+        IconPixels.Unpremultiply(px);
         Assert.Equal(255, px[3]);
         Assert.Equal(255, px[7]);
         Assert.Equal(10, px[0]);

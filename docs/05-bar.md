@@ -28,7 +28,7 @@ di Windows, che viene **nascosta** (non disattivata: Explorer resta in funzione)
 | Orologio e data | Centro notifiche (Win+N) | — |
 | Spazio vuoto | — | *Mostra taskbar di Windows* (per l'area di notifica), *Esci* |
 
-- Icone in **scala di grigi** su sfondo nero (stile icone monocromatiche Nothing); hover: cerchio `Surface`.
+- Icone con i loro **colori originali** su sfondo nero; hover: cerchio `Surface`.
 - Indicatore sotto l'icona: punto **rosso** = app in primo piano, punto grigio = aperta.
 - Tooltip con il titolo della finestra.
 

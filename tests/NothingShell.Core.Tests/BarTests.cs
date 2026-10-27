@@ -76,23 +76,6 @@ public class TaskbarModelTests
         Assert.Equal(ClickAction.None, TaskbarModel.Click(new AppGroup("x", []), 1));
 }
 
-public class MonochromeTests
-{
-    [Fact]
-    public void PixelsBecomeGreyAndKeepAlpha()
-    {
-        byte[] px = [0, 0, 255, 128, 255, 255, 255, 255, 0, 0, 0, 10]; // rosso, bianco, nero
-        Design.Monochrome.ApplyBgra(px);
-
-        Assert.Equal(px[0], px[1]);
-        Assert.Equal(px[1], px[2]);
-        Assert.Equal(128, px[3]);
-        Assert.Equal(255, px[4]);
-        Assert.Equal(Design.Monochrome.Floor, px[8]);
-        Assert.Equal(10, px[11]);
-    }
-}
-
 public class FullscreenTests
 {
     private static readonly Rect2 Monitor = new(0, 0, 1920, 1200);

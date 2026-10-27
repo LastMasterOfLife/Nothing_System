@@ -7,12 +7,12 @@ using NothingShell.Core.Design;
 
 namespace NothingShell.App.Bar;
 
-/// <summary>Icone delle app in scala di grigi, con cache per app.</summary>
+/// <summary>Icone delle app con i loro colori originali, con cache per app.</summary>
 public sealed class AppIcons
 {
     private readonly Dictionary<string, ImageSource?> _cache = new(StringComparer.Ordinal);
 
-    /// <summary>Icona monocromatica; null se l'app non ne espone (si usa l'iniziale a punti).</summary>
+    /// <summary>Icona dell'app; null se l'app non ne espone (si usa l'iniziale a punti).</summary>
     public ImageSource? Get(string appKey, nint hwnd, string? exePath)
     {
         if (_cache.TryGetValue(appKey, out var cached))
@@ -55,12 +55,12 @@ public sealed class AppIcons
     {
         try
         {
+            // Copia dei pixel a colori: la bitmap non dipende più dall'HICON, che può essere distrutto.
             var source = Imaging.CreateBitmapSourceFromHIcon(hicon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
             var bgra = new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0);
             var stride = bgra.PixelWidth * 4;
             var pixels = new byte[stride * bgra.PixelHeight];
             bgra.CopyPixels(pixels, stride, 0);
-            Monochrome.ApplyBgra(pixels);
 
             var result = BitmapSource.Create(bgra.PixelWidth, bgra.PixelHeight, 96, 96, PixelFormats.Bgra32, null, pixels, stride);
             result.Freeze();

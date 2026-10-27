@@ -6,12 +6,12 @@ using NothingShell.Core.Design;
 namespace NothingShell.App.Launcher;
 
 /// <summary>
-/// Icone delle app di shell:AppsFolder tramite IShellItemImageFactory, in scala di grigi e in cache.
+/// Icone delle app di shell:AppsFolder tramite IShellItemImageFactory, a colori e in cache.
 /// Va usata dal thread UI (STA).
 /// </summary>
 public sealed class ShellIcons
 {
-    private const int IconPixels = 48;
+    private const int IconSize = 48;
     private const int SiigbfIconOnly = 0x4;
 
     private readonly Dictionary<string, BitmapSource?> _cache = new(StringComparer.OrdinalIgnoreCase);
@@ -39,9 +39,9 @@ public sealed class ShellIcons
             // HRESULT restituito, non eccezione: un'app appena disinstallata dà "file non trovato".
             if (SHCreateItemFromParsingName($"shell:AppsFolder\\{appId}", 0, ref iid, out var factory) != 0 || factory is null)
                 return null;
-            if (factory.GetImage(new NativeSize { Width = IconPixels, Height = IconPixels }, SiigbfIconOnly, out bitmap) != 0)
+            if (factory.GetImage(new NativeSize { Width = IconSize, Height = IconSize }, SiigbfIconOnly, out bitmap) != 0)
                 return null;
-            return ToMonochrome(bitmap);
+            return ToBitmapSource(bitmap);
         }
         catch (Exception ex) when (ex is COMException or ArgumentException or InvalidCastException)
         {
@@ -55,10 +55,10 @@ public sealed class ShellIcons
     }
 
     /// <summary>
-    /// HBITMAP a 32 bit premoltiplicato → BitmapSource grigia. CreateBitmapSourceFromHBitmap
+    /// HBITMAP a 32 bit premoltiplicato → BitmapSource a colori. CreateBitmapSourceFromHBitmap
     /// perderebbe l'alfa, quindi si leggono i pixel grezzi con GetDIBits.
     /// </summary>
-    private static BitmapSource? ToMonochrome(nint bitmap)
+    private static BitmapSource? ToBitmapSource(nint bitmap)
     {
         if (GetObject(bitmap, Marshal.SizeOf<NativeBitmap>(), out var info) == 0 || info.Width <= 0 || info.Height <= 0)
             return null;
@@ -85,8 +85,7 @@ public sealed class ShellIcons
             _ = ReleaseDC(0, dc);
         }
 
-        Monochrome.Unpremultiply(pixels);
-        Monochrome.ApplyBgra(pixels);
+        IconPixels.Unpremultiply(pixels);
         var source = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, width * 4);
         source.Freeze();
         return source;

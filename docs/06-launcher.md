@@ -19,7 +19,7 @@ sopra la barra. Comparsa: dissolvenza + salita di 12 DIP in 150 ms.
 │ andrea                 🔒  ☾  ↻  ⏻   │  ← blocca, sospendi, riavvia, spegni
 └──────────────────────────────────────┘
 ```
-- Icone in scala di grigi come nella barra; finché un'icona non è caricata si mostra l'iniziale a punti.
+- Icone con i loro colori originali, come nella barra; finché un'icona non è caricata si mostra l'iniziale a punti.
 - Con una ricerca in corso: al massimo 12 risultati, il primo selezionato.
 
 ## Tastiera
