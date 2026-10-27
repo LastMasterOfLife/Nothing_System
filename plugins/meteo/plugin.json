@@ -1,0 +1,17 @@
+{
+  // Meteo da Open-Meteo (gratuito, senza chiave). Cambia latitude/longitude e la didascalia per la tua città.
+  "name": "Meteo",
+  "size": "small",
+  "refreshSeconds": 900,
+  "source": {
+    "type": "http",
+    "url": "https://api.open-meteo.com/v1/forecast?latitude=41.89&longitude=12.48&current=temperature_2m,relative_humidity_2m"
+  },
+  "display": {
+    "header": "METEO",
+    "value": "{current.temperature_2m}°",
+    "caption": "Roma · umidità {current.relative_humidity_2m}%",
+    "bar": "{current.relative_humidity_2m}",
+    "barMax": 100
+  }
+}

@@ -1,0 +1,7 @@
+{
+  // Spazio sul disco: lo script stampa JSON { header, value, caption, bar, alert }.
+  "name": "Disco",
+  "size": "small",
+  "refreshSeconds": 120,
+  "source": { "type": "command", "command": "disco.ps1", "args": ["C"] }
+}
