@@ -192,4 +192,19 @@ public static class DotIcons
 
     public static readonly DotGlyph Gear = new(
         "..#.#..", ".#####.", "##...##", ".#...#.", "##...##", ".#####.", "..#.#..");
+
+    /// <summary>Prompt <c>&gt;_</c>: comandi e build (docs/12-sviluppo.md).</summary>
+    public static readonly DotGlyph Terminal = new(
+        "#......", ".#.....", "..#....", "...#...", "..#....", ".#.....", "#..####");
+
+    public static readonly DotGlyph Check = new(
+        ".......", "......#", ".....#.", "#...#..", ".#.#...", "..#....", ".......");
+
+    /// <summary>Spina: server in ascolto.</summary>
+    public static readonly DotGlyph Plug = new(
+        ".#.#.", ".#.#.", "#####", "#####", ".###.", "..#..", "..#..");
+
+    /// <summary>Appunti.</summary>
+    public static readonly DotGlyph Clip = new(
+        ".###.", "#####", "#...#", "#.#.#", "#...#", "#.#.#", "#####");
 }

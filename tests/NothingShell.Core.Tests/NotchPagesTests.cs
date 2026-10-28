@@ -73,7 +73,21 @@ public class NotchPagerTests
         Assert.Equal(NotchPage.Agenda, pager.Current);
         pager.Show(NotchPage.System);
         Assert.False(pager.Apply(SwipeDirection.Next)); // già all'ultima
-        Assert.Equal(4, pager.Index);
+        Assert.Equal(NotchPager.Pages.Length - 1, pager.Index);
+    }
+
+    [Fact]
+    public void PagesOfDisabledFeaturesAreSkipped()
+    {
+        var pager = new NotchPager();
+        pager.Show(NotchPage.Servers);
+        Assert.True(pager.SetAvailable([NotchPage.Agenda, NotchPage.Mail, NotchPage.Timer])); // Server spento: si torna alla Home
+        Assert.Equal(NotchPage.Home, pager.Current);
+        pager.Show(NotchPage.Mail);
+        Assert.True(pager.Apply(SwipeDirection.Next));
+        Assert.Equal(NotchPage.Timer, pager.Current); // Lavoro, Server e Appunti saltati
+        Assert.False(pager.Show(NotchPage.Clipboard));
+        Assert.Equal(new[] { NotchPage.Home, NotchPage.Agenda, NotchPage.Mail, NotchPage.Timer }, pager.Available);
     }
 }
 

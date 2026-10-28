@@ -65,6 +65,14 @@ public partial class App : Application
                 await PreviewDemo(image);
                 Shutdown();
                 return;
+            case ["--task", var json]:
+                TaskWatcher.Send(json, TimeSpan.FromMilliseconds(500));
+                Shutdown();
+                return;
+            case ["--dev-check", var report]:
+                await DevCheck(report);
+                Shutdown();
+                return;
             case ["--restore-taskbar"]:
                 WindowsTaskbar.ForceShow();
                 Shutdown();
@@ -194,7 +202,7 @@ public partial class App : Application
     private static void RenderNotchSnapshots(string folder)
     {
         using var media = new MediaService(); // non avviato: nessuna sessione, Home mostra l'ora
-        var notch = new NotchWindow(media);
+        var notch = new NotchWindow(media, DevPageActions.None);
         var now = DateTimeOffset.Now;
         MailItem[] demo =
         [
@@ -277,9 +285,89 @@ public partial class App : Application
         SaveSnapshot(quick.PrepareSnapshot(), Path.Combine(folder, "quick-panel.png"));
         quick.Close();
 
+        RenderDevSnapshots(notch, folder);
+
         notch.StartTimer(TimeSpan.FromMinutes(25));
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Timer), Path.Combine(folder, "notch-timer-running.png"));
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Activity, NotchPage.Home), Path.Combine(folder, "notch-activity-timer.png"));
+    }
+
+    /// <summary>Lavoro, Server e Appunti con dati di esempio (docs/12-sviluppo.md).</summary>
+    private static void RenderDevSnapshots(NotchWindow notch, string folder)
+    {
+        var now = DateTimeOffset.Now;
+        var failed = new NothingShell.Core.Dev.FinishedTask("dotnet build", @"C:\dev\app", null, 1, TimeSpan.FromSeconds(83), now.AddMinutes(-2), @"C:\temp\task.log", false)
+        {
+            Error = new NothingShell.Core.Dev.CodeLocation(@"C:\dev\app\src\Program.cs", 57, 9, "CS1002: ; previsto"),
+        };
+        var ok = new NothingShell.Core.Dev.FinishedTask("npm test", @"C:\dev\web", null, 0, TimeSpan.FromSeconds(41), now.AddMinutes(-15), null, true);
+        notch.SetTasks([new NothingShell.Core.Dev.RunningTask("1", "cargo build --release", @"C:\dev\cli", null, now.AddSeconds(-95))], [failed, ok]);
+        notch.SetCi(new NothingShell.Core.Dev.CiStatus(@"C:\dev\nothing-shell", "master",
+            [new NothingShell.Core.Dev.CiRun(1, "build", "in_progress", null, "u", now), new NothingShell.Core.Dev.CiRun(2, "test", "queued", null, "u", now)]), null);
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Activity, NotchPage.Home), Path.Combine(folder, "notch-activity-task.png"));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Work), Path.Combine(folder, "notch-work.png"));
+        notch.ShowCard(NotchCards.TaskFinished(failed, () => { }, () => { }, () => { }, () => { }), TimeSpan.FromSeconds(8));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-task-failed.png"));
+        notch.ShowCard(NotchCards.TaskFinished(ok, null, null, () => { }, () => { }), TimeSpan.FromSeconds(8));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-task-ok.png"));
+        var ci = new NothingShell.Core.Dev.CiStatus(@"C:\dev\nothing-shell", "master",
+            [new NothingShell.Core.Dev.CiRun(1, "build", "completed", "success", "u", now), new NothingShell.Core.Dev.CiRun(2, "test", "completed", "failure", "u", now)]);
+        notch.ShowCard(NotchCards.CiFinished(ci, () => { }, () => { }, () => { }), TimeSpan.FromSeconds(8));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-ci-failed.png"));
+        notch.SetTasks([], []);
+        notch.SetCi(null, null);
+
+        notch.SetServers(
+        [
+            new NothingShell.Core.Dev.DevServer(3000, 18244, "node", null, false),
+            new NothingShell.Core.Dev.DevServer(5173, 18990, "node", null, false),
+            new NothingShell.Core.Dev.DevServer(5432, 4120, "postgres", "Postgres", true),
+        ]);
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Servers), Path.Combine(folder, "notch-servers.png"));
+        notch.ShowHint(NothingShell.Core.Design.DotIcons.Plug, Rendering.Theme.White, "LOCALHOST:5173 - NODE", NotchPage.Servers);
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "notch-server-hint.png"));
+
+        var history = new NothingShell.Core.Dev.ClipboardHistory();
+        history.Add("#FF3B30", NothingShell.Core.Dev.ClipKind.Color, now);
+        history.Add("ghp_abcdefghijklmnopqrstuvwxyz0123456789", NothingShell.Core.Dev.ClipKind.Secret, now);
+        history.Add("{\"id\": 42, \"nome\": \"Nothing\", \"attivo\": true}", NothingShell.Core.Dev.ClipKind.Json, now);
+        notch.SetClipboard(history.Entries);
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Clipboard), Path.Combine(folder, "notch-clipboard.png"));
+        notch.ShowHint(NothingShell.Core.Design.DotIcons.Clip, Rendering.Theme.White, "JSON - 2,1 KB", NotchPage.Clipboard);
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "notch-clipboard-hint.png"));
+        notch.ShowCard(NotchCards.Secret("CHIAVE GITHUB", "ghp_••••6789", () => { }, () => { }, null, () => { }), TimeSpan.FromSeconds(8));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-secret.png"));
+        notch.ShowCard(NotchCards.Secret("TOKEN JWT", "scade tra 2 h", () => { }, () => { }, () => { }, () => { }), TimeSpan.FromSeconds(8));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-jwt.png"));
+        notch.SetServers([]);
+        notch.SetClipboard([]);
+    }
+
+    /// <summary>
+    /// Diagnostica di docs/12-sviluppo.md, in sola lettura: server trovati ed esclusi con il motivo, editor, gh,
+    /// tipo del testo negli appunti (senza il contenuto).
+    /// </summary>
+    private static async Task DevCheck(string file)
+    {
+        var lines = new List<string>();
+        foreach (var (listener, owner) in PortWatcher.ReadAll().DistinctBy(x => (x.Listener.Port, x.Listener.Pid)).OrderBy(x => x.Listener.Port))
+        {
+            var reason = NothingShell.Core.Dev.DevServers.Exclusion(listener, owner);
+            lines.Add($"porta {listener.Port} pid {listener.Pid} {owner?.Name ?? "?"}{(owner?.IsService == true ? " (servizio)" : string.Empty)}: {reason ?? "MOSTRATA"}");
+        }
+        lines.Add($"editor: {DevTools.EditorTemplate(new NothingShell.Core.Settings.ShellSettingsStore(NothingShell.Core.Settings.ShellSettingsStore.DefaultPath).Load().Editor) ?? "nessuno (app associata)"}");
+        var gh = await DevTools.RunAsync("gh", "auth status", Environment.CurrentDirectory, TimeSpan.FromSeconds(15));
+        lines.Add($"gh: {(gh is null ? "non trovato" : gh.Value.ExitCode == 0 ? "autenticato" : "non autenticato")}");
+        try
+        {
+            var text = Clipboard.ContainsText() ? Clipboard.GetText() : null;
+            lines.Add($"appunti: {(text is null ? "nessun testo" : NothingShell.Core.Dev.ClipClassifier.Classify(text, p => File.Exists(p) || Directory.Exists(p)).ToString())}");
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            lines.Add("appunti: occupati");
+        }
+        await File.WriteAllLinesAsync(file, lines);
     }
 
     /// <summary>Widget dei plugin installati (dati veri dalle loro sorgenti) e finestra delle impostazioni, in PNG.</summary>

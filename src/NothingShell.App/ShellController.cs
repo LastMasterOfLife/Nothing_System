@@ -26,7 +26,7 @@ namespace NothingShell.App;
 /// Collega servizi e finestre della shell e applica le impostazioni dal vivo
 /// (docs/01-architecture.md, docs/07-settings-plugins.md).
 /// </summary>
-public sealed class ShellController : IShellSettingsActions, IMailReaderActions, IDisposable
+public sealed partial class ShellController : IShellSettingsActions, IMailReaderActions, IDisposable
 {
     private readonly ShellSettingsStore _settingsStore = new(ShellSettingsStore.DefaultPath);
     private readonly ClockService _clock = new();
@@ -81,7 +81,7 @@ public sealed class ShellController : IShellSettingsActions, IMailReaderActions,
         _launcher.LockRequested += Lock;
         _access.Enabled = _settings.Access;
 
-        _notch = new NotchWindow(_media);
+        _notch = new NotchWindow(_media, DevActions);
         var appIcons = new AppIcons();
         _bars = new BarHost((monitor, mode) =>
             new BarWindow(_tracker, appIcons, shellIcons, _catalog, _taskbar, _launcher, monitor, mode));
@@ -125,6 +125,7 @@ public sealed class ShellController : IShellSettingsActions, IMailReaderActions,
         };
         WireLiveActivities();
         WireAgenda();
+        WireDev();
         _network.Changed += _bars.SetNetwork;
         _bars.SetNetwork(_network.Current);
         _tracker.FullscreenChanged += monitor =>
@@ -466,6 +467,7 @@ public sealed class ShellController : IShellSettingsActions, IMailReaderActions,
         _downloads.Dispose();
         _screenshots.Dispose();
         _bluetooth.Dispose();
+        DisposeDev();
         _winKey.Dispose();
         _pins.Dispose();
         _bars.Dispose();
@@ -661,6 +663,7 @@ public sealed class ShellController : IShellSettingsActions, IMailReaderActions,
         else
             _calendar.Stop();
         RefreshAgenda();
+        ApplyDevActivities();
         ApplyVolumeKeys();
     }
 

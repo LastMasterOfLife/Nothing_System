@@ -5,6 +5,9 @@ public enum NotchPage
     Home,
     Agenda,
     Mail,
+    Work,
+    Servers,
+    Clipboard,
     Timer,
     System,
 }
@@ -16,30 +19,51 @@ public enum SwipeDirection
     Previous,
 }
 
-/// <summary>Pagina corrente del notch espanso; ai bordi lo swipe si ferma (docs/08-notch-mail-pages.md).</summary>
+/// <summary>
+/// Pagina corrente del notch espanso; ai bordi lo swipe si ferma (docs/08-notch-mail-pages.md). Le pagine delle
+/// funzioni spente non ci sono (docs/12-sviluppo.md): la Home c'è sempre.
+/// </summary>
 public sealed class NotchPager
 {
     public static readonly NotchPage[] Pages = Enum.GetValues<NotchPage>();
 
+    private NotchPage[] _available = Pages;
+
     public NotchPage Current { get; private set; } = NotchPage.Home;
 
-    public int Index => Array.IndexOf(Pages, Current);
+    public IReadOnlyList<NotchPage> Available => _available;
+
+    public int Index => Array.IndexOf(_available, Current);
+
+    /// <summary>Le pagine visibili, nell'ordine fisso; true se la corrente è sparita (si torna alla Home).</summary>
+    public bool SetAvailable(IEnumerable<NotchPage> pages)
+    {
+        ArgumentNullException.ThrowIfNull(pages);
+        var set = pages.ToHashSet();
+        _available = Pages.Where(p => p == NotchPage.Home || set.Contains(p)).ToArray();
+        if (_available.Contains(Current))
+            return false;
+        Current = NotchPage.Home;
+        return true;
+    }
+
+    public bool IsAvailable(NotchPage page) => _available.Contains(page);
 
     /// <summary>Applica lo swipe; restituisce true se la pagina è cambiata.</summary>
     public bool Apply(SwipeDirection direction)
     {
         var target = direction switch
         {
-            SwipeDirection.Next => Math.Min(Index + 1, Pages.Length - 1),
+            SwipeDirection.Next => Math.Min(Index + 1, _available.Length - 1),
             SwipeDirection.Previous => Math.Max(Index - 1, 0),
             _ => Index,
         };
-        return Show(Pages[target]);
+        return Show(_available[target]);
     }
 
     public bool Show(NotchPage page)
     {
-        if (page == Current)
+        if (page == Current || !_available.Contains(page))
             return false;
         Current = page;
         return true;

@@ -15,7 +15,8 @@ public sealed record ShellSettings(
     MailAccount? MailAccount = null,
     IReadOnlyList<LiveActivity>? DisabledActivities = null,
     IReadOnlyList<string>? CalendarFeeds = null,
-    DateOnly? MorningBriefShown = null)
+    DateOnly? MorningBriefShown = null,
+    string? Editor = null)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
 

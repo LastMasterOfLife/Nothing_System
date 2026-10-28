@@ -11,6 +11,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="..\..\tools\NothingShell.psm1" Link="tools\NothingShell.psm1" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\NothingShell.Core\NothingShell.Core.csproj" />
   </ItemGroup>
 

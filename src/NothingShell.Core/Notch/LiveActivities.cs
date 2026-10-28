@@ -17,6 +17,24 @@ public enum LiveActivity
 
     /// <summary>Riepilogo del mattino al primo accesso della giornata.</summary>
     MorningBrief,
+
+    /// <summary>Comandi e build dal terminale (docs/12-sviluppo.md): pillola, scheda alla fine, pagina Lavoro.</summary>
+    Tasks,
+
+    /// <summary>GitHub Actions dopo un <c>git push</c>.</summary>
+    Ci,
+
+    /// <summary>Cronologia degli appunti e pagina Appunti.</summary>
+    Clipboard,
+
+    /// <summary>Avviso al momento della copia di JSON, errori, colori e timestamp.</summary>
+    ClipboardHints,
+
+    /// <summary>Segreti e token copiati: scheda e cancellazione dagli appunti dopo 30 s.</summary>
+    ClipboardSecrets,
+
+    /// <summary>Porte e server locali: avviso e pagina Server.</summary>
+    Servers,
 }
 
 /// <summary>

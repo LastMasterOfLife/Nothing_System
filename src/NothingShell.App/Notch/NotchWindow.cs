@@ -12,6 +12,7 @@ using NothingShell.App.Rendering;
 using NothingShell.App.Services;
 using NothingShell.Core.Animation;
 using NothingShell.Core.Design;
+using NothingShell.Core.Dev;
 using NothingShell.Core.DotMatrix;
 using NothingShell.Core.Media;
 using NothingShell.Core.Notch;
@@ -59,6 +60,9 @@ public sealed class NotchWindow : Window
     private readonly StackPanel _downloadView = new() { Orientation = Orientation.Horizontal };
     private readonly DotMatrixView _downloadIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Download) };
     private readonly DotMatrixView _downloadText = new() { Pitch = 2 };
+    private readonly StackPanel _taskView = new() { Orientation = Orientation.Horizontal };
+    private readonly DotMatrixView _taskIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Terminal) };
+    private readonly DotMatrixView _taskText = new() { Pitch = 2 };
 
     // Avviso: [icona] testo che scorre, oppure [icona] livello a punti e valore (volume, luminosità)
     private readonly Grid _alert = new() { VerticalAlignment = VerticalAlignment.Top, Opacity = 0 };
@@ -75,20 +79,27 @@ public sealed class NotchWindow : Window
     private readonly Grid _pageHost = new() { ClipToBounds = true };
     private readonly StackPanel _indicators = new() { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly Dictionary<NotchPage, NotchPageView> _pages = [];
+    private readonly Dictionary<NotchPage, Ellipse> _indicatorDots = [];
     private readonly HomePage _home;
     private readonly AgendaPage _agenda;
     private readonly MailPage _mail = new();
     private readonly TimerPage _timerPage;
     private readonly SystemPage _system = new();
+    private readonly WorkPage _work;
+    private readonly ServersPage _servers;
+    private readonly ClipboardPage _clipboard;
 
     private readonly DispatcherTimer _deadlineTimer = new();
     private readonly DispatcherTimer _equalizerTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly DispatcherTimer _alertMarquee = new() { Interval = TimeSpan.FromMilliseconds(45) };
     private readonly DispatcherTimer _countdownTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private readonly DispatcherTimer _taskTimer = new() { Interval = TimeSpan.FromSeconds(1) };
 
     private MediaSnapshot? _media;
     private PrivacyState _privacy = PrivacyState.None;
     private IReadOnlyList<ActiveDownload> _downloads = [];
+    private IReadOnlyList<RunningTask> _tasks = [];
+    private bool _ciRunning;
     private DateTime _now = DateTime.Now;
     private string _alertMessage = string.Empty;
     private NotchPage? _alertPage;
@@ -96,10 +107,14 @@ public sealed class NotchWindow : Window
     private TimeSpan _lastFrame;
     private bool _animating;
 
-    public NotchWindow(IMediaService media)
+    public NotchWindow(IMediaService media, DevPageActions dev)
     {
         ArgumentNullException.ThrowIfNull(media);
+        ArgumentNullException.ThrowIfNull(dev);
         _home = new HomePage(media);
+        _work = new WorkPage(dev.OpenTask);
+        _servers = new ServersPage(dev.OpenServer, dev.KillServer);
+        _clipboard = new ClipboardPage(dev.CopyClip, dev.ClipAction);
         _agenda = new AgendaPage(e => AppointmentOpened?.Invoke(e));
         _timerPage = new TimerPage(StartTimer, StopTimer);
         _mail.Opened += mail => MailOpened?.Invoke(mail);
@@ -128,6 +143,7 @@ public sealed class NotchWindow : Window
         _equalizerTimer.Tick += (_, _) => _equalizerView.Dots = _equalizer.NextFrame();
         _alertMarquee.Tick += (_, _) => RenderAlertText(++_alertOffset);
         _countdownTimer.Tick += (_, _) => OnCountdownTick();
+        _taskTimer.Tick += (_, _) => RenderTaskElapsed();
         media.Changed += snapshot => Dispatcher.BeginInvoke(() => OnMedia(snapshot));
 
         SourceInitialized += (_, _) =>
@@ -227,6 +243,52 @@ public sealed class NotchWindow : Window
         OnActivitiesChanged();
     }
 
+    /// <summary>Comandi dal terminale (docs/12-sviluppo.md): tempo dell'ultimo avviato a destra nella pillola, pagina Lavoro.</summary>
+    public void SetTasks(IReadOnlyList<RunningTask> running, IReadOnlyList<FinishedTask> recent)
+    {
+        ArgumentNullException.ThrowIfNull(running);
+        ArgumentNullException.ThrowIfNull(recent);
+        _tasks = running;
+        _work.Update(running, recent);
+        RenderTaskElapsed();
+        if (running.Count > 0)
+            _taskTimer.Start();
+        else
+            _taskTimer.Stop();
+        OnActivitiesChanged();
+    }
+
+    /// <summary>CI seguita dopo un push: in corso conta come attività (punto che pulsa), riga nella pagina Lavoro.</summary>
+    public void SetCi(CiStatus? status, string? problem)
+    {
+        _ciRunning = status?.State == CiState.Pending;
+        _work.SetCi(status, problem);
+        OnActivitiesChanged();
+    }
+
+    public void SetServers(IReadOnlyList<DevServer> servers) => _servers.Update(servers);
+
+    public void SetClipboard(IReadOnlyList<ClipEntry> entries) => _clipboard.Update(entries);
+
+    /// <summary>Avviso breve con icona; passandoci sopra col mouse si apre <paramref name="page"/>.</summary>
+    public void ShowHint(DotGlyph icon, Color iconColor, string text, NotchPage page)
+    {
+        ArgumentNullException.ThrowIfNull(icon);
+        ShowBanner(text, icon, iconColor, Theme.White, page, NoticeDuration);
+    }
+
+    /// <summary>Le pagine delle funzioni accese; le altre spariscono dallo swipe e dagli indicatori.</summary>
+    public void SetAvailablePages(IEnumerable<NotchPage> pages)
+    {
+        ArgumentNullException.ThrowIfNull(pages);
+        var current = _pager.Current;
+        _pager.SetAvailable(pages);
+        foreach (var (page, dot) in _indicatorDots)
+            dot.Visibility = _pager.IsAvailable(page) ? Visibility.Visible : Visibility.Collapsed;
+        if (current != _pager.Current)
+            ShowPage(_pager.Current, animate: false);
+    }
+
     public void SetMail(IReadOnlyList<MailItem> mails, string emptyMessage) => _mail.Update(mails, emptyMessage);
 
     /// <summary>Appuntamenti: pagina Agenda e, sotto l'ora della Home, il prossimo.</summary>
@@ -284,7 +346,8 @@ public sealed class NotchWindow : Window
         Apply(_machine.OnActivityChanged(HasActivity));
     }
 
-    private bool HasActivity => _countdown.IsRunning || _media?.IsPlaying == true || _privacy.Any || _downloads.Count > 0;
+    private bool HasActivity =>
+        _countdown.IsRunning || _media?.IsPlaying == true || _privacy.Any || _downloads.Count > 0 || _tasks.Count > 0 || _ciRunning;
 
     private Grid BuildVisualTree()
     {
@@ -312,11 +375,20 @@ public sealed class NotchWindow : Window
         _downloadText.Margin = new Thickness(6, 0, 0, 0);
         _downloadView.Children.Add(_downloadIcon);
         _downloadView.Children.Add(_downloadText);
+        _taskView.HorizontalAlignment = HorizontalAlignment.Right;
+        _taskView.VerticalAlignment = VerticalAlignment.Center;
+        _taskView.Margin = new Thickness(0, 0, 18, 0);
+        _taskIcon.VerticalAlignment = VerticalAlignment.Center;
+        _taskText.VerticalAlignment = VerticalAlignment.Center;
+        _taskText.Margin = new Thickness(6, 0, 0, 0);
+        _taskView.Children.Add(_taskIcon);
+        _taskView.Children.Add(_taskText);
         _compact.Children.Add(_compactClock);
         _compact.Children.Add(_liveDot);
         _compact.Children.Add(_equalizerView);
         _compact.Children.Add(_privacyIcons);
         _compact.Children.Add(_downloadView);
+        _compact.Children.Add(_taskView);
         SetActivityVisible(false);
 
         var alertSize = NotchLayout.For(NotchState.Alert);
@@ -346,13 +418,15 @@ public sealed class NotchWindow : Window
         _card.HorizontalAlignment = HorizontalAlignment.Center;
         _card.Padding = new Thickness(NotchUi.Padding, 14, NotchUi.Padding, 14);
 
-        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _timerPage, _system })
+        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _work, _servers, _clipboard, _timerPage, _system }.OrderBy(p => p.Page))
         {
             _pages[page.Page] = page;
             page.Visibility = Visibility.Collapsed;
             page.RenderTransform = new TranslateTransform();
             _pageHost.Children.Add(page);
-            _indicators.Children.Add(new Ellipse { Width = 5, Height = 5, Margin = new Thickness(4, 0, 4, 0) });
+            var dot = new Ellipse { Width = 5, Height = 5, Margin = new Thickness(4, 0, 4, 0) };
+            _indicatorDots[page.Page] = dot;
+            _indicators.Children.Add(dot);
         }
 
         var expandedSize = NotchLayout.For(NotchState.Expanded);
@@ -438,6 +512,7 @@ public sealed class NotchWindow : Window
     private void ShowPage(NotchPage page, bool animate, bool fromRight = true)
     {
         _pager.Show(page);
+        page = _pager.Current; // una pagina spenta non si apre
         foreach (var (kind, view) in _pages)
         {
             var visible = kind == page;
@@ -448,12 +523,10 @@ public sealed class NotchWindow : Window
                 view.OnShown();
         }
 
-        var index = _pager.Index;
-        for (var i = 0; i < _indicators.Children.Count; i++)
+        foreach (var (kind, dot) in _indicatorDots)
         {
-            var dot = (Ellipse)_indicators.Children[i];
-            dot.Fill = i == index ? Theme.WhiteBrush : Theme.GreyBrush;
-            dot.Width = dot.Height = i == index ? 6 : 5;
+            dot.Fill = kind == page ? Theme.WhiteBrush : Theme.GreyBrush;
+            dot.Width = dot.Height = kind == page ? 6 : 5;
         }
 
         if (!animate)
@@ -469,7 +542,7 @@ public sealed class NotchWindow : Window
     {
         var alertPage = _machine.State == NotchState.Alert ? _alertPage : null;
         Apply(_machine.OnPointerEnter());
-        if (alertPage is { } page)
+        if (alertPage is { } page && _pager.IsAvailable(page))
             ShowPage(page, animate: false);
     }
 
@@ -512,7 +585,7 @@ public sealed class NotchWindow : Window
         RenderAlertText(0);
         if (_machine.State == NotchState.Expanded)
         {
-            if (page is { } p) // già aperto: si va direttamente alla pagina
+            if (page is { } p && _pager.IsAvailable(p)) // già aperto: si va direttamente alla pagina
                 ShowPage(p, animate: true);
             return;
         }
@@ -575,6 +648,12 @@ public sealed class NotchWindow : Window
         UpdateCompactClock();
     }
 
+    private void RenderTaskElapsed()
+    {
+        if (_tasks is [var latest, ..])
+            _taskText.Dots = DotText.Render(TaskTracker.FormatElapsed(DateTimeOffset.Now - latest.StartedAt));
+    }
+
     /// <summary>La pillola compatta mostra il tempo rimanente se un timer è in corso, altrimenti l'ora.</summary>
     private void UpdateCompactClock()
     {
@@ -620,17 +699,19 @@ public sealed class NotchWindow : Window
     }
 
     /// <summary>
-    /// A sinistra microfono e webcam in uso (hanno la precedenza sul punto rosso), a destra il download in corso
-    /// (ha la precedenza sull'equalizzatore della musica).
+    /// A sinistra microfono e webcam in uso (hanno la precedenza sul punto rosso), a destra il comando in corso,
+    /// poi il download, poi l'equalizzatore della musica.
     /// </summary>
     private void SetActivityVisible(bool visible)
     {
         var privacy = visible && _privacy.Any;
         _privacyIcons.Visibility = privacy ? Visibility.Visible : Visibility.Hidden;
         _liveDot.Visibility = visible && !privacy ? Visibility.Visible : Visibility.Hidden;
-        var downloading = visible && _downloads.Count > 0;
+        var task = visible && _tasks.Count > 0;
+        _taskView.Visibility = task ? Visibility.Visible : Visibility.Hidden;
+        var downloading = visible && !task && _downloads.Count > 0;
         _downloadView.Visibility = downloading ? Visibility.Visible : Visibility.Hidden;
-        var music = visible && !downloading && _media?.IsPlaying == true;
+        var music = visible && !task && !downloading && _media?.IsPlaying == true;
         _equalizerView.Visibility = music ? Visibility.Visible : Visibility.Hidden;
         if (music)
             _equalizerTimer.Start();

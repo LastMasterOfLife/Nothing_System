@@ -158,7 +158,7 @@ public sealed class SettingsWindow : Window
         ToggleRow("Tasto Win apre il launcher", "Le combinazioni Win+… restano a Windows", _shell.UseWinKey, v => _shell.UseWinKey = v);
 
         Section("NOTCH");
-        Note("Swipe sul notch aperto (touchpad, rotellina o trascinamento) per Agenda, Posta, Timer e Sistema.", Theme.GreyBrush);
+        Note("Swipe sul notch aperto (touchpad, rotellina o trascinamento) per Agenda, Posta, Lavoro, Server, Appunti, Timer e Sistema.", Theme.GreyBrush);
         ActivityRow(LiveActivity.Volume, "Volume", "Con i tasti del volume, al posto dell'indicatore di Windows");
         ActivityRow(LiveActivity.Brightness, "Luminosità", "Schermo del portatile (i monitor esterni non la comunicano)");
         ActivityRow(LiveActivity.Privacy, "Microfono e webcam in uso", "Icone rosse nel notch, le app nella pagina Sistema");
@@ -166,6 +166,7 @@ public sealed class SettingsWindow : Window
         ActivityRow(LiveActivity.Screenshots, "Screenshot rapido", "Strumento di cattura (Win+Maiusc+S, Stamp) e Greenshot: anteprima da trascinare");
         ActivityRow(LiveActivity.Bluetooth, "Cuffie Bluetooth", "Collegamento e batteria");
 
+        DevSection();
         AgendaSection();
         MailSection();
 
@@ -197,6 +198,27 @@ public sealed class SettingsWindow : Window
         Note($"Nothing Shell {typeof(SettingsWindow).Assembly.GetName().Version?.ToString(2)}", Theme.GreyBrush);
         Note($"Dati: {_shell.DataFolder}", Theme.GreyBrush);
         ButtonRow(("APRI CARTELLA DEI DATI", () => OpenFolder(_shell.DataFolder)));
+    }
+
+    /// <summary>Lavoro nel notch, appunti intelligenti e server locali (docs/12-sviluppo.md).</summary>
+    private void DevSection()
+    {
+        Section("SVILUPPO");
+        ActivityRow(LiveActivity.Tasks, "Comandi e build", "Tempo nella pillola, scheda alla fine con il primo errore, pagina Lavoro");
+        ActivityRow(LiveActivity.Ci, "CI di GitHub dopo il push", "Con GitHub CLI (gh): esito delle Actions e Rilancia");
+        ActivityRow(LiveActivity.Clipboard, "Cronologia degli appunti", "Pagina Appunti: ultime copie con Formatta, Apri, Copia HEX… (solo in memoria)");
+        ActivityRow(LiveActivity.ClipboardHints, "Avviso alla copia", "JSON, errori, colori e timestamp appena copiati");
+        ActivityRow(LiveActivity.ClipboardSecrets, "Proteggi chiavi e token", "Chiavi API, JWT e password copiati spariscono dagli appunti dopo 30 s");
+        ActivityRow(LiveActivity.Servers, "Server locali", "Porte in ascolto: avviso, Apri nel browser, Termina");
+        var module = System.IO.Path.Combine(AppContext.BaseDirectory, "tools", "NothingShell.psm1");
+        var profileLine = $"Import-Module '{module}'; Enable-NothingShellPrompt";
+        Note("Nel terminale: ns seguito dal comando (ns dotnet build, ns npm test) manda inizio e fine al notch. " +
+             "Con l'hook del prompt arrivano anche i comandi lunghi (30 s o più) e i git push. Aggiungi al profilo " +
+             "di PowerShell ($PROFILE):", Theme.GreyBrush);
+        Note(profileLine, Theme.WhiteBrush);
+        Note("Altre shell: NothingShell.exe --task '{\"event\":\"done\",\"title\":\"make\",\"seconds\":40,\"exitCode\":0}'. " +
+             "Editor per gli errori: \"editor\" in settings.json, altrimenti VS Code o Cursor dal PATH.", Theme.GreyBrush);
+        ButtonRow(("COPIA RIGA DEL PROFILO", () => Clipboard.SetDataObject(profileLine, copy: true)));
     }
 
     /// <summary>Prossimo appuntamento e riepilogo del mattino, con i calendari da cui leggere gli appuntamenti.</summary>

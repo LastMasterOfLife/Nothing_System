@@ -31,7 +31,7 @@ Un clic su una mail della pagina Posta la apre nel **lettore** di Nothing (senza
 con *Rispondi*, *Apri nella webmail* (o nella sua app di Edge), *Segna come letta* e *Copia codice* per i
 codici di verifica; le mail arrivate da una notifica aprono l'app che l'ha mandata.
 Sul notch aperto, uno swipe (touchpad a due dita, rotellina o trascinamento) scorre le pagine
-Home · Agenda · Posta · Timer · Sistema. Dettagli in [docs/08-notch-mail-pages.md](docs/08-notch-mail-pages.md).
+Home · Agenda · Posta · Lavoro · Server · Appunti · Timer · Sistema. Dettagli in [docs/08-notch-mail-pages.md](docs/08-notch-mail-pages.md).
 
 **Attività dal vivo** nel notch: volume (i tasti del volume mostrano il livello a punti al posto
 dell'indicatore di Windows), luminosità dei portatili, icone rosse quando un'app usa microfono o webcam,
@@ -39,6 +39,14 @@ download in corso con la scheda *Scaricato*, scheda dello screenshot appena fatt
 trascinare, Apri, Cartella), cuffie Bluetooth collegate con la batteria. Ognuna si spegne in
 Impostazioni › Notch. Lo screenshot funziona anche con **Greenshot** (appunti e cartella di salvataggio).
 Dettagli in [docs/10-live-activities.md](docs/10-live-activities.md).
+
+**Per chi programma**: `ns dotnet build` (modulo PowerShell `tools\NothingShell.psm1`) mostra il tempo
+nella pillola e alla fine una scheda *Fatto* o *Errore* con il primo errore, che si apre alla riga in VS Code;
+con l'hook del prompt arrivano anche i comandi lunghi e, dopo un `git push`, l'esito della CI di GitHub
+(con `gh`). Gli **appunti** riconoscono JSON, stack trace, colori, timestamp, link e percorsi (pagina
+Appunti con Formatta, Apri, Copia HEX…) e tolgono dagli appunti dopo 30 s chiavi API e token copiati.
+La pagina **Server** elenca le porte in ascolto (node, dotnet, Postgres…) con Apri e Termina.
+Tutto si spegne in Impostazioni › Sviluppo. Dettagli in [docs/12-sviluppo.md](docs/12-sviluppo.md).
 
 **Agenda**: il prossimo appuntamento sotto l'ora nella Home, la pagina Agenda con quelli di oggi e un
 promemoria 10 minuti prima con *Partecipa* per Teams, Meet e Zoom. Al primo accesso del mattino il

@@ -190,6 +190,103 @@ internal static class NotchCards
         return Layout(tile, brief.Greeting, lines, Actions([.. buttons]), Theme.White);
     }
 
+    /// <summary>
+    /// Comando finito (docs/12-sviluppo.md): FATTO o ERRORE con l'exit code, titolo, primo errore o durata;
+    /// Errore apre il file alla riga, Log l'output, Terminale porta davanti la finestra da cui è partito.
+    /// </summary>
+    public static UIElement TaskFinished(Core.Dev.FinishedTask task, Action? openError, Action? openLog, Action? showTerminal, Action dismiss)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        ArgumentNullException.ThrowIfNull(dismiss);
+        var color = task.Succeeded ? Theme.White : Theme.Red;
+        var tile = Tile(
+            new DotMatrixView { Pitch = 3, Dots = DotGrid.From(DotIcons.Terminal), DotColor = color, HorizontalAlignment = HorizontalAlignment.Center },
+            new DotMatrixView
+            {
+                Pitch = 1.5,
+                Dots = DotText.Render(Core.Dev.TaskTracker.FormatElapsed(task.Duration)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 8, 0, 0),
+            });
+        var buttons = new List<(string, Action)>();
+        void Add(string label, Action? action)
+        {
+            if (action is not null)
+                buttons.Add((label, () =>
+                {
+                    action();
+                    dismiss();
+                }));
+        }
+        Add("ERRORE", openError);
+        Add("LOG", openLog);
+        Add("TERMINALE", showTerminal);
+        var detail = task.Error is { } error
+            ? $"{error.Label} · {error.Message}"
+            : $"{(task.Succeeded ? "Finito" : "Fallito")} in {Core.Dev.TaskTracker.FormatDuration(task.Duration)}";
+        var title = task.Succeeded ? "FATTO" : $"ERRORE {task.ExitCode}";
+        return Layout(tile, title, [task.Title, detail], Actions([.. buttons]), color);
+    }
+
+    /// <summary>CI conclusa: CI OK o CI FALLITA con i workflow falliti; Apri la pagina dell'esecuzione, Rilancia i job falliti.</summary>
+    public static UIElement CiFinished(Core.Dev.CiStatus status, Action open, Action? rerun, Action dismiss)
+    {
+        ArgumentNullException.ThrowIfNull(status);
+        ArgumentNullException.ThrowIfNull(open);
+        ArgumentNullException.ThrowIfNull(dismiss);
+        var failed = status.State == Core.Dev.CiState.Failure;
+        var tile = Tile(new DotMatrixView { Pitch = 4, Dots = DotText.Render("CI"), DotColor = failed ? Theme.Red : Theme.White, HorizontalAlignment = HorizontalAlignment.Center });
+        var buttons = new List<(string, Action)>
+        {
+            ("APRI", () =>
+            {
+                open();
+                dismiss();
+            }),
+        };
+        if (rerun is not null)
+            buttons.Add(("RILANCIA", () =>
+            {
+                rerun();
+                dismiss();
+            }));
+        return Layout(tile, failed ? "CI FALLITA" : "CI OK", [$"{status.Repository} · {status.Branch}", Core.Dev.CiRuns.Summary(status.Runs)],
+            Actions([.. buttons]), failed ? Theme.Red : Theme.White);
+    }
+
+    /// <summary>Segreto o token appena copiato: nome in rosso, scadenza del JWT, Cancella e Tieni (o Copia payload).</summary>
+    public static UIElement Secret(string name, string? detail, Action clearNow, Action keep, Action? copyPayload, Action dismiss)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(clearNow);
+        ArgumentNullException.ThrowIfNull(keep);
+        ArgumentNullException.ThrowIfNull(dismiss);
+        var tile = Tile(new DotMatrixView { Pitch = 4, Dots = DotGrid.From(DotIcons.Lock), DotColor = Theme.Red, HorizontalAlignment = HorizontalAlignment.Center });
+        var buttons = new List<(string, Action)>
+        {
+            ("CANCELLA", () =>
+            {
+                clearNow();
+                dismiss();
+            }),
+        };
+        if (copyPayload is not null)
+            buttons.Add(("COPIA PAYLOAD", () =>
+            {
+                copyPayload();
+                dismiss();
+            }));
+        buttons.Add(("TIENI", () =>
+        {
+            keep();
+            dismiss();
+        }));
+        var lines = detail is null
+            ? new[] { "Si cancella dagli appunti tra 30 s" }
+            : [detail, "Si cancella dagli appunti tra 30 s"];
+        return Layout(tile, name, lines, Actions([.. buttons]), Theme.Red);
+    }
+
     private static Border Tile(params UIElement[] content)
     {
         var stack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
