@@ -29,7 +29,9 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
     private readonly SystemMonitor _monitor = new();
     private readonly NetworkStatus _network = new();
     private readonly MediaService _media = new();
-    private readonly WindowTracker _tracker = new();
+    private readonly AppIdResolver _appIds = new();
+    private readonly TaskbarPins _pins = new();
+    private readonly WindowTracker _tracker;
     private readonly WindowsTaskbar _taskbar = new();
     private readonly AppCatalog _catalog = new();
     private readonly PluginHost _plugins = new();
@@ -48,8 +50,10 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
     public ShellController()
     {
         _settings = _settingsStore.Load();
+        _tracker = new WindowTracker(_appIds);
+        var shellIcons = new ShellIcons();
 
-        _launcher = new LauncherWindow(_catalog, new ShellIcons(), new LauncherSettingsStore(LauncherSettingsStore.DefaultPath));
+        _launcher = new LauncherWindow(_catalog, shellIcons, new LauncherSettingsStore(LauncherSettingsStore.DefaultPath));
         _winKey = new WinKeyHook { Enabled = _launcher.UseWinKey };
         _winKey.Pressed += () => Application.Current.Dispatcher.BeginInvoke(_launcher.Toggle);
         _launcher.UseWinKeyChanged += enabled => _winKey.Enabled = enabled;
@@ -62,7 +66,8 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
         _access.Enabled = _settings.Access;
 
         _notch = new NotchWindow(_media);
-        _bar = new BarWindow(_tracker, new AppIcons(), _taskbar, _launcher);
+        _bar = new BarWindow(_tracker, new AppIcons(), shellIcons, _catalog, _taskbar, _launcher);
+        _pins.Changed += ApplyPins;
         _widgets = new WidgetHost(_clock, _monitor, new WidgetSettingsStore(WidgetSettingsStore.DefaultPath));
 
         _notch.SettingsRequested += OpenSettings;
@@ -171,6 +176,8 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
         _clock.Start();
         _monitor.Start();
         _network.Start();
+        _pins.Start();
+        ApplyPins();
         _tracker.Start();
         ApplyTopLevelVisibility();
         _winKey.Start();
@@ -183,6 +190,7 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
         try
         {
             await _catalog.RefreshAsync(); // pronto prima della prima apertura del launcher
+            ApplyPins(); // lo Start dà l'AppUserModelID delle app che lo impostano solo sul processo
         }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException)
         {
@@ -229,8 +237,17 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
         _plugins.Dispose();
         _notifications.Dispose();
         _winKey.Dispose();
+        _pins.Dispose();
         _tracker.Dispose();
         _media.Dispose();
+    }
+
+    /// <summary>App appuntate nella barra e fonti degli AppUserModelID (docs/05-bar.md).</summary>
+    private void ApplyPins()
+    {
+        _appIds.SetSources(_pins.Pins, _catalog.Apps);
+        _tracker.SetPinned(_pins.Pins);
+        _tracker.Refresh();
     }
 
     private void RefreshMailPage()

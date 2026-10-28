@@ -6,8 +6,8 @@ using NothingShell.Core.Design;
 namespace NothingShell.App.Launcher;
 
 /// <summary>
-/// Icone delle app di shell:AppsFolder tramite IShellItemImageFactory, a colori e in cache.
-/// Va usata dal thread UI (STA).
+/// Icone delle app di shell:AppsFolder (e di altri elementi della shell, come i collegamenti appuntati)
+/// tramite IShellItemImageFactory, a colori e in cache. Va usata dal thread UI (STA).
 /// </summary>
 public sealed class ShellIcons
 {
@@ -22,22 +22,31 @@ public sealed class ShellIcons
     {
         if (_cache.TryGetValue(appId, out var cached))
             return cached;
-        var icon = Load(appId);
+        // Voce della shell: si usa l'iniziale a punti
+        var icon = appId.StartsWith(AppCatalog.InternalPrefix, StringComparison.Ordinal) ? null : Load($"shell:AppsFolder\\{appId}");
         _cache[appId] = icon;
         return icon;
     }
 
-    private static BitmapSource? Load(string appId)
+    /// <summary>Icona di un elemento della shell dato il percorso (es. un collegamento appuntato).</summary>
+    public BitmapSource? GetForPath(string parsingName)
     {
-        if (appId.StartsWith(AppCatalog.InternalPrefix, StringComparison.Ordinal))
-            return null; // voce della shell: si usa l'iniziale a punti
+        var key = "path:" + parsingName;
+        if (_cache.TryGetValue(key, out var cached))
+            return cached;
+        var icon = Load(parsingName);
+        _cache[key] = icon;
+        return icon;
+    }
 
+    private static BitmapSource? Load(string parsingName)
+    {
         nint bitmap = 0;
         try
         {
             var iid = typeof(IShellItemImageFactory).GUID;
             // HRESULT restituito, non eccezione: un'app appena disinstallata dà "file non trovato".
-            if (SHCreateItemFromParsingName($"shell:AppsFolder\\{appId}", 0, ref iid, out var factory) != 0 || factory is null)
+            if (SHCreateItemFromParsingName(parsingName, 0, ref iid, out var factory) != 0 || factory is null)
                 return null;
             if (factory.GetImage(new NativeSize { Width = IconSize, Height = IconSize }, SiigbfIconOnly, out bitmap) != 0)
                 return null;

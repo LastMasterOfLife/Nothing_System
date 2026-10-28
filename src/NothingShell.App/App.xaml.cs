@@ -47,14 +47,14 @@ public partial class App : Application
             case ["--snapshot", var folder]:
                 RenderSnapshots(folder);
                 await RenderLauncherSnapshot(folder);
+                await RenderBarSnapshots(folder);
                 await RenderPluginAndSettingsSnapshots(folder);
                 RenderNotchSnapshots(folder);
                 await RenderAccessSnapshots(folder);
                 Shutdown();
                 return;
             case ["--dump-windows", var file]:
-                using (var tracker = new WindowTracker())
-                    File.WriteAllLines(file, tracker.Diagnose());
+                await DumpWindows(file);
                 Shutdown();
                 return;
             case ["--restore-taskbar"]:
@@ -274,6 +274,67 @@ public partial class App : Application
 
         public void ReloadPlugins()
         {
+        }
+    }
+
+    /// <summary>
+    /// Finestre (<c>+</c> in barra con la chiave dell'app, <c>-</c> col motivo dell'esclusione), poi le app
+    /// appuntate con AppUserModelID e numero di recenti.
+    /// </summary>
+    private static async Task DumpWindows(string file)
+    {
+        var catalog = new AppCatalog();
+        await catalog.RefreshAsync();
+        var pins = TaskbarPins.Read();
+        var resolver = new AppIdResolver();
+        resolver.SetSources(pins, catalog.Apps);
+
+        using var tracker = new WindowTracker(resolver);
+        var lines = tracker.Diagnose().ToList();
+        lines.Add(string.Empty);
+        lines.Add("Appuntate:");
+        foreach (var pin in pins)
+        {
+            var (items, frequent) = Interop.ShellNative.ReadJumpList(pin.AppId);
+            lines.Add($"  {pin.Name} | {pin.AppId} | {pin.LaunchPath} | exe={pin.ExePath} args={pin.HasArguments} | " +
+                      $"{(frequent ? "frequenti" : "recenti")}={NothingShell.Core.Bar.JumpLists.Clean(items).Count}");
+        }
+        File.WriteAllLines(file, lines);
+    }
+
+    /// <summary>Barra con le app appuntate e aperte, ed elenco dei recenti della prima app che ne ha, in PNG.</summary>
+    private static async Task RenderBarSnapshots(string folder)
+    {
+        var catalog = new AppCatalog();
+        await catalog.RefreshAsync();
+        var pins = TaskbarPins.Read();
+        var resolver = new AppIdResolver();
+        resolver.SetSources(pins, catalog.Apps);
+        using var tracker = new WindowTracker(resolver);
+        var shellIcons = new ShellIcons();
+        var launcher = new LauncherWindow(catalog, shellIcons, new LauncherSettingsStore(LauncherSettingsStore.DefaultPath));
+        var bar = new BarWindow(tracker, new AppIcons(), shellIcons, catalog, new WindowsTaskbar(), launcher);
+        tracker.SetPinned(pins);
+        tracker.Refresh();
+        bar.SetTime(DateTime.Now);
+
+        var root = (FrameworkElement)bar.Content;
+        root.Width = SystemParameters.PrimaryScreenWidth;
+        root.Height = 48;
+        SaveSnapshot(root, Path.Combine(folder, "bar.png"), scale: 1);
+
+        var appIcons = new AppIcons();
+        foreach (var pin in pins)
+        {
+            var (items, frequent) = Interop.ShellNative.ReadJumpList(pin.AppId);
+            var clean = NothingShell.Core.Bar.JumpLists.Clean(items);
+            if (clean.Count < 3)
+                continue;
+            var icon = shellIcons.GetForPath(pin.LaunchPath);
+            var model = new JumpListModel(pin.Name, icon, frequent, clean, 2,
+                item => item.IsLink ? icon : appIcons.ForFile(item.Path), _ => { }, () => { }, () => { });
+            SaveSnapshot(new JumpListWindow().PrepareSnapshot(model), Path.Combine(folder, "jumplist.png"));
+            break;
         }
     }
 

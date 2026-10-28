@@ -7,7 +7,8 @@ namespace NothingShell.App.Bar;
 
 /// <summary>
 /// Elenca le finestre "da taskbar" e le osserva con SetWinEventHook, senza polling
-/// (docs/05-bar.md). Rileva anche le app a schermo intero sul monitor principale.
+/// (docs/05-bar.md); le raggruppa per AppUserModelID e le unisce alle app appuntate.
+/// Rileva anche le app a schermo intero sul monitor principale.
 /// </summary>
 public sealed class WindowTracker : IDisposable
 {
@@ -17,15 +18,19 @@ public sealed class WindowTracker : IDisposable
     };
 
     private readonly TaskbarModel _model = new();
+    private readonly AppIdResolver _resolver;
     private readonly Dictionary<nint, string> _exePaths = [];
+    private readonly Dictionary<nint, string?> _appIds = [];
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(150) };
     private readonly WindowNative.WinEventProc _callback; // tenuto in vita finché esistono gli hook
     private readonly List<nint> _hooks = [];
     private readonly uint _ownProcessId = (uint)Environment.ProcessId;
+    private int _resolverVersion;
     private bool _fullscreen;
 
-    public WindowTracker()
+    public WindowTracker(AppIdResolver? resolver = null)
     {
+        _resolver = resolver ?? new AppIdResolver();
         _callback = OnWinEvent;
         _debounce.Tick += (_, _) =>
         {
@@ -57,6 +62,57 @@ public sealed class WindowTracker : IDisposable
     }
 
     public string? ExePathOf(nint hwnd) => _exePaths.GetValueOrDefault(hwnd);
+
+    /// <summary>AppUserModelID dell'app (per i recenti); null se non si conosce.</summary>
+    public string? AppIdOf(AppGroup group)
+    {
+        ArgumentNullException.ThrowIfNull(group);
+        return group.Pin?.AppId ?? group.Windows.Select(w => _appIds.GetValueOrDefault(w.Handle)).FirstOrDefault(id => id is not null);
+    }
+
+    /// <summary>Eseguibile dell'app, se è un'app desktop.</summary>
+    public string? ExePathOf(AppGroup group)
+    {
+        ArgumentNullException.ThrowIfNull(group);
+        return group.Windows.Select(w => ExePathOf(w.Handle)).FirstOrDefault(p => p?.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) == true)
+               ?? group.Pin?.ExePath;
+    }
+
+    public void SetPinned(IReadOnlyList<PinnedApp> pins)
+    {
+        if (_model.SetPinned(pins))
+            GroupsChanged?.Invoke();
+    }
+
+    /// <summary>Rilegge le finestre (es. dopo che sono cambiate le fonti degli AppUserModelID).</summary>
+    public void Refresh()
+    {
+        if (_resolverVersion != _resolver.Version)
+        {
+            _resolverVersion = _resolver.Version;
+            _appIds.Clear();
+        }
+
+        var windows = new List<AppWindow>();
+        var z = 0;
+        WindowNative.EnumWindows((hwnd, _) =>
+        {
+            var position = z++;
+            if (TryDescribe(hwnd, position) is { } window)
+                windows.Add(window);
+            return true;
+        }, 0);
+
+        var alive = windows.Select(w => w.Handle).ToHashSet();
+        foreach (var gone in _exePaths.Keys.Where(h => !alive.Contains(h)).ToArray())
+        {
+            _exePaths.Remove(gone);
+            _appIds.Remove(gone);
+        }
+
+        if (_model.Update(windows))
+            GroupsChanged?.Invoke();
+    }
 
     public static void Execute(ClickAction action)
     {
@@ -140,26 +196,6 @@ public sealed class WindowTracker : IDisposable
         FullscreenChanged?.Invoke(fullscreen);
     }
 
-    private void Refresh()
-    {
-        var windows = new List<AppWindow>();
-        var z = 0;
-        WindowNative.EnumWindows((hwnd, _) =>
-        {
-            var position = z++;
-            if (TryDescribe(hwnd, position) is { } window)
-                windows.Add(window);
-            return true;
-        }, 0);
-
-        var alive = windows.Select(w => w.Handle).ToHashSet();
-        foreach (var gone in _exePaths.Keys.Where(h => !alive.Contains(h)).ToArray())
-            _exePaths.Remove(gone);
-
-        if (_model.Update(windows))
-            GroupsChanged?.Invoke();
-    }
-
     private AppWindow? TryDescribe(nint hwnd, int zOrder)
         => Describe(hwnd, zOrder, out _);
 
@@ -215,8 +251,16 @@ public sealed class WindowTracker : IDisposable
             _exePaths[hwnd] = exe;
         }
 
-        // Le app UWP vivono tutte in ApplicationFrameHost: le distinguiamo per titolo.
-        var key = className == "ApplicationFrameWindow" ? $"{exe}|{title}" : exe.ToUpperInvariant();
+        if (!_appIds.TryGetValue(hwnd, out var appId))
+        {
+            appId = _resolver.Resolve(hwnd, exe);
+            _appIds[hwnd] = appId;
+        }
+
+        // Senza AppUserModelID: per eseguibile; le app UWP (tutte in ApplicationFrameHost) per titolo.
+        var key = appId is not null ? AppIds.Key(appId)
+            : className == "ApplicationFrameWindow" ? $"{exe}|{title}"
+            : exe.ToUpperInvariant();
         return new AppWindow(hwnd, key, title, WindowNative.IsIconic(hwnd), zOrder);
     }
 

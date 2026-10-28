@@ -50,7 +50,8 @@ public sealed class AppCatalog
             string id = item.Path;
             if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(id))
                 continue;
-            var entry = new AppEntry(id, name);
+            // L'eseguibile serve alla barra: lega le finestre (es. Code.exe) all'AppUserModelID dell'app.
+            var entry = new AppEntry(id, name, item.ExtendedProperty("System.Link.TargetParsingPath") as string);
             if (!AppSearch.IsNoise(entry))
                 apps.Add(entry);
         }

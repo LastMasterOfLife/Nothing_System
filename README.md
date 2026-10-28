@@ -18,6 +18,11 @@ Se il processo viene terminato di forza e la taskbar resta nascosta:
 NothingShell.exe --restore-taskbar
 ```
 
+Nella barra ci sono le stesse app appuntate alla taskbar di Windows, nello stesso ordine (si
+appuntano e tolgono da Windows, la barra si aggiorna da sola). Il clic destro su un'app apre i suoi
+**recenti** (file, cartelle, progetti) come la jump list di Windows, più nuova finestra e chiudi.
+Dettagli in [docs/05-bar.md](docs/05-bar.md).
+
 Quando arriva una mail il notch mostra per qualche secondo la busta e l'oggetto (da qualsiasi
 client che manda notifiche di Windows: Outlook, Posta, Thunderbird, Gmail nel browser).
 Sul notch aperto, uno swipe (touchpad a due dita, rotellina o trascinamento) scorre le pagine

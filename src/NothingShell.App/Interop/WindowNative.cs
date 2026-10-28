@@ -40,6 +40,10 @@ internal static partial class WindowNative
     private const uint MonitorDefaultToNearest = 2;
     private const uint MonitorDefaultToPrimary = 1;
     private const uint KeyEventKeyUp = 0x0002;
+    private const uint ShgfiIcon = 0x100;
+    private const uint ShgfiUseFileAttributes = 0x10;
+    private const uint FileAttributeDirectory = 0x10;
+    private const uint FileAttributeNormal = 0x80;
 
     public delegate bool EnumWindowsProc(nint hwnd, nint lParam);
 
@@ -52,6 +56,18 @@ internal static partial class WindowNative
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct ShFileInfo
+    {
+        public nint Icon;
+        public int IconIndex;
+        public uint Attributes;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string DisplayName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
+        public string TypeName;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -159,6 +175,9 @@ internal static partial class WindowNative
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool DestroyIcon(nint icon);
 
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern nint SHGetFileInfo(string path, uint attributes, ref ShFileInfo info, uint size, uint flags);
+
     public static string GetTitle(nint hwnd) => ReadString(hwnd, 512, GetWindowText);
 
     public static string GetClassName(nint hwnd) => ReadString(hwnd, 256, GetClassName);
@@ -209,6 +228,19 @@ internal static partial class WindowNative
         if (small != 0 && small != large)
             DestroyIcon(small);
         return large;
+    }
+
+    /// <summary>
+    /// Icona grande del tipo di file (dal nome, senza accedere al disco); il chiamante deve distruggerla
+    /// con <see cref="DestroyIcon"/>.
+    /// </summary>
+    public static nint FileTypeIcon(string name, bool isFolder)
+    {
+        var info = new ShFileInfo();
+        var attributes = isFolder ? FileAttributeDirectory : FileAttributeNormal;
+        return SHGetFileInfo(name, attributes, ref info, (uint)Marshal.SizeOf<ShFileInfo>(), ShgfiIcon | ShgfiUseFileAttributes) != 0
+            ? info.Icon
+            : 0;
     }
 
     /// <summary>Rettangolo (pixel fisici) del monitor che contiene la finestra, e se è il principale.</summary>

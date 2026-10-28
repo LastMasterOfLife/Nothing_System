@@ -1,4 +1,6 @@
-﻿using System.Globalization;
+﻿using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -30,8 +32,11 @@ public sealed class BarWindow : Window
 
     private readonly WindowTracker _tracker;
     private readonly AppIcons _icons;
+    private readonly ShellIcons _shellIcons;
+    private readonly AppCatalog _catalog;
     private readonly WindowsTaskbar _taskbar;
     private readonly LauncherWindow _launcher;
+    private readonly JumpListWindow _jumpList = new();
 
     private readonly StackPanel _apps = new()
     {
@@ -44,15 +49,20 @@ public sealed class BarWindow : Window
     private readonly DotMatrixView _time = new() { Pitch = 2.5, HorizontalAlignment = HorizontalAlignment.Right };
     private readonly DotMatrixView _date = new() { Pitch = 2, DotColor = Theme.Grey, HorizontalAlignment = HorizontalAlignment.Right };
 
-    public BarWindow(WindowTracker tracker, AppIcons icons, WindowsTaskbar taskbar, LauncherWindow launcher)
+    public BarWindow(WindowTracker tracker, AppIcons icons, ShellIcons shellIcons, AppCatalog catalog,
+        WindowsTaskbar taskbar, LauncherWindow launcher)
     {
         ArgumentNullException.ThrowIfNull(tracker);
         ArgumentNullException.ThrowIfNull(icons);
+        ArgumentNullException.ThrowIfNull(shellIcons);
+        ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(taskbar);
         ArgumentNullException.ThrowIfNull(launcher);
         _launcher = launcher;
         _tracker = tracker;
         _icons = icons;
+        _shellIcons = shellIcons;
+        _catalog = catalog;
         _taskbar = taskbar;
 
         WindowStyle = WindowStyle.None;
@@ -191,8 +201,7 @@ public sealed class BarWindow : Window
 
     private Border AppButton(AppGroup group)
     {
-        var first = group.Windows[0];
-        UIElement glyph = _icons.Get(group.AppKey, first.Handle, _tracker.ExePathOf(first.Handle)) is { } icon
+        UIElement glyph = IconOf(group) is { } icon
             ? new Image { Source = icon, Width = 24, Height = 24 }
             : new DotMatrixView { Pitch = 3, Dots = DotText.Render(Initial(group.Title)) };
         RenderOptions.SetBitmapScalingMode(glyph, BitmapScalingMode.HighQuality);
@@ -210,6 +219,7 @@ public sealed class BarWindow : Window
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(0, 0, 0, 3),
+            Visibility = group.IsRunning ? Visibility.Visible : Visibility.Hidden, // appuntata ma chiusa: nessun punto
         };
         _indicators[group.AppKey] = indicator;
 
@@ -221,36 +231,111 @@ public sealed class BarWindow : Window
         content.HorizontalAlignment = HorizontalAlignment.Stretch; // l'indicatore sta sul fondo del pulsante
         content.VerticalAlignment = VerticalAlignment.Stretch;
         button.Margin = new Thickness(2, 0, 2, 0);
-        button.ToolTip = group.Windows.Count == 1 ? group.Title : $"{group.Title} (+{group.Windows.Count - 1})";
+        button.ToolTip = group.Windows.Count > 1 ? $"{group.Title} (+{group.Windows.Count - 1})" : group.Title;
         button.MouseLeftButtonUp += (_, e) =>
         {
             e.Handled = true;
             // Il gruppo va riletto: il riferimento catturato può essere vecchio
-            if (_tracker.Groups.FirstOrDefault(g => g.AppKey == group.AppKey) is { } current)
-                WindowTracker.Execute(TaskbarModel.Click(current, _tracker.Foreground));
+            if (CurrentGroup(group.AppKey) is not { } current)
+                return;
+            var action = TaskbarModel.Click(current, _tracker.Foreground);
+            if (action.Kind == ClickKind.Launch)
+                LaunchApp(current);
+            else
+                WindowTracker.Execute(action);
         };
-        button.ContextMenu = AppContextMenu(group.AppKey);
+        // Gestito qui: il menu della barra (spazio vuoto) non deve aprirsi sopra l'elenco dei recenti.
+        button.MouseRightButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            if (CurrentGroup(group.AppKey) is { } current)
+                _jumpList.Open(JumpListFor(current), AnchorX(button));
+        };
         return button;
     }
 
-    private ContextMenu AppContextMenu(string appKey)
+    private AppGroup? CurrentGroup(string appKey) => _tracker.Groups.FirstOrDefault(g => g.AppKey == appKey);
+
+    private JumpListModel JumpListFor(AppGroup group)
     {
-        var close = new MenuItem { Header = "Chiudi finestra" };
-        close.Click += (_, _) =>
+        var appId = _tracker.AppIdOf(group);
+        var exe = _tracker.ExePathOf(group);
+        var appIcon = IconOf(group);
+        var (items, frequent) = appId is null ? ((IReadOnlyList<JumpItem>)[], false) : ShellNative.ReadJumpList(appId);
+        return new JumpListModel(
+            AppName(group, appId, exe),
+            appIcon,
+            frequent,
+            JumpLists.Clean(items),
+            group.Windows.Count,
+            item => item.IsLink ? appIcon : _icons.ForFile(item.Path),
+            item => Run(JumpLists.Open(item, exe)),
+            () => LaunchApp(group),
+            () =>
+            {
+                foreach (var w in CurrentGroup(group.AppKey)?.Windows ?? [])
+                    WindowTracker.Close(w.Handle);
+            });
+    }
+
+    /// <summary>
+    /// Icona dell'app: quella del collegamento appuntato (come la mostra Windows), poi quella della finestra
+    /// o dell'eseguibile, infine quella dello Start (app UWP non appuntate).
+    /// </summary>
+    private ImageSource? IconOf(AppGroup group)
+    {
+        if (group.Pin is { } pin && _shellIcons.GetForPath(pin.LaunchPath) is { } pinned)
+            return pinned;
+        if (group.Windows.Count > 0 &&
+            _icons.Get(group.AppKey, group.Windows[0].Handle, _tracker.ExePathOf(group.Windows[0].Handle)) is { } own)
+            return own;
+        return _tracker.AppIdOf(group) is { } appId ? _shellIcons.Get(appId) : null;
+    }
+
+    private string AppName(AppGroup group, string? appId, string? exe)
+    {
+        if (group.Pin is { } pin)
+            return pin.Name;
+        if (appId is not null && _catalog.Apps.FirstOrDefault(a => a.Id.Equals(appId, StringComparison.OrdinalIgnoreCase)) is { } app)
+            return app.Name;
+        if (exe is not null && FileVersionInfo.GetVersionInfo(exe).FileDescription is { Length: > 0 } description)
+            return description;
+        return exe is not null ? System.IO.Path.GetFileNameWithoutExtension(exe) : group.Title;
+    }
+
+    /// <summary>Nuova istanza dell'app: dal collegamento appuntato, dallo Start o dall'eseguibile.</summary>
+    private void LaunchApp(AppGroup group)
+    {
+        var appId = _tracker.AppIdOf(group);
+        if (group.Pin is { } pin)
+            Run(pin.LaunchPath.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)
+                ? new LaunchCommand("explorer.exe", pin.LaunchPath)
+                : new LaunchCommand(pin.LaunchPath, null));
+        else if (appId is not null && _catalog.Apps.FirstOrDefault(a => a.Id.Equals(appId, StringComparison.OrdinalIgnoreCase)) is { } app)
+            Run(new LaunchCommand("explorer.exe", $"shell:AppsFolder\\{app.Id}"));
+        else if (_tracker.ExePathOf(group) is { } exe)
+            Run(new LaunchCommand(exe, null));
+    }
+
+    private static void Run(LaunchCommand command)
+    {
+        try
         {
-            if (_tracker.Groups.FirstOrDefault(g => g.AppKey == appKey) is not { } group)
-                return;
-            foreach (var w in group.Windows)
-                WindowTracker.Close(w.Handle);
-        };
-        var menu = new ContextMenu();
-        menu.Opened += (_, _) =>
+            Process.Start(new ProcessStartInfo(command.FileName, command.Arguments ?? string.Empty) { UseShellExecute = true })?.Dispose();
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
         {
-            var count = _tracker.Groups.FirstOrDefault(g => g.AppKey == appKey)?.Windows.Count ?? 0;
-            close.Header = count > 1 ? $"Chiudi {count} finestre" : "Chiudi finestra";
-        };
-        menu.Items.Add(close);
-        return menu;
+            // file spostato o app disinstallata: come in Windows, l'elemento semplicemente non si apre
+        }
+    }
+
+    /// <summary>Centro orizzontale del pulsante in DIP dello schermo, per allinearvi l'elenco dei recenti.</summary>
+    private static double AnchorX(FrameworkElement button)
+    {
+        var center = button.PointToScreen(new Point(button.ActualWidth / 2, 0));
+        return PresentationSource.FromVisual(button)?.CompositionTarget is { } target
+            ? target.TransformFromDevice.Transform(center).X
+            : center.X;
     }
 
     private void UpdateIndicators()

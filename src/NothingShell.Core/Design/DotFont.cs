@@ -152,4 +152,7 @@ public static class DotIcons
 
     public static readonly DotGlyph Ethernet = new(
         "..###..", "..#.#..", "#######", "#.....#", "#.#.#.#", "#######");
+
+    public static readonly DotGlyph Close = new(
+        "#.....#", ".#...#.", "..#.#..", "...#...", "..#.#..", ".#...#.", "#.....#");
 }

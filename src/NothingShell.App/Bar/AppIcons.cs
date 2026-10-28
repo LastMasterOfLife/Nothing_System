@@ -25,6 +25,32 @@ public sealed class AppIcons
         return icon;
     }
 
+    /// <summary>
+    /// Icona del tipo di file o di cartella. Sui percorsi di rete si decide dalla sola estensione senza
+    /// toccare il disco: un server irraggiungibile bloccherebbe la barra.
+    /// </summary>
+    public ImageSource? ForFile(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        var extension = System.IO.Path.GetExtension(path.TrimEnd('\\')).ToLowerInvariant();
+        var isFolder = path.StartsWith(@"\\", StringComparison.Ordinal)
+            ? extension.Length == 0
+            : System.IO.Directory.Exists(path); // es. "beelbo-connector-1.4.0" è una cartella
+        var key = "file:" + (isFolder ? "<folder>" : extension);
+        if (_cache.TryGetValue(key, out var cached))
+            return cached;
+
+        var hicon = WindowNative.FileTypeIcon(isFolder ? "folder" : "x" + extension, isFolder);
+        ImageSource? icon = null;
+        if (hicon != 0)
+        {
+            icon = Convert(hicon);
+            WindowNative.DestroyIcon(hicon);
+        }
+        _cache[key] = icon;
+        return icon;
+    }
+
     private static bool IsUwpHost(string? exePath) =>
         exePath?.EndsWith("ApplicationFrameHost.exe", StringComparison.OrdinalIgnoreCase) == true;
 
