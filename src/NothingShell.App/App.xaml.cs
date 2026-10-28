@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -47,14 +47,22 @@ public partial class App : Application
             case ["--snapshot", var folder]:
                 RenderSnapshots(folder);
                 await RenderLauncherSnapshot(folder);
+                await RenderBarSnapshots(folder);
                 await RenderPluginAndSettingsSnapshots(folder);
                 RenderNotchSnapshots(folder);
                 await RenderAccessSnapshots(folder);
                 Shutdown();
                 return;
             case ["--dump-windows", var file]:
-                using (var tracker = new WindowTracker())
-                    File.WriteAllLines(file, tracker.Diagnose());
+                await DumpWindows(file);
+                Shutdown();
+                return;
+            case ["--live-check", var report]:
+                await LiveCheck(report);
+                Shutdown();
+                return;
+            case ["--preview-demo", var image]:
+                await PreviewDemo(image);
                 Shutdown();
                 return;
             case ["--restore-taskbar"]:
@@ -190,20 +198,84 @@ public partial class App : Application
         var now = DateTimeOffset.Now;
         MailItem[] demo =
         [
-            new("Mario Rossi", "Riunione di domani alle 10: ordine del giorno aggiornato", "Outlook", now),
-            new("Studio Bianchi", "Preventivo convalida", "Outlook", now.AddMinutes(-12)),
+            new("Mario Rossi", "Riunione di domani alle 10: ordine del giorno aggiornato", "Casella collegata", now)
+            {
+                Imap = new ImapMessageRef(1, 3), IsUnread = true, SenderAddress = "mario.rossi@example.it",
+            },
+            new("Studio Bianchi", "Preventivo convalida", "Casella collegata", now.AddMinutes(-12)) { Imap = new ImapMessageRef(1, 2) },
             new("GitHub", "[nothing-shell] Nuova issue aperta", "Brave", now.AddHours(-1)),
         ];
         notch.SetTime(DateTime.Now);
         notch.SetMail(demo, string.Empty);
         notch.SetSystem(new SystemStats(0.23, SystemMonitor.ReadMemoryLoad()));
         notch.SetBattery(SystemMonitor.ReadBattery());
+        var today = DateTime.Today;
+        CalendarEvent[] agenda =
+        [
+            new("Ferie Marco", new DateTimeOffset(today), new DateTimeOffset(today.AddDays(1)), AllDay: true),
+            new("Standup", new DateTimeOffset(DateTime.Now.AddMinutes(8)), new DateTimeOffset(DateTime.Now.AddMinutes(23)),
+                MeetingLink: "https://teams.microsoft.com/l/meetup-join/demo"),
+            new("Revisione budget", new DateTimeOffset(DateTime.Now.AddMinutes(95)), new DateTimeOffset(DateTime.Now.AddMinutes(155)), Location: "Sala 2"),
+            new("Dentista", new DateTimeOffset(DateTime.Now.AddHours(5)), new DateTimeOffset(DateTime.Now.AddHours(6))),
+        ];
+        notch.SetAgenda(agenda, DateTimeOffset.Now, string.Empty);
 
         notch.ShowMailAlert(demo[0]);
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "notch-alert.png"));
         foreach (var page in NotchPager.Pages)
             SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, page),
                 Path.Combine(folder, $"notch-{page}.png".ToLowerInvariant()));
+
+        var reader = new MailReaderWindow(new SnapshotMail(demo));
+        reader.Select(demo[0]);
+        var readerRoot = (FrameworkElement)reader.Content;
+        readerRoot.Width = reader.Width;
+        readerRoot.Height = reader.Height;
+        SaveSnapshot(readerRoot, Path.Combine(folder, "mail-reader.png"));
+
+        // Attività dal vivo (docs/10-live-activities.md)
+        notch.ShowLevel(NothingShell.Core.Design.DotIcons.Speaker, 0.64, muted: false);
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "notch-volume.png"));
+        notch.ShowLevel(NothingShell.Core.Design.DotIcons.SpeakerMuted, 0.64, muted: true);
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "notch-volume-muted.png"));
+        notch.ShowLevel(NothingShell.Core.Design.DotIcons.Sun, 0.8, muted: false);
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "notch-brightness.png"));
+        notch.ShowNotice(NothingShell.Core.Design.DotIcons.Headphones, Rendering.Theme.White, "Nothing Ear (a)  80%");
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "notch-bluetooth.png"));
+
+        notch.SetPrivacy(new PrivacyState(["Zoom"], ["Zoom"]));
+        notch.SetDownloads([new ActiveDownload(@"C:\x.crdownload", "report-trimestre.pdf", 13_002_342, 2_400_000, TimeSpan.Zero)]);
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Activity, NotchPage.Home), Path.Combine(folder, "notch-activity-live.png"));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.System), Path.Combine(folder, "notch-system-live.png"));
+        notch.SetPrivacy(PrivacyState.None);
+        notch.SetDownloads([]);
+
+        var shot = new RenderTargetBitmap(1600, 900, 96, 96, PixelFormats.Pbgra32);
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+        {
+            dc.DrawRectangle(new LinearGradientBrush(Color.FromRgb(40, 40, 48), Color.FromRgb(200, 30, 40), 30), null, new Rect(0, 0, 1600, 900));
+            dc.DrawRectangle(Brushes.White, null, new Rect(200, 200, 700, 400));
+        }
+        shot.Render(visual);
+        shot.Freeze();
+        notch.ShowCard(NotchCards.Screenshot(new ScreenshotCapture(shot, null), () => { }), TimeSpan.FromSeconds(8));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-screenshot.png"));
+        notch.ShowCard(NotchCards.Download(Path.Combine(folder, "notch-volume.png"), () => { }), TimeSpan.FromSeconds(8));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-download.png"));
+
+        // Agenda (docs/11-agenda-pannello-rapido.md)
+        notch.ShowCard(NotchCards.Appointment(agenda[1], ReminderKind.Soon, DateTimeOffset.Now, _ => { }, () => { }, () => { }), TimeSpan.FromSeconds(8));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-appointment.png"));
+        var brief = MorningBrief.Compose(today.AddHours(8), agenda, 5);
+        notch.ShowCard(NotchCards.MorningBrief(brief, today.AddHours(8), () => { }, () => { }, () => { }), TimeSpan.FromSeconds(8));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-morning.png"));
+        notch.SetAgenda([], DateTimeOffset.Now, "Collega un calendario nelle impostazioni di Nothing Shell");
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Agenda), Path.Combine(folder, "notch-agenda-empty.png"));
+
+        var quick = new QuickPanelWindow(() => { }, () => { });
+        SaveSnapshot(quick.PrepareSnapshot(), Path.Combine(folder, "quick-panel.png"));
+        quick.Close();
 
         notch.StartTimer(TimeSpan.FromMinutes(25));
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Timer), Path.Combine(folder, "notch-timer-running.png"));
@@ -231,6 +303,82 @@ public partial class App : Application
         SaveSnapshot(root, Path.Combine(folder, "settings-full.png"));
     }
 
+    /// <summary>
+    /// Diagnostica delle attività dal vivo, in sola lettura: volume attuale, chi usa microfono e webcam, cartelle
+    /// osservate, dispositivi Bluetooth associati con stato, classe e batteria.
+    /// </summary>
+    private static async Task LiveCheck(string file)
+    {
+        var lines = new List<string>();
+        using (var audio = new AudioService())
+        {
+            audio.Start();
+            lines.Add($"volume: {audio.Read()?.ToString() ?? "non disponibile"}");
+        }
+        using (var privacy = new PrivacyMonitor())
+        {
+            privacy.Start();
+            lines.Add($"microfono: [{string.Join(", ", privacy.Current.Microphone)}] webcam: [{string.Join(", ", privacy.Current.Camera)}]");
+        }
+        lines.Add($"download: {Interop.ShellNative.DownloadsFolder}");
+        lines.Add($"screenshot: {ScreenshotWatcher.Folder}");
+        lines.Add($"greenshot: {ScreenshotWatcher.GreenshotFolder ?? "non installato"}");
+        using (var calendar = new CalendarService())
+        {
+            calendar.Start([]);
+            await calendar.RefreshAsync();
+            lines.Add($"calendario: {calendar.Status}");
+            foreach (var e in calendar.Events.Take(5))
+                lines.Add($"  {e.Start:ddd dd/MM HH:mm} {e.Title}{(e.MeetingLink is null ? string.Empty : " [online]")}");
+        }
+        var (wifi, bluetooth) = await RadioSwitch.LoadAsync();
+        lines.Add($"radio: wifi={(wifi is null ? "n/d" : wifi.IsOn ? "on" : "off")} bluetooth={(bluetooth is null ? "n/d" : bluetooth.IsOn ? "on" : "off")} rete={RadioSwitch.ConnectedNetwork() ?? "-"}");
+        lines.Add($"luminosità: {ScreenBrightness.Read()?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "non regolabile"}");
+        using (var microphone = new AudioService(capture: true))
+        {
+            microphone.Start();
+            lines.Add($"microfono: {microphone.Read()?.ToString() ?? "nessuno"}");
+        }
+        lines.Add($"bluetooth: {string.Join(Environment.NewLine + "  ", await BluetoothAudioWatcher.DescribeAsync())}");
+        await File.WriteAllLinesAsync(file, lines);
+    }
+
+    /// <summary>Mail d'esempio per disegnare il lettore senza collegarsi a una casella.</summary>
+    private sealed class SnapshotMail(IReadOnlyList<MailItem> mails) : IMailReaderActions
+    {
+        public IReadOnlyList<MailItem> Mails => mails;
+
+        public int UnreadCount => 4;
+
+        public event Action? MailsChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Task<(MailContent? Content, string? Error)> LoadAsync(MailItem mail, CancellationToken cancellation) =>
+            Task.FromResult<(MailContent?, string?)>((new MailContent(
+                $"{mail.Sender} <{mail.SenderAddress}>",
+                "Andrea",
+                mail.Received,
+                mail.Subject,
+                MailText.FromHtml("<p>Ciao Andrea,</p><p>ti giro l'ordine del giorno aggiornato:</p><ul><li>stato del progetto</li>" +
+                                  "<li>budget del trimestre</li><li>varie ed eventuali</li></ul><p>Per entrare nella stanza " +
+                                  "virtuale usa il codice 482913.</p><p>A domani,<br>Mario</p>"),
+                ["ordine-del-giorno.pdf"],
+                mail.SenderAddress), null));
+
+        public Task<string?> MarkReadAsync(MailItem mail) => Task.FromResult<string?>(null);
+
+        public string? WebmailName => "Outlook";
+
+        public void OpenWebmail()
+        {
+        }
+
+        public bool OpenSourceApp(MailItem mail) => false;
+    }
+
     /// <summary>Stato fittizio ma realistico per disegnare le impostazioni senza avviare la shell.</summary>
     private sealed class SnapshotSettings(IReadOnlyList<PluginLoadResult> results) : IShellSettingsActions
     {
@@ -251,6 +399,74 @@ public partial class App : Application
         public bool CanRequestNotificationAccess => false;
 
         public Task RequestNotificationAccessAsync() => Task.CompletedTask;
+
+        public bool NotificationAccessAllowed => true;
+
+        public IReadOnlyList<(string App, bool IsMail)> MailAppCandidates => [("Aruba Webmail", true), ("Slack", false)];
+
+        public void SetMailApp(string app, bool isMail)
+        {
+        }
+
+        public MailItem? LastMail => new("Mario Rossi", "Preventivo sito", "Outlook", DateTimeOffset.Now);
+
+        public void ShowTestMailAlert()
+        {
+        }
+
+        public MailAccount? MailAccount => null;
+
+        public string MailAccountStatus => "Nessuna casella collegata";
+
+        public bool MailAccountConnected => false;
+
+        public event Action? MailAccountChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Task<string?> ConnectMailAccountAsync(MailAccount account, string password) => Task.FromResult<string?>(null);
+
+        public void DisconnectMailAccount()
+        {
+        }
+
+        public void ReconnectMailAccount()
+        {
+        }
+
+        public string? WebmailAddress => null;
+
+        public bool IsActivityEnabled(LiveActivity activity) => activity != LiveActivity.Brightness;
+
+        public void SetActivityEnabled(LiveActivity activity, bool enabled)
+        {
+        }
+
+        public void SetWebmail(string? url)
+        {
+        }
+
+        public IReadOnlyList<string> CalendarFeeds => ["https://outlook.office365.com/owa/calendar/abc/reachcalendar.ics"];
+
+        public string? SetCalendarFeeds(IReadOnlyList<string> feeds) => null;
+
+        public string CalendarStatus => "Calendario di Windows: 0 eventi · Link iCal: 14 eventi";
+
+        public event Action? CalendarChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public void RefreshCalendar()
+        {
+        }
+
+        public void ShowMorningBriefNow()
+        {
+        }
 
         public IEnumerable<(string Id, string Name)> Widgets =>
             new[] { ("Clock", "Orologio"), ("Battery", "Batteria"), ("System", "Sistema"), ("Calendar", "Calendario") }
@@ -274,6 +490,106 @@ public partial class App : Application
 
         public void ReloadPlugins()
         {
+        }
+    }
+
+    /// <summary>
+    /// Finestre (<c>+</c> in barra con la chiave dell'app, <c>-</c> col motivo dell'esclusione), poi le app
+    /// appuntate con AppUserModelID e numero di recenti.
+    /// </summary>
+    private static async Task DumpWindows(string file)
+    {
+        var catalog = new AppCatalog();
+        await catalog.RefreshAsync();
+        var pins = TaskbarPins.Read();
+        var resolver = new AppIdResolver();
+        resolver.SetSources(pins, catalog.Apps);
+
+        using var tracker = new WindowTracker(resolver);
+        var lines = tracker.Diagnose().ToList();
+        lines.Add(string.Empty);
+        lines.Add("Appuntate:");
+        foreach (var pin in pins)
+        {
+            var (items, frequent) = Interop.ShellNative.ReadJumpList(pin.AppId);
+            lines.Add($"  {pin.Name} | {pin.AppId} | {pin.LaunchPath} | exe={pin.ExePath} args={pin.HasArguments} | " +
+                      $"{(frequent ? "frequenti" : "recenti")}={NothingShell.Core.Bar.JumpLists.Clean(items).Count}");
+        }
+        File.WriteAllLines(file, lines);
+    }
+
+    /// <summary>
+    /// Anteprime dal vivo dell'app con più finestre, sul monitor principale, catturate dallo schermo in PNG
+    /// (le miniature le disegna DWM: un rendering WPF non le vedrebbe).
+    /// </summary>
+    private static async Task PreviewDemo(string image)
+    {
+        var catalog = new AppCatalog();
+        await catalog.RefreshAsync();
+        var pins = TaskbarPins.Read();
+        var resolver = new AppIdResolver();
+        resolver.SetSources(pins, catalog.Apps);
+        using var tracker = new WindowTracker(resolver);
+        tracker.Refresh();
+        var monitor = Interop.WindowNative.Monitors().First(m => m.IsPrimary);
+        if (tracker.Groups.MaxBy(g => g.Windows.Count) is not { IsRunning: true } group)
+            return;
+
+        var preview = new PreviewWindow();
+        preview.Open(group, null, 0, monitor.Bounds.X + monitor.Bounds.Width / 2, monitor);
+        await Task.Delay(1000);
+        var hwnd = new WindowInteropHelper(preview).Handle;
+        if (Interop.WindowNative.GetWindowRect(hwnd, out var r) &&
+            Interop.NativeMethods.CaptureScreen(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top) is { } shot)
+        {
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(shot));
+            using var file = File.Create(image);
+            encoder.Save(file);
+        }
+        preview.Close();
+    }
+
+    /// <summary>Barra con le app appuntate e aperte, ed elenco dei recenti della prima app che ne ha, in PNG.</summary>
+    private static async Task RenderBarSnapshots(string folder)
+    {
+        var catalog = new AppCatalog();
+        await catalog.RefreshAsync();
+        var pins = TaskbarPins.Read();
+        var resolver = new AppIdResolver();
+        resolver.SetSources(pins, catalog.Apps);
+        using var tracker = new WindowTracker(resolver);
+        var shellIcons = new ShellIcons();
+        var launcher = new LauncherWindow(catalog, shellIcons, new LauncherSettingsStore(LauncherSettingsStore.DefaultPath));
+        tracker.SetPinned(pins);
+        tracker.Refresh();
+
+        // Una barra per monitor (bar-1.png sul principale), come le crea BarHost
+        var monitors = Interop.WindowNative.Monitors().OrderByDescending(m => m.IsPrimary).ToArray();
+        for (var i = 0; i < monitors.Length; i++)
+        {
+            var bar = new BarWindow(tracker, new AppIcons(), shellIcons, catalog, new WindowsTaskbar(), launcher,
+                monitors[i], NothingShell.Core.Bar.MultiMonitorMode.AllTaskbars);
+            bar.SetTime(DateTime.Now);
+            var root = (FrameworkElement)bar.Content;
+            var rect = NothingShell.Core.Bar.MultiMonitorBar.Place(monitors[i]);
+            root.Width = rect.Width / monitors[i].Scale;
+            root.Height = rect.Height / monitors[i].Scale;
+            SaveSnapshot(root, Path.Combine(folder, $"bar-{i + 1}.png"), scale: 1);
+        }
+
+        var appIcons = new AppIcons();
+        foreach (var pin in pins)
+        {
+            var (items, frequent) = Interop.ShellNative.ReadJumpList(pin.AppId);
+            var clean = NothingShell.Core.Bar.JumpLists.Clean(items);
+            if (clean.Count < 3)
+                continue;
+            var icon = shellIcons.GetForPath(pin.LaunchPath);
+            var model = new JumpListModel(pin.Name, icon, frequent, clean, 2,
+                item => item.IsLink ? icon : appIcons.ForFile(item.Path), _ => { }, () => { }, () => { });
+            SaveSnapshot(new JumpListWindow().PrepareSnapshot(model), Path.Combine(folder, "jumplist.png"));
+            break;
         }
     }
 

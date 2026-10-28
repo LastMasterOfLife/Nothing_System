@@ -7,8 +7,8 @@ Non sostituisce `explorer.exe`. Le spec sono in [docs/](docs/).
 ```
 dotnet run --project src/NothingShell.App
 ```
-All'avvio la taskbar di Windows viene nascosta e sostituita dalla barra Nothing; torna visibile
-all'uscita. Per chiudere: tasto destro sul notch, su un widget o sulla barra → *Esci da Nothing Shell*,
+All'avvio la taskbar di Windows viene nascosta e sostituita dalla barra Nothing, su ogni monitor
+(seguendo le impostazioni multi-monitor della taskbar di Windows); torna visibile all'uscita. Per chiudere: tasto destro sul notch, su un widget o sulla barra → *Esci da Nothing Shell*,
 oppure da terminale:
 ```
 NothingShell.exe --exit
@@ -18,10 +18,34 @@ Se il processo viene terminato di forza e la taskbar resta nascosta:
 NothingShell.exe --restore-taskbar
 ```
 
-Quando arriva una mail il notch mostra per qualche secondo la busta e l'oggetto (da qualsiasi
+Nella barra ci sono le stesse app appuntate alla taskbar di Windows, nello stesso ordine (si
+appuntano e tolgono da Windows, la barra si aggiorna da sola). Il clic destro su un'app apre i suoi
+**recenti** (file, cartelle, progetti) come la jump list di Windows, più nuova finestra e chiudi.
+Col mouse sopra un'app aperta compaiono le **anteprime dal vivo** delle sue finestre.
+Dettagli in [docs/05-bar.md](docs/05-bar.md).
+
+Quando arriva una mail il notch mostra per qualche secondo la busta e l'oggetto: dalla casella collegata
+direttamente (IMAP, nelle impostazioni) oppure dalle notifiche (da qualsiasi
 client che manda notifiche di Windows: Outlook, Posta, Thunderbird, Gmail nel browser).
+Un clic su una mail della pagina Posta la apre nel **lettore** di Nothing (senza segnarla come letta),
+con *Rispondi*, *Apri nella webmail* (o nella sua app di Edge), *Segna come letta* e *Copia codice* per i
+codici di verifica; le mail arrivate da una notifica aprono l'app che l'ha mandata.
 Sul notch aperto, uno swipe (touchpad a due dita, rotellina o trascinamento) scorre le pagine
-Home · Posta · Timer · Sistema. Dettagli in [docs/08-notch-mail-pages.md](docs/08-notch-mail-pages.md).
+Home · Agenda · Posta · Timer · Sistema. Dettagli in [docs/08-notch-mail-pages.md](docs/08-notch-mail-pages.md).
+
+**Attività dal vivo** nel notch: volume (i tasti del volume mostrano il livello a punti al posto
+dell'indicatore di Windows), luminosità dei portatili, icone rosse quando un'app usa microfono o webcam,
+download in corso con la scheda *Scaricato*, scheda dello screenshot appena fatto (anteprima da
+trascinare, Apri, Cartella), cuffie Bluetooth collegate con la batteria. Ognuna si spegne in
+Impostazioni › Notch. Lo screenshot funziona anche con **Greenshot** (appunti e cartella di salvataggio).
+Dettagli in [docs/10-live-activities.md](docs/10-live-activities.md).
+
+**Agenda**: il prossimo appuntamento sotto l'ora nella Home, la pagina Agenda con quelli di oggi e un
+promemoria 10 minuti prima con *Partecipa* per Teams, Meet e Zoom. Al primo accesso del mattino il
+**riepilogo** con gli appuntamenti della giornata e le mail da leggere. Gli appuntamenti arrivano dal
+calendario di Windows e dai link iCal (.ics) di Outlook, Google o iCloud aggiunti in Impostazioni › Agenda.
+Il pulsante rete e batteria della barra apre il **pannello rapido** Nothing: Wi-Fi, Bluetooth, microfono,
+screenshot, proietta, blocca, volume e luminosità. Dettagli in [docs/11-agenda-pannello-rapido.md](docs/11-agenda-pannello-rapido.md).
 
 **Accesso Nothing**: *Blocca* nel launcher (o `NothingShell.exe --lock`, comodo in una scorciatoia)
 chiude lo schermo con un'animazione a iride e la card del tuo account, poi passa al blocco di

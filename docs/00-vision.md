@@ -26,3 +26,10 @@ dove serve, nasconde gli elementi originali.
 | M5 | Impostazioni + plugin widget (docs/07-settings-plugins.md) | fatto |
 | M6 | Notch: avvisi mail e pagine con swipe (docs/08-notch-mail-pages.md) | fatto |
 | M7 | Accesso Nothing: animazioni di blocco e bentornato con card account (docs/09-access.md) | fatto |
+| M8 | Barra: app appuntate di Windows, recenti col clic destro, anteprime dal vivo, una barra per monitor (docs/05-bar.md) | fatto |
+| M9 | Posta nel notch dalla casella collegata (IMAP) e impostazioni guidate (docs/08-notch-mail-pages.md) | fatto |
+| M10 | Lettore di posta: clic su una mail del notch, rispondi, webmail, segna come letta, codici (docs/08-notch-mail-pages.md) | fatto |
+| M11 | Attività dal vivo: volume, luminosità, microfono e webcam, download, screenshot, cuffie (docs/10-live-activities.md) | fatto |
+| M12 | Agenda nel notch, riepilogo del mattino, pannello rapido, screenshot di Greenshot (docs/11-agenda-pannello-rapido.md) | fatto |
+
+Versioni: 0.5 = M0–M5, 0.6 = M6–M7, 0.7 = M8–M9, 0.8 = M10, 0.9 = M11, 0.10 = M12.

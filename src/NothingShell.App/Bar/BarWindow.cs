@@ -1,10 +1,13 @@
-﻿using System.Globalization;
+﻿using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using NothingShell.App.Interop;
 using NothingShell.App.Launcher;
 using NothingShell.App.Rendering;
@@ -16,11 +19,9 @@ using NothingShell.Core.Sensors;
 
 namespace NothingShell.App.Bar;
 
-/// <summary>Barra in basso al posto della taskbar (docs/05-bar.md).</summary>
+/// <summary>Barra in basso al posto della taskbar di Windows di un monitor (docs/05-bar.md).</summary>
 public sealed class BarWindow : Window
 {
-    private const double FallbackHeight = 48;
-    private const double MinReservedHeight = 24;
     private const byte VkLeftWin = 0x5B;
     private const byte VkA = 0x41;
     private const byte VkN = 0x4E;
@@ -30,8 +31,15 @@ public sealed class BarWindow : Window
 
     private readonly WindowTracker _tracker;
     private readonly AppIcons _icons;
+    private readonly ShellIcons _shellIcons;
+    private readonly AppCatalog _catalog;
     private readonly WindowsTaskbar _taskbar;
     private readonly LauncherWindow _launcher;
+    private readonly JumpListWindow _jumpList = new();
+    private readonly PreviewWindow _preview = new();
+    private readonly DispatcherTimer _previewOpen = new() { Interval = TimeSpan.FromMilliseconds(400) };
+    private readonly DispatcherTimer _previewHide = new() { Interval = TimeSpan.FromMilliseconds(300) };
+    private (string AppKey, double AnchorX)? _previewTarget;
 
     private readonly StackPanel _apps = new()
     {
@@ -44,15 +52,25 @@ public sealed class BarWindow : Window
     private readonly DotMatrixView _time = new() { Pitch = 2.5, HorizontalAlignment = HorizontalAlignment.Right };
     private readonly DotMatrixView _date = new() { Pitch = 2, DotColor = Theme.Grey, HorizontalAlignment = HorizontalAlignment.Right };
 
-    public BarWindow(WindowTracker tracker, AppIcons icons, WindowsTaskbar taskbar, LauncherWindow launcher)
+    private MultiMonitorMode _mode;
+
+    public BarWindow(WindowTracker tracker, AppIcons icons, ShellIcons shellIcons, AppCatalog catalog,
+        WindowsTaskbar taskbar, LauncherWindow launcher, DisplayMonitor monitor, MultiMonitorMode mode)
     {
+        ArgumentNullException.ThrowIfNull(monitor);
+        Monitor = monitor;
+        _mode = mode;
         ArgumentNullException.ThrowIfNull(tracker);
         ArgumentNullException.ThrowIfNull(icons);
+        ArgumentNullException.ThrowIfNull(shellIcons);
+        ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(taskbar);
         ArgumentNullException.ThrowIfNull(launcher);
         _launcher = launcher;
         _tracker = tracker;
         _icons = icons;
+        _shellIcons = shellIcons;
+        _catalog = catalog;
         _taskbar = taskbar;
 
         WindowStyle = WindowStyle.None;
@@ -65,18 +83,49 @@ public sealed class BarWindow : Window
         Content = BuildVisualTree();
 
         _tracker.GroupsChanged += RebuildApps;
-        _tracker.ForegroundChanged += _ => UpdateIndicators();
+        _tracker.ForegroundChanged += OnForegroundChanged;
         SourceInitialized += (_, _) =>
-            NativeMethods.MakeNonActivatingToolWindow(new WindowInteropHelper(this).Handle);
-        Loaded += (_, _) => PositionOnPrimaryScreen();
-        SystemParameters.StaticPropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(SystemParameters.WorkArea))
-                PositionOnPrimaryScreen();
+            NativeMethods.MakeNonActivatingToolWindow(new WindowInteropHelper(this).Handle);
+            Place();
         };
+        Closed += (_, _) =>
+        {
+            // Monitor scollegato: la barra sparisce e non deve più ricevere eventi.
+            _tracker.GroupsChanged -= RebuildApps;
+            _tracker.ForegroundChanged -= OnForegroundChanged;
+            _previewOpen.Stop();
+            _previewHide.Stop();
+            _jumpList.Close();
+            _preview.Close();
+        };
+        IsVisibleChanged += (_, _) =>
+        {
+            if (!IsVisible)
+                HidePreview(); // schermo intero o barra spenta
+        };
+        SetupPreview();
+        RebuildApps();
     }
 
     public event Action? SettingsRequested;
+
+    /// <summary>Clic sul pulsante rete e batteria: pannello rapido di Nothing (docs/11-agenda-pannello-rapido.md).</summary>
+    public event Action<BarWindow>? QuickPanelRequested;
+
+    public DisplayMonitor Monitor { get; private set; }
+
+    /// <summary>Monitor o impostazione di Windows cambiati: riposiziona la barra e rifà l'elenco delle app.</summary>
+    public void SetMonitor(DisplayMonitor monitor, MultiMonitorMode mode)
+    {
+        ArgumentNullException.ThrowIfNull(monitor);
+        var modeChanged = mode != _mode || monitor.Handle != Monitor.Handle || monitor.IsPrimary != Monitor.IsPrimary;
+        Monitor = monitor;
+        _mode = mode;
+        Place();
+        if (modeChanged)
+            RebuildApps();
+    }
 
     public void SetTime(DateTime now)
     {
@@ -109,7 +158,7 @@ public sealed class BarWindow : Window
         start.MouseLeftButtonUp += (_, e) =>
         {
             e.Handled = true;
-            _launcher.Toggle();
+            _launcher.Toggle(Monitor);
         };
         root.Children.Add(start);
 
@@ -126,8 +175,15 @@ public sealed class BarWindow : Window
         quick.Children.Add(_network);
         quick.Children.Add(_battery);
         var quickButton = Button(quick, double.NaN);
-        quickButton.ToolTip = "Impostazioni rapide";
-        quickButton.MouseLeftButtonUp += (_, e) => Press(e, VkLeftWin, VkA);
+        quickButton.ToolTip = "Pannello rapido";
+        quickButton.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            if (QuickPanelRequested is null)
+                WindowNative.PressKeys(VkLeftWin, VkA);
+            else
+                QuickPanelRequested(this);
+        };
 
         var clock = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 12, 0) };
         _date.Margin = new Thickness(0, 4, 0, 0);
@@ -184,15 +240,76 @@ public sealed class BarWindow : Window
     {
         _apps.Children.Clear();
         _indicators.Clear();
-        foreach (var group in _tracker.Groups)
+        foreach (var group in VisibleGroups())
             _apps.Children.Add(AppButton(group));
         UpdateIndicators();
+        RefreshPreview();
+    }
+
+    private void SetupPreview()
+    {
+        _previewOpen.Tick += (_, _) =>
+        {
+            _previewOpen.Stop();
+            ShowPreview();
+        };
+        _previewHide.Tick += (_, _) => HidePreview();
+        // Il mouse passa dall'icona al pannello: il pannello resta aperto finché ci si sta sopra.
+        _preview.MouseEnter += (_, _) => _previewHide.Stop();
+        _preview.MouseLeave += (_, _) => _previewHide.Start();
+        _preview.ActivateRequested += hwnd =>
+        {
+            HidePreview();
+            WindowTracker.Execute(new ClickAction(ClickKind.Activate, hwnd));
+        };
+        _preview.CloseRequested += WindowTracker.Close; // il pannello si aggiorna quando la finestra sparisce
+    }
+
+    /// <summary>Mouse su un'icona: anteprime dopo una breve pausa, subito se un pannello è già aperto.</summary>
+    private void OnAppHover(string appKey, FrameworkElement button)
+    {
+        _previewHide.Stop();
+        _previewTarget = (appKey, AnchorX(button));
+        if (_preview.AppKey is not null)
+            ShowPreview();
+        else
+            _previewOpen.Start();
+    }
+
+    private void OnAppLeave()
+    {
+        _previewOpen.Stop();
+        _previewHide.Start();
+    }
+
+    private void ShowPreview()
+    {
+        if (_previewTarget is not var (appKey, anchorX) || CurrentGroup(appKey) is not { IsRunning: true } group || _jumpList.IsVisible)
+        {
+            HidePreview();
+            return;
+        }
+        _preview.Open(group, IconOf(group), _tracker.Foreground, anchorX, Monitor);
+    }
+
+    /// <summary>Finestre aperte o chiuse, titoli cambiati: il pannello aperto si aggiorna.</summary>
+    private void RefreshPreview()
+    {
+        if (_preview.AppKey is not null)
+            ShowPreview();
+    }
+
+    private void HidePreview()
+    {
+        _previewOpen.Stop();
+        _previewHide.Stop();
+        _previewTarget = null;
+        _preview.Dismiss();
     }
 
     private Border AppButton(AppGroup group)
     {
-        var first = group.Windows[0];
-        UIElement glyph = _icons.Get(group.AppKey, first.Handle, _tracker.ExePathOf(first.Handle)) is { } icon
+        UIElement glyph = IconOf(group) is { } icon
             ? new Image { Source = icon, Width = 24, Height = 24 }
             : new DotMatrixView { Pitch = 3, Dots = DotText.Render(Initial(group.Title)) };
         RenderOptions.SetBitmapScalingMode(glyph, BitmapScalingMode.HighQuality);
@@ -210,6 +327,7 @@ public sealed class BarWindow : Window
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(0, 0, 0, 3),
+            Visibility = group.IsRunning ? Visibility.Visible : Visibility.Hidden, // appuntata ma chiusa: nessun punto
         };
         _indicators[group.AppKey] = indicator;
 
@@ -221,41 +339,119 @@ public sealed class BarWindow : Window
         content.HorizontalAlignment = HorizontalAlignment.Stretch; // l'indicatore sta sul fondo del pulsante
         content.VerticalAlignment = VerticalAlignment.Stretch;
         button.Margin = new Thickness(2, 0, 2, 0);
-        button.ToolTip = group.Windows.Count == 1 ? group.Title : $"{group.Title} (+{group.Windows.Count - 1})";
+        // App aperta: al posto del suggerimento ci sono le anteprime delle finestre, come in Windows.
+        if (!group.IsRunning)
+            button.ToolTip = group.Title;
+        button.MouseEnter += (_, _) => OnAppHover(group.AppKey, button);
+        button.MouseLeave += (_, _) => OnAppLeave();
         button.MouseLeftButtonUp += (_, e) =>
         {
             e.Handled = true;
+            HidePreview();
             // Il gruppo va riletto: il riferimento catturato può essere vecchio
-            if (_tracker.Groups.FirstOrDefault(g => g.AppKey == group.AppKey) is { } current)
-                WindowTracker.Execute(TaskbarModel.Click(current, _tracker.Foreground));
+            if (CurrentGroup(group.AppKey) is not { } current)
+                return;
+            var action = TaskbarModel.Click(current, _tracker.Foreground);
+            if (action.Kind == ClickKind.Launch)
+                LaunchApp(current);
+            else
+                WindowTracker.Execute(action);
         };
-        button.ContextMenu = AppContextMenu(group.AppKey);
+        // Gestito qui: il menu della barra (spazio vuoto) non deve aprirsi sopra l'elenco dei recenti.
+        button.MouseRightButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            HidePreview();
+            if (CurrentGroup(group.AppKey) is { } current)
+                _jumpList.Open(JumpListFor(current), AnchorX(button), Monitor);
+        };
         return button;
     }
 
-    private ContextMenu AppContextMenu(string appKey)
+    private AppGroup? CurrentGroup(string appKey) => VisibleGroups().FirstOrDefault(g => g.AppKey == appKey);
+
+    private JumpListModel JumpListFor(AppGroup group)
     {
-        var close = new MenuItem { Header = "Chiudi finestra" };
-        close.Click += (_, _) =>
-        {
-            if (_tracker.Groups.FirstOrDefault(g => g.AppKey == appKey) is not { } group)
-                return;
-            foreach (var w in group.Windows)
-                WindowTracker.Close(w.Handle);
-        };
-        var menu = new ContextMenu();
-        menu.Opened += (_, _) =>
-        {
-            var count = _tracker.Groups.FirstOrDefault(g => g.AppKey == appKey)?.Windows.Count ?? 0;
-            close.Header = count > 1 ? $"Chiudi {count} finestre" : "Chiudi finestra";
-        };
-        menu.Items.Add(close);
-        return menu;
+        var appId = _tracker.AppIdOf(group);
+        var exe = _tracker.ExePathOf(group);
+        var appIcon = IconOf(group);
+        var (items, frequent) = appId is null ? ((IReadOnlyList<JumpItem>)[], false) : ShellNative.ReadJumpList(appId);
+        return new JumpListModel(
+            AppName(group, appId, exe),
+            appIcon,
+            frequent,
+            JumpLists.Clean(items),
+            group.Windows.Count,
+            item => item.IsLink ? appIcon : _icons.ForFile(item.Path),
+            item => Run(JumpLists.Open(item, exe)),
+            () => LaunchApp(group),
+            () =>
+            {
+                foreach (var w in CurrentGroup(group.AppKey)?.Windows ?? [])
+                    WindowTracker.Close(w.Handle);
+            });
     }
+
+    /// <summary>
+    /// Icona dell'app: quella del collegamento appuntato (come la mostra Windows), poi quella della finestra
+    /// o dell'eseguibile, infine quella dello Start (app UWP non appuntate).
+    /// </summary>
+    private ImageSource? IconOf(AppGroup group)
+    {
+        if (group.Pin is { } pin && _shellIcons.GetForPath(pin.LaunchPath) is { } pinned)
+            return pinned;
+        if (group.Windows.Count > 0 &&
+            _icons.Get(group.AppKey, group.Windows[0].Handle, _tracker.ExePathOf(group.Windows[0].Handle)) is { } own)
+            return own;
+        return _tracker.AppIdOf(group) is { } appId ? _shellIcons.Get(appId) : null;
+    }
+
+    private string AppName(AppGroup group, string? appId, string? exe)
+    {
+        if (group.Pin is { } pin)
+            return pin.Name;
+        if (appId is not null && _catalog.Apps.FirstOrDefault(a => a.Id.Equals(appId, StringComparison.OrdinalIgnoreCase)) is { } app)
+            return app.Name;
+        if (exe is not null && FileVersionInfo.GetVersionInfo(exe).FileDescription is { Length: > 0 } description)
+            return description;
+        return exe is not null ? System.IO.Path.GetFileNameWithoutExtension(exe) : group.Title;
+    }
+
+    /// <summary>Nuova istanza dell'app: dal collegamento appuntato, dallo Start o dall'eseguibile.</summary>
+    private void LaunchApp(AppGroup group)
+    {
+        var appId = _tracker.AppIdOf(group);
+        if (group.Pin is { } pin)
+            Run(pin.LaunchPath.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)
+                ? new LaunchCommand("explorer.exe", pin.LaunchPath)
+                : new LaunchCommand(pin.LaunchPath, null));
+        else if (appId is not null && _catalog.Apps.FirstOrDefault(a => a.Id.Equals(appId, StringComparison.OrdinalIgnoreCase)) is { } app)
+            Run(new LaunchCommand("explorer.exe", $"shell:AppsFolder\\{app.Id}"));
+        else if (_tracker.ExePathOf(group) is { } exe)
+            Run(new LaunchCommand(exe, null));
+    }
+
+    private static void Run(LaunchCommand command)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(command.FileName, command.Arguments ?? string.Empty) { UseShellExecute = true })?.Dispose();
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            // file spostato o app disinstallata: come in Windows, l'elemento semplicemente non si apre
+        }
+    }
+
+    /// <summary>Centro orizzontale del pulsante in pixel fisici, per allinearvi l'elenco dei recenti.</summary>
+    private static double AnchorX(FrameworkElement button) =>
+        button.PointToScreen(new Point(button.ActualWidth / 2, 0)).X;
+
+    private void OnForegroundChanged(nint foreground) => UpdateIndicators();
 
     private void UpdateIndicators()
     {
-        var active = _tracker.Groups.FirstOrDefault(g => g.Contains(_tracker.Foreground))?.AppKey;
+        var active = VisibleGroups().FirstOrDefault(g => g.Contains(_tracker.Foreground))?.AppKey;
         foreach (var (key, dot) in _indicators)
         {
             var isActive = key == active;
@@ -264,15 +460,16 @@ public sealed class BarWindow : Window
         }
     }
 
-    private void PositionOnPrimaryScreen()
+    /// <summary>App di questa barra secondo l'impostazione multi-monitor di Windows.</summary>
+    private IReadOnlyList<AppGroup> VisibleGroups() =>
+        MultiMonitorBar.GroupsFor(_tracker.Groups, Monitor.Handle, Monitor.IsPrimary, _mode);
+
+    /// <summary>Nella fascia riservata alla taskbar del suo monitor, in pixel fisici (vale anche con DPI diversi).</summary>
+    private void Place()
     {
-        var screenHeight = SystemParameters.PrimaryScreenHeight;
-        var reserved = screenHeight - SystemParameters.WorkArea.Bottom;
-        var height = reserved >= MinReservedHeight ? reserved : FallbackHeight;
-        Left = 0;
-        Top = screenHeight - height;
-        Width = SystemParameters.PrimaryScreenWidth;
-        Height = height;
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd != 0)
+            WindowNative.Place(hwnd, MultiMonitorBar.Place(Monitor));
     }
 
     private static void Press(MouseButtonEventArgs e, params byte[] keys)

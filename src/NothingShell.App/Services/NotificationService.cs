@@ -14,10 +14,12 @@ namespace NothingShell.App.Services;
 public sealed class NotificationService : IDisposable
 {
     public const int RecentCapacity = 10;
+    private const int RecentAppsCapacity = 8;
 
     private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
     private readonly List<MailItem> _recent = [];
+    private readonly List<string> _apps = [];
     private HashSet<uint> _seen = [];
     private UserNotificationListener? _listener;
     private bool _primed;
@@ -35,6 +37,9 @@ public sealed class NotificationService : IDisposable
     public UserNotificationListenerAccessStatus Access { get; private set; } = UserNotificationListenerAccessStatus.Unspecified;
 
     public IReadOnlyList<MailItem> Recent => _recent;
+
+    /// <summary>App che hanno mandato notifiche da quando la shell è avviata, la più recente per prima.</summary>
+    public IReadOnlyList<string> NotifyingApps => _apps;
 
     /// <summary>Mail nuova arrivata dopo l'avvio (quelle già presenti non generano avvisi).</summary>
     public event Action<MailItem>? MailArrived;
@@ -106,12 +111,14 @@ public sealed class NotificationService : IDisposable
                 current.Add(n.Id);
                 if (_seen.Contains(n.Id))
                     continue;
-                var (app, texts) = Read(n);
+                var (app, appId, texts) = Read(n);
+                RememberApp(app);
                 if (!MailDetector.IsMail(app, texts, ExtraMailApps()))
                     continue;
                 if (MailDetector.Extract(app, texts, n.CreationTime) is not { } mail)
                     continue;
 
+                mail = mail with { AppId = appId }; // per aprire l'app dal notch
                 _recent.Insert(0, mail);
                 if (_recent.Count > RecentCapacity)
                     _recent.RemoveAt(_recent.Count - 1);
@@ -135,11 +142,24 @@ public sealed class NotificationService : IDisposable
         }
     }
 
-    private static (string App, IReadOnlyList<string> Texts) Read(UserNotification notification)
+    /// <summary>Solo il nome dell'app, mai il contenuto: serve alle impostazioni per scegliere le app di posta.</summary>
+    private void RememberApp(string app)
+    {
+        if (string.IsNullOrWhiteSpace(app))
+            return;
+        _apps.RemoveAll(a => a.Equals(app, StringComparison.OrdinalIgnoreCase));
+        _apps.Insert(0, app);
+        if (_apps.Count > RecentAppsCapacity)
+            _apps.RemoveAt(_apps.Count - 1);
+    }
+
+    private static (string App, string? AppId, IReadOnlyList<string> Texts) Read(UserNotification notification)
     {
         string app;
+        string? appId = null;
         try
         {
+            appId = notification.AppInfo.AppUserModelId;
             app = notification.AppInfo.DisplayInfo.DisplayName;
         }
         catch (Exception ex) when (ex is COMException or ArgumentException)
@@ -150,6 +170,6 @@ public sealed class NotificationService : IDisposable
         var visual = notification.Notification.Visual;
         var binding = visual?.GetBinding(KnownNotificationBindings.ToastGeneric) ?? visual?.Bindings.FirstOrDefault();
         var texts = binding?.GetTextElements().Select(t => t.Text ?? string.Empty).ToArray() ?? [];
-        return (app, texts);
+        return (app, appId, texts);
     }
 }

@@ -3,8 +3,11 @@ using System.Text;
 
 namespace NothingShell.Core.Launcher;
 
-/// <summary>App del catalogo: <see cref="Id"/> è il parsing name in shell:AppsFolder.</summary>
-public sealed record AppEntry(string Id, string Name);
+/// <summary>
+/// App del catalogo: <see cref="Id"/> è il parsing name in shell:AppsFolder (l'AppUserModelID);
+/// <see cref="TargetPath"/> è l'eseguibile del collegamento, se l'app ne ha uno.
+/// </summary>
+public sealed record AppEntry(string Id, string Name, string? TargetPath = null);
 
 public sealed record AppSection(char Letter, IReadOnlyList<AppEntry> Apps);
 

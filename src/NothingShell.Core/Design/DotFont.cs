@@ -152,4 +152,44 @@ public static class DotIcons
 
     public static readonly DotGlyph Ethernet = new(
         "..###..", "..#.#..", "#######", "#.....#", "#.#.#.#", "#######");
+
+    public static readonly DotGlyph Close = new(
+        "#.....#", ".#...#.", "..#.#..", "...#...", "..#.#..", ".#...#.", "#.....#");
+
+    public static readonly DotGlyph Microphone = new(
+        "..###..", "..###..", "#.###.#", "#.###.#", ".#...#.", "..###..", "...#...");
+
+    public static readonly DotGlyph Camera = new(
+        "######..#", "######.##", "#########", "######.##", "######..#");
+
+    public static readonly DotGlyph Speaker = new(
+        "...#....", "..##..#.", "####...#", "####.#.#", "####...#", "..##..#.", "...#....");
+
+    public static readonly DotGlyph SpeakerMuted = new(
+        "...#....", "..##....", "####.#.#", "####..#.", "####.#.#", "..##....", "...#....");
+
+    public static readonly DotGlyph Sun = new(
+        "#..#..#", ".#...#.", "..###..", "#.###.#", "..###..", ".#...#.", "#..#..#");
+
+    public static readonly DotGlyph Download = new(
+        "..#..", "..#..", "..#..", "#.#.#", ".###.", "..#..", "#####");
+
+    public static readonly DotGlyph Headphones = new(
+        ".#####.", "#.....#", "#.....#", "#.....#", "##...##", "##...##", "##...##");
+
+    public static readonly DotGlyph Screenshot = new(
+        "##...##", "#.....#", "..###..", "..###..", "..###..", "#.....#", "##...##");
+
+    public static readonly DotGlyph Bluetooth = new(
+        "..#..", "..##.", "#.#.#", ".###.", "#.#.#", "..##.", "..#..");
+
+    public static readonly DotGlyph Calendar = new(
+        ".#...#.", "#######", "#.....#", "#.#.#.#", "#.....#", "#.#.#.#", "#######");
+
+    /// <summary>Schermo: Proietta (Win+P).</summary>
+    public static readonly DotGlyph Display = new(
+        "#######", "#.....#", "#.....#", "#.....#", "#######", "...#...", "..###..");
+
+    public static readonly DotGlyph Gear = new(
+        "..#.#..", ".#####.", "##...##", ".#...#.", "##...##", ".#####.", "..#.#..");
 }

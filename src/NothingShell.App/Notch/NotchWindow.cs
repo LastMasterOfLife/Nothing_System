@@ -9,6 +9,7 @@ using System.Windows.Shapes;
 using System.Windows.Threading;
 using NothingShell.App.Interop;
 using NothingShell.App.Rendering;
+using NothingShell.App.Services;
 using NothingShell.Core.Animation;
 using NothingShell.Core.Design;
 using NothingShell.Core.DotMatrix;
@@ -27,6 +28,10 @@ public sealed class NotchWindow : Window
 {
     private const int WmMouseHWheel = 0x020E;
     private const double AlertTextPitch = 2.5;
+    private const double LevelPitch = 5;
+    private static readonly TimeSpan LevelDuration = TimeSpan.FromSeconds(1.5);
+    private static readonly TimeSpan NoticeDuration = TimeSpan.FromSeconds(4);
+    private static readonly int LevelColumns = (int)((NotchLayout.For(NotchState.Alert).Width - 56 - 100) / LevelPitch);
     private static readonly Duration Fade = new(TimeSpan.FromMilliseconds(120));
     private static readonly Duration Slide = new(TimeSpan.FromMilliseconds(150));
     private static readonly int AlertViewportColumns =
@@ -43,16 +48,27 @@ public sealed class NotchWindow : Window
 
     private readonly Border _pill = new() { Background = Theme.BlackBrush, ClipToBounds = true };
 
-    // Compatto: [punto rosso]  HH:MM o timer  [equalizzatore]
+    // Compatto: [punto rosso | microfono e webcam]  HH:MM o timer  [equalizzatore | download]
     private readonly Grid _compact = new() { VerticalAlignment = VerticalAlignment.Top };
     private readonly DotMatrixView _compactClock = new() { Pitch = 3 };
     private readonly Ellipse _liveDot = new() { Width = 8, Height = 8, Fill = Theme.RedBrush };
     private readonly DotMatrixView _equalizerView = new() { Pitch = 3 };
+    private readonly StackPanel _privacyIcons = new() { Orientation = Orientation.Horizontal };
+    private readonly DotMatrixView _micIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Microphone), DotColor = Theme.Red };
+    private readonly DotMatrixView _camIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Camera), DotColor = Theme.Red };
+    private readonly StackPanel _downloadView = new() { Orientation = Orientation.Horizontal };
+    private readonly DotMatrixView _downloadIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Download) };
+    private readonly DotMatrixView _downloadText = new() { Pitch = 2 };
 
-    // Avviso: [busta] oggetto che scorre
+    // Avviso: [icona] testo che scorre, oppure [icona] livello a punti e valore (volume, luminosità)
     private readonly Grid _alert = new() { VerticalAlignment = VerticalAlignment.Top, Opacity = 0 };
     private readonly DotMatrixView _alertIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Mail), DotColor = Theme.Red };
     private readonly DotMatrixView _alertText = new() { Pitch = AlertTextPitch };
+    private readonly DotMatrixView _alertLevel = new() { Pitch = LevelPitch, OffColor = Theme.DotOff };
+    private readonly DotMatrixView _alertValue = new() { Pitch = AlertTextPitch };
+
+    // Scheda: contenuto con pulsanti (screenshot, download completato)
+    private readonly Border _card = new() { VerticalAlignment = VerticalAlignment.Top, Opacity = 0, IsHitTestVisible = false };
 
     // Espanso: pagine + indicatori
     private readonly Grid _expanded = new() { VerticalAlignment = VerticalAlignment.Top, Opacity = 0 };
@@ -60,6 +76,7 @@ public sealed class NotchWindow : Window
     private readonly StackPanel _indicators = new() { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly Dictionary<NotchPage, NotchPageView> _pages = [];
     private readonly HomePage _home;
+    private readonly AgendaPage _agenda;
     private readonly MailPage _mail = new();
     private readonly TimerPage _timerPage;
     private readonly SystemPage _system = new();
@@ -70,6 +87,8 @@ public sealed class NotchWindow : Window
     private readonly DispatcherTimer _countdownTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
 
     private MediaSnapshot? _media;
+    private PrivacyState _privacy = PrivacyState.None;
+    private IReadOnlyList<ActiveDownload> _downloads = [];
     private DateTime _now = DateTime.Now;
     private string _alertMessage = string.Empty;
     private NotchPage? _alertPage;
@@ -81,7 +100,9 @@ public sealed class NotchWindow : Window
     {
         ArgumentNullException.ThrowIfNull(media);
         _home = new HomePage(media);
+        _agenda = new AgendaPage(e => AppointmentOpened?.Invoke(e));
         _timerPage = new TimerPage(StartTimer, StopTimer);
+        _mail.Opened += mail => MailOpened?.Invoke(mail);
 
         var idle = NotchLayout.For(NotchState.Idle);
         _width = new Spring(idle.Width);
@@ -125,6 +146,12 @@ public sealed class NotchWindow : Window
 
     public event Action? SettingsRequested;
 
+    /// <summary>Clic su una mail della pagina Posta.</summary>
+    public event Action<MailItem>? MailOpened;
+
+    /// <summary>Clic su un appuntamento della pagina Agenda.</summary>
+    public event Action<CalendarEvent>? AppointmentOpened;
+
     public void SetTime(DateTime now)
     {
         _now = now;
@@ -136,10 +163,90 @@ public sealed class NotchWindow : Window
     public void ShowMailAlert(MailItem mail)
     {
         ArgumentNullException.ThrowIfNull(mail);
-        ShowAlert(mail.Subject, isMail: true, NotchPage.Mail);
+        ShowBanner(mail.Subject, DotIcons.Mail, Theme.Red, Theme.White, NotchPage.Mail, duration: null);
+    }
+
+    /// <summary>Volume o luminosità: icona, barra a punti e valore per 1,5 s; ogni tasto rinnova la durata.</summary>
+    public void ShowLevel(DotGlyph icon, double level, bool muted)
+    {
+        ArgumentNullException.ThrowIfNull(icon);
+        _alertMessage = string.Empty;
+        _alertPage = null;
+        SetAlertIcon(icon, muted ? Theme.Red : Theme.White);
+        _alertText.Visibility = Visibility.Collapsed;
+        _alertLevel.Visibility = Visibility.Visible;
+        _alertValue.Visibility = Visibility.Visible;
+        _alertLevel.Dots = DotBar.Render(muted ? 0 : level, LevelColumns);
+        _alertValue.Dots = DotText.Render(muted ? "MUTO" : $"{Math.Round(level * 100):0}");
+        _alertValue.DotColor = muted ? Theme.Red : Theme.White;
+        RaiseAlert(LevelDuration);
+    }
+
+    /// <summary>Avviso breve con icona (cuffie collegate…).</summary>
+    public void ShowNotice(DotGlyph icon, Color iconColor, string text)
+    {
+        ArgumentNullException.ThrowIfNull(icon);
+        ShowBanner(text, icon, iconColor, Theme.White, page: null, NoticeDuration);
+    }
+
+    /// <summary>Scheda con contenuto e pulsanti; col mouse sopra resta aperta.</summary>
+    public void ShowCard(UIElement content, TimeSpan duration)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        _card.Child = content;
+        Apply(_machine.OnCard(_clock.Elapsed, duration) || _machine.State == NotchState.Card);
+        ScheduleDeadline();
+    }
+
+    public void DismissCard()
+    {
+        Apply(_machine.DismissCard());
+        ScheduleDeadline();
+    }
+
+    /// <summary>Microfono e webcam in uso: icone rosse a sinistra nella pillola, dettaglio nella pagina Sistema.</summary>
+    public void SetPrivacy(PrivacyState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        _privacy = state;
+        _micIcon.Visibility = state.Microphone.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _camIcon.Visibility = state.Camera.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _camIcon.Margin = new Thickness(state.Microphone.Count > 0 ? 6 : 0, 0, 0, 0);
+        _system.SetActivities(state, _downloads);
+        OnActivitiesChanged();
+    }
+
+    /// <summary>Download in corso: freccia e dimensione a destra nella pillola.</summary>
+    public void SetDownloads(IReadOnlyList<ActiveDownload> downloads)
+    {
+        ArgumentNullException.ThrowIfNull(downloads);
+        _downloads = downloads;
+        if (downloads.Count > 0)
+            _downloadText.Dots = DotText.Render(DownloadTracker.FormatShort(downloads.Sum(d => d.Bytes)));
+        _system.SetActivities(_privacy, downloads);
+        OnActivitiesChanged();
     }
 
     public void SetMail(IReadOnlyList<MailItem> mails, string emptyMessage) => _mail.Update(mails, emptyMessage);
+
+    /// <summary>Appuntamenti: pagina Agenda e, sotto l'ora della Home, il prossimo.</summary>
+    public void SetAgenda(IReadOnlyList<CalendarEvent> events, DateTimeOffset now, string emptyMessage)
+    {
+        ArgumentNullException.ThrowIfNull(events);
+        _agenda.Update(events, now, emptyMessage);
+        _home.SetNext(Agenda.Next(events, now), now);
+    }
+
+    /// <summary>Apre il notch su una pagina (pulsanti delle schede): si richiude quando il mouse esce.</summary>
+    public void OpenPage(NotchPage page)
+    {
+        var changed = _machine.DismissCard();
+        changed |= _machine.OnPointerEnter();
+        ShowPage(page, animate: false);
+        Apply(changed);
+        if (!_pill.IsMouseOver)
+            OnPointerLeave();
+    }
 
     public void SetSystem(SystemStats stats) => _system.Update(stats);
 
@@ -158,6 +265,7 @@ public sealed class NotchWindow : Window
                      (_compact, state is NotchState.Idle or NotchState.Activity),
                      (_alert, state == NotchState.Alert),
                      (_expanded, state == NotchState.Expanded),
+                     (_card, state == NotchState.Card),
                  })
         {
             layer.BeginAnimation(OpacityProperty, null);
@@ -176,7 +284,7 @@ public sealed class NotchWindow : Window
         Apply(_machine.OnActivityChanged(HasActivity));
     }
 
-    private bool HasActivity => _countdown.IsRunning || _media?.IsPlaying == true;
+    private bool HasActivity => _countdown.IsRunning || _media?.IsPlaying == true || _privacy.Any || _downloads.Count > 0;
 
     private Grid BuildVisualTree()
     {
@@ -189,9 +297,26 @@ public sealed class NotchWindow : Window
         _equalizerView.HorizontalAlignment = HorizontalAlignment.Right;
         _equalizerView.VerticalAlignment = VerticalAlignment.Center;
         _equalizerView.Margin = new Thickness(0, 0, 18, 0);
+        _privacyIcons.HorizontalAlignment = HorizontalAlignment.Left;
+        _privacyIcons.VerticalAlignment = VerticalAlignment.Center;
+        _privacyIcons.Margin = new Thickness(18, 0, 0, 0);
+        _micIcon.VerticalAlignment = VerticalAlignment.Center;
+        _camIcon.VerticalAlignment = VerticalAlignment.Center;
+        _privacyIcons.Children.Add(_micIcon);
+        _privacyIcons.Children.Add(_camIcon);
+        _downloadView.HorizontalAlignment = HorizontalAlignment.Right;
+        _downloadView.VerticalAlignment = VerticalAlignment.Center;
+        _downloadView.Margin = new Thickness(0, 0, 18, 0);
+        _downloadIcon.VerticalAlignment = VerticalAlignment.Center;
+        _downloadText.VerticalAlignment = VerticalAlignment.Center;
+        _downloadText.Margin = new Thickness(6, 0, 0, 0);
+        _downloadView.Children.Add(_downloadIcon);
+        _downloadView.Children.Add(_downloadText);
         _compact.Children.Add(_compactClock);
         _compact.Children.Add(_liveDot);
         _compact.Children.Add(_equalizerView);
+        _compact.Children.Add(_privacyIcons);
+        _compact.Children.Add(_downloadView);
         SetActivityVisible(false);
 
         var alertSize = NotchLayout.For(NotchState.Alert);
@@ -204,10 +329,24 @@ public sealed class NotchWindow : Window
         _alertText.HorizontalAlignment = HorizontalAlignment.Left;
         _alertText.VerticalAlignment = VerticalAlignment.Center;
         _alertText.Margin = new Thickness(60, 0, 20, 0);
+        _alertLevel.HorizontalAlignment = HorizontalAlignment.Left;
+        _alertLevel.VerticalAlignment = VerticalAlignment.Center;
+        _alertLevel.Margin = new Thickness(56, 0, 0, 0);
+        _alertValue.HorizontalAlignment = HorizontalAlignment.Right;
+        _alertValue.VerticalAlignment = VerticalAlignment.Center;
+        _alertValue.Margin = new Thickness(0, 0, 22, 0);
         _alert.Children.Add(_alertIcon);
         _alert.Children.Add(_alertText);
+        _alert.Children.Add(_alertLevel);
+        _alert.Children.Add(_alertValue);
 
-        foreach (var page in new NotchPageView[] { _home, _mail, _timerPage, _system })
+        var cardSize = NotchLayout.For(NotchState.Card);
+        _card.Width = cardSize.Width;
+        _card.Height = cardSize.Height;
+        _card.HorizontalAlignment = HorizontalAlignment.Center;
+        _card.Padding = new Thickness(NotchUi.Padding, 14, NotchUi.Padding, 14);
+
+        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _timerPage, _system })
         {
             _pages[page.Page] = page;
             page.Visibility = Visibility.Collapsed;
@@ -233,6 +372,7 @@ public sealed class NotchWindow : Window
         content.Children.Add(_compact);
         content.Children.Add(_alert);
         content.Children.Add(_expanded);
+        content.Children.Add(_card);
         _pill.Child = content;
         _pill.HorizontalAlignment = HorizontalAlignment.Center;
         _pill.VerticalAlignment = VerticalAlignment.Top;
@@ -354,13 +494,20 @@ public sealed class NotchWindow : Window
         _deadlineTimer.Start();
     }
 
-    private void ShowAlert(string message, bool isMail, NotchPage? page)
+    /// <summary>Avviso con testo che scorre: icona facoltativa a sinistra, durata standard se non indicata.</summary>
+    private void ShowBanner(string message, DotGlyph? icon, Color iconColor, Color textColor, NotchPage? page, TimeSpan? duration)
     {
         _alertMessage = message.Length > 0 ? message : "(senza oggetto)";
         _alertPage = page;
-        _alertIcon.Visibility = isMail ? Visibility.Visible : Visibility.Collapsed;
-        _alertText.Margin = new Thickness(isMail ? 60 : 20, 0, 20, 0);
-        _alertText.DotColor = isMail ? Theme.White : Theme.Red;
+        if (icon is not null)
+            SetAlertIcon(icon, iconColor);
+        else
+            _alertIcon.Visibility = Visibility.Collapsed;
+        _alertText.Visibility = Visibility.Visible;
+        _alertLevel.Visibility = Visibility.Collapsed;
+        _alertValue.Visibility = Visibility.Collapsed;
+        _alertText.Margin = new Thickness(icon is null ? 20 : 20 + (icon.Width * _alertIcon.Pitch) + 16, 0, 20, 0);
+        _alertText.DotColor = textColor;
         _alertOffset = 0;
         RenderAlertText(0);
         if (_machine.State == NotchState.Expanded)
@@ -369,10 +516,28 @@ public sealed class NotchWindow : Window
                 ShowPage(p, animate: true);
             return;
         }
-        // un secondo avviso durante il primo: lo sostituisce e ne rinnova la durata
-        var changed = _machine.OnAlert(_clock.Elapsed);
+        RaiseAlert(duration);
+    }
+
+    private void SetAlertIcon(DotGlyph icon, Color color)
+    {
+        _alertIcon.Dots = DotGrid.From(icon);
+        _alertIcon.DotColor = color;
+        _alertIcon.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Un secondo avviso durante il primo lo sostituisce e ne rinnova la durata.</summary>
+    private void RaiseAlert(TimeSpan? duration)
+    {
+        var changed = _machine.OnAlert(_clock.Elapsed, duration);
         Apply(changed || _machine.State == NotchState.Alert);
         ScheduleDeadline();
+    }
+
+    private void OnActivitiesChanged()
+    {
+        Apply(_machine.OnActivityChanged(HasActivity));
+        SetActivityVisible(_machine.State == NotchState.Activity);
     }
 
     private void RenderAlertText(int offset)
@@ -404,7 +569,7 @@ public sealed class NotchWindow : Window
         {
             _countdownTimer.Stop();
             Apply(_machine.OnActivityChanged(HasActivity));
-            ShowAlert("TEMPO SCADUTO", isMail: false, NotchPage.Timer);
+            ShowBanner("TEMPO SCADUTO", icon: null, Theme.Red, Theme.Red, NotchPage.Timer, duration: null);
         }
         _timerPage.Update(_countdown.IsRunning, _countdown.Remaining(now));
         UpdateCompactClock();
@@ -433,10 +598,13 @@ public sealed class NotchWindow : Window
 
         var expanded = state == NotchState.Expanded;
         var alert = state == NotchState.Alert;
+        var card = state == NotchState.Card;
         FadeTo(_expanded, expanded ? 1 : 0);
         FadeTo(_alert, alert ? 1 : 0);
-        FadeTo(_compact, expanded || alert ? 0 : 1);
+        FadeTo(_card, card ? 1 : 0);
+        FadeTo(_compact, expanded || alert || card ? 0 : 1);
         _expanded.IsHitTestVisible = expanded;
+        _card.IsHitTestVisible = card;
         SetActivityVisible(state == NotchState.Activity);
 
         if (alert && DotText.NeedsMarquee(_alertMessage, AlertViewportColumns))
@@ -451,17 +619,25 @@ public sealed class NotchWindow : Window
             page.OnHidden();
     }
 
+    /// <summary>
+    /// A sinistra microfono e webcam in uso (hanno la precedenza sul punto rosso), a destra il download in corso
+    /// (ha la precedenza sull'equalizzatore della musica).
+    /// </summary>
     private void SetActivityVisible(bool visible)
     {
-        _liveDot.Visibility = visible ? Visibility.Visible : Visibility.Hidden;
-        var music = visible && _media?.IsPlaying == true;
+        var privacy = visible && _privacy.Any;
+        _privacyIcons.Visibility = privacy ? Visibility.Visible : Visibility.Hidden;
+        _liveDot.Visibility = visible && !privacy ? Visibility.Visible : Visibility.Hidden;
+        var downloading = visible && _downloads.Count > 0;
+        _downloadView.Visibility = downloading ? Visibility.Visible : Visibility.Hidden;
+        var music = visible && !downloading && _media?.IsPlaying == true;
         _equalizerView.Visibility = music ? Visibility.Visible : Visibility.Hidden;
         if (music)
             _equalizerTimer.Start();
         else
             _equalizerTimer.Stop();
 
-        if (visible)
+        if (visible && !privacy)
         {
             var pulse = new DoubleAnimation(1, 0.25, new Duration(TimeSpan.FromMilliseconds(900)))
             {

@@ -9,7 +9,10 @@ using NothingShell.Core.Notch;
 
 namespace NothingShell.App.Notch;
 
-/// <summary>Pagina Home: musica in corso (titolo che scorre, controlli) oppure ora grande e data.</summary>
+/// <summary>
+/// Pagina Home: musica in corso (titolo che scorre, controlli) oppure ora grande, data e prossimo appuntamento
+/// (docs/11-agenda-pannello-rapido.md).
+/// </summary>
 public sealed class HomePage : NotchPageView
 {
     private const double TitlePitch = 3;
@@ -26,6 +29,7 @@ public sealed class HomePage : NotchPageView
     private readonly StackPanel _idlePanel = new() { HorizontalAlignment = HorizontalAlignment.Center };
     private readonly DotMatrixView _bigClock = new() { Pitch = 6, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly DotMatrixView _date = new() { Pitch = 2, DotColor = Theme.Grey, HorizontalAlignment = HorizontalAlignment.Center };
+    private readonly TextBlock _next = NotchUi.Text(12, Theme.GreyBrush);
 
     private readonly DispatcherTimer _marqueeTimer = new() { Interval = TimeSpan.FromMilliseconds(45) };
     private MediaSnapshot? _snapshot;
@@ -60,8 +64,13 @@ public sealed class HomePage : NotchPageView
 
         _idlePanel.Margin = new Thickness(0, 22, 0, 0);
         _date.Margin = new Thickness(0, 14, 0, 0);
+        _next.HorizontalAlignment = HorizontalAlignment.Center;
+        _next.MaxWidth = NotchUi.PageWidth;
+        _next.Margin = new Thickness(0, 12, 0, 0);
+        _next.Visibility = Visibility.Collapsed;
         _idlePanel.Children.Add(_bigClock);
         _idlePanel.Children.Add(_date);
+        _idlePanel.Children.Add(_next);
 
         Children.Add(_mediaPanel);
         Children.Add(_idlePanel);
@@ -77,6 +86,20 @@ public sealed class HomePage : NotchPageView
         _headerClock.Dots = DotText.Render(hhmm);
         _bigClock.Dots = DotText.Render(hhmm);
         _date.Dots = DotText.Render(now.ToString("dddd d MMMM", NotchUi.Italian));
+    }
+
+    /// <summary>Sotto la data: "14:30 Riunione · tra 25 min", in rosso quando manca poco o è in corso.</summary>
+    public void SetNext(CalendarEvent? next, DateTimeOffset now)
+    {
+        _next.Visibility = next is null ? Visibility.Collapsed : Visibility.Visible;
+        if (next is null)
+        {
+            _idlePanel.Margin = new Thickness(0, 22, 0, 0);
+            return;
+        }
+        _idlePanel.Margin = new Thickness(0, 10, 0, 0);
+        _next.Text = $"{Agenda.When(next, now)}  {next.Title} · {Agenda.Relative(next, now)}";
+        _next.Foreground = next.Start - now <= Agenda.ReminderLead ? Theme.RedBrush : Theme.GreyBrush;
     }
 
     public void ShowMedia(MediaSnapshot? snapshot)

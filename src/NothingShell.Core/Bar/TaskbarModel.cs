@@ -2,13 +2,18 @@ using NothingShell.Core.Widgets;
 
 namespace NothingShell.Core.Bar;
 
-/// <summary>Finestra elencabile nella barra. <see cref="ZOrder"/>: 0 = più in alto (più recente).</summary>
-public sealed record AppWindow(nint Handle, string AppKey, string Title, bool IsMinimized, int ZOrder);
+/// <summary>Finestra elencabile nella barra. <see cref="ZOrder"/>: 0 = più in alto (più recente); <see cref="Monitor"/>: HMONITOR.</summary>
+public sealed record AppWindow(nint Handle, string AppKey, string Title, bool IsMinimized, int ZOrder, nint Monitor = 0);
 
-/// <summary>Finestre della stessa app, in ordine stabile (ordine di comparsa).</summary>
-public sealed record AppGroup(string AppKey, IReadOnlyList<AppWindow> Windows)
+/// <summary>
+/// Finestre della stessa app, in ordine stabile (ordine di comparsa). Un'app appuntata ha <see cref="Pin"/>
+/// e resta nella barra anche senza finestre.
+/// </summary>
+public sealed record AppGroup(string AppKey, IReadOnlyList<AppWindow> Windows, PinnedApp? Pin = null)
 {
-    public string Title => Windows[0].Title;
+    public string Title => Windows.Count > 0 ? Windows[0].Title : Pin?.Name ?? string.Empty;
+
+    public bool IsRunning => Windows.Count > 0;
 
     public bool Contains(nint handle) => Windows.Any(w => w.Handle == handle);
 }
@@ -18,6 +23,7 @@ public enum ClickKind
     None,
     Activate,
     Minimize,
+    Launch,
 }
 
 public readonly record struct ClickAction(ClickKind Kind, nint Handle)
@@ -26,15 +32,26 @@ public readonly record struct ClickAction(ClickKind Kind, nint Handle)
 }
 
 /// <summary>
-/// Stato delle app nella barra (docs/05-bar.md): gruppi per eseguibile con ordine stabile —
-/// le app e le finestre già viste mantengono la posizione, le nuove vanno in fondo.
+/// Stato delle app nella barra (docs/05-bar.md): prima le app appuntate nell'ordine di Windows,
+/// poi le altre app aperte con ordine stabile — le app e le finestre già viste mantengono la posizione,
+/// le nuove vanno in fondo.
 /// </summary>
 public sealed class TaskbarModel
 {
     private readonly List<string> _appOrder = [];
     private readonly List<nint> _windowOrder = [];
+    private AppWindow[] _windows = [];
+    private PinnedApp[] _pins = [];
 
     public IReadOnlyList<AppGroup> Groups { get; private set; } = [];
+
+    /// <summary>App appuntate, in ordine. Restituisce true se la barra va ridisegnata.</summary>
+    public bool SetPinned(IReadOnlyList<PinnedApp> pins)
+    {
+        ArgumentNullException.ThrowIfNull(pins);
+        _pins = pins.DistinctBy(p => p.Key, StringComparer.Ordinal).ToArray();
+        return Compose();
+    }
 
     /// <summary>Aggiorna con le finestre attuali (in qualsiasi ordine). Restituisce true se la barra va ridisegnata.</summary>
     public bool Update(IReadOnlyList<AppWindow> windows)
@@ -54,14 +71,8 @@ public sealed class TaskbarModel
             if (!_appOrder.Contains(w.AppKey))
                 _appOrder.Add(w.AppKey);
 
-        var position = _windowOrder.Select((h, i) => (h, i)).ToDictionary(x => x.h, x => x.i);
-        var groups = _appOrder
-            .Select(key => new AppGroup(key, byZ.Where(w => w.AppKey == key).OrderBy(w => position[w.Handle]).ToArray()))
-            .ToArray();
-
-        var changed = !SameGroups(Groups, groups);
-        Groups = groups;
-        return changed;
+        _windows = byZ;
+        return Compose();
     }
 
     /// <summary>Regole del clic su un'app (tabella in docs/05-bar.md).</summary>
@@ -70,7 +81,7 @@ public sealed class TaskbarModel
         ArgumentNullException.ThrowIfNull(group);
         var windows = group.Windows;
         if (windows.Count == 0)
-            return ClickAction.None;
+            return group.Pin is null ? ClickAction.None : new ClickAction(ClickKind.Launch, 0);
 
         if (windows.Count == 1)
         {
@@ -88,14 +99,33 @@ public sealed class TaskbarModel
         return new ClickAction(ClickKind.Activate, mostRecent.Handle);
     }
 
+    private bool Compose()
+    {
+        var position = _windowOrder.Select((h, i) => (h, i)).ToDictionary(x => x.h, x => x.i);
+        AppWindow[] WindowsOf(string key) =>
+            _windows.Where(w => w.AppKey == key).OrderBy(w => position[w.Handle]).ToArray();
+
+        var pinned = _pins.Select(p => p.Key).ToHashSet(StringComparer.Ordinal);
+        var groups = _pins
+            .Select(p => new AppGroup(p.Key, WindowsOf(p.Key), p))
+            .Concat(_appOrder.Where(k => !pinned.Contains(k)).Select(k => new AppGroup(k, WindowsOf(k))))
+            .ToArray();
+
+        var changed = !SameGroups(Groups, groups);
+        Groups = groups;
+        return changed;
+    }
+
     private static bool SameGroups(IReadOnlyList<AppGroup> a, AppGroup[] b) =>
         a.Count == b.Length && a.Zip(b).All(p =>
             p.First.AppKey == p.Second.AppKey &&
+            Equals(p.First.Pin, p.Second.Pin) &&
             p.First.Windows.Count == p.Second.Windows.Count &&
             p.First.Windows.Zip(p.Second.Windows).All(w =>
                 w.First.Handle == w.Second.Handle &&
                 w.First.Title == w.Second.Title &&
-                w.First.IsMinimized == w.Second.IsMinimized));
+                w.First.IsMinimized == w.Second.IsMinimized &&
+                w.First.Monitor == w.Second.Monitor));
 }
 
 public static class Fullscreen

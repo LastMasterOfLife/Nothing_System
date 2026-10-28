@@ -3,6 +3,7 @@ namespace NothingShell.Core.Notch;
 public enum NotchPage
 {
     Home,
+    Agenda,
     Mail,
     Timer,
     System,
