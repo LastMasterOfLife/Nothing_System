@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using NothingShell.App.Access;
 using NothingShell.App.Bar;
 using NothingShell.App.Launcher;
 using NothingShell.Core.Launcher;
@@ -11,6 +12,7 @@ using NothingShell.App.Plugins;
 using NothingShell.App.Services;
 using NothingShell.App.Settings;
 using NothingShell.App.Widgets;
+using NothingShell.Core.Access;
 using NothingShell.Core.Notch;
 using NothingShell.Core.Plugins;
 using NothingShell.Core.Sensors;
@@ -24,10 +26,13 @@ namespace NothingShell.App;
 public partial class App : Application
 {
     private const string ExitEventName = @"Local\NothingShell.Exit";
+    private const string LockEventName = @"Local\NothingShell.Lock";
 
     private Mutex? _singleInstance;
     private EventWaitHandle? _exitSignal;
     private RegisteredWaitHandle? _exitWait;
+    private EventWaitHandle? _lockSignal;
+    private RegisteredWaitHandle? _lockWait;
     private ShellController? _shell;
 
     protected override async void OnStartup(StartupEventArgs e)
@@ -44,6 +49,7 @@ public partial class App : Application
                 await RenderLauncherSnapshot(folder);
                 await RenderPluginAndSettingsSnapshots(folder);
                 RenderNotchSnapshots(folder);
+                await RenderAccessSnapshots(folder);
                 Shutdown();
                 return;
             case ["--dump-windows", var file]:
@@ -54,6 +60,17 @@ public partial class App : Application
             case ["--restore-taskbar"]:
                 WindowsTaskbar.ForceShow();
                 Shutdown();
+                return;
+            case ["--lock"]:
+                if (EventWaitHandle.TryOpenExisting(LockEventName, out var shell))
+                    using (shell)
+                        shell.Set();
+                else
+                    PowerActions.Lock();
+                Shutdown();
+                return;
+            case ["--access-demo", var report]:
+                await PlayAccessDemo(report);
                 return;
             case ["--exit"]:
                 if (EventWaitHandle.TryOpenExisting(ExitEventName, out var running))
@@ -70,6 +87,7 @@ public partial class App : Application
             return;
         }
         ListenForExitSignal();
+        ListenForLockSignal();
         RestoreTaskbarOnCrash();
 
         _shell = new ShellController();
@@ -88,6 +106,8 @@ public partial class App : Application
     {
         _shell?.Dispose();
         _exitWait?.Unregister(null);
+        _lockWait?.Unregister(null);
+        _lockSignal?.Dispose();
         _exitSignal?.Dispose();
         _singleInstance?.Dispose();
         base.OnExit(e);
@@ -99,6 +119,59 @@ public partial class App : Application
         _exitSignal = new EventWaitHandle(false, EventResetMode.AutoReset, ExitEventName);
         _exitWait = ThreadPool.RegisterWaitForSingleObject(_exitSignal,
             (_, _) => Dispatcher.BeginInvoke(() => Shutdown()), null, Timeout.Infinite, executeOnlyOnce: true);
+    }
+
+    /// <summary><c>NothingShell.exe --lock</c>: blocco con l'animazione Nothing (utile per scorciatoie).</summary>
+    private void ListenForLockSignal()
+    {
+        _lockSignal = new EventWaitHandle(false, EventResetMode.AutoReset, LockEventName);
+        _lockWait = ThreadPool.RegisterWaitForSingleObject(_lockSignal,
+            (_, _) => Dispatcher.BeginInvoke(() => _shell?.Lock()), null, Timeout.Infinite, executeOnlyOnce: false);
+    }
+
+    /// <summary>Bentornato dal vivo senza bloccare il PC; scrive fotogrammi e durata in <paramref name="report"/>.</summary>
+    private async Task PlayAccessDemo(string report)
+    {
+        var access = new AccessController();
+        await access.StartAsync();
+        var started = DateTimeOffset.Now;
+        access.Hidden += () =>
+        {
+            var welcome = DateTimeOffset.Now - started - TimeSpan.FromMilliseconds(700);
+            File.WriteAllText(report,
+                $"frames={access.FramesRendered} welcomeMs={welcome.TotalMilliseconds:0} fps={access.FramesRendered / welcome.TotalSeconds:0.0}");
+            access.Dispose();
+            Shutdown();
+        };
+        var watchdog = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
+        watchdog.Tick += (_, _) => Shutdown();
+        watchdog.Start();
+        access.PlayWelcomeDemo();
+    }
+
+    /// <summary>Overlay di accesso: stato bloccato e fotogrammi chiave delle due sequenze, con il profilo reale.</summary>
+    private static async Task RenderAccessSnapshots(string folder)
+    {
+        var window = new AccessWindow();
+        window.SetProfile(await UserProfile.LoadAsync());
+        var now = DateTime.Now;
+        (string Name, AccessFrame Frame)[] frames =
+        [
+            ("access-locked", AccessTimeline.Locked),
+            ("access-lock-200", AccessTimeline.Lock(TimeSpan.FromMilliseconds(200))),
+            ("access-lock-450", AccessTimeline.Lock(TimeSpan.FromMilliseconds(450))),
+            ("access-lock-900", AccessTimeline.Lock(TimeSpan.FromMilliseconds(900))),
+            ("access-welcome-300", AccessTimeline.Welcome(TimeSpan.FromMilliseconds(300))),
+            ("access-welcome-700", AccessTimeline.Welcome(TimeSpan.FromMilliseconds(700))),
+            ("access-welcome-1100", AccessTimeline.Welcome(TimeSpan.FromMilliseconds(1100))),
+            ("access-welcome-1350", AccessTimeline.Welcome(TimeSpan.FromMilliseconds(1350))),
+        ];
+        foreach (var (name, frame) in frames)
+        {
+            window.Render(frame, now);
+            SaveSnapshot(window.Surface, Path.Combine(folder, $"{name}.png"), scale: 1);
+        }
+        window.Close();
     }
 
     /// <summary>Qualunque crash deve lasciare la taskbar di Windows visibile.</summary>
@@ -170,6 +243,8 @@ public partial class App : Application
         public bool WidgetsLocked { get; set; }
 
         public bool MailInNotch { get; set; } = true;
+
+        public bool AccessAnimations { get; set; } = true;
 
         public string NotificationAccessText => "Accesso alle notifiche consentito";
 
@@ -244,13 +319,13 @@ public partial class App : Application
         SaveSnapshot(low, Path.Combine(folder, "battery-low.png"));
     }
 
-    private static void SaveSnapshot(FrameworkElement view, string path)
+    private static void SaveSnapshot(FrameworkElement view, string path, double scale = 2)
     {
         var size = new Size(view.Width, view.Height);
         view.Measure(size);
         view.Arrange(new Rect(size));
         view.UpdateLayout();
-        var bitmap = new RenderTargetBitmap((int)(size.Width * 2), (int)(size.Height * 2), 192, 192, PixelFormats.Pbgra32);
+        var bitmap = new RenderTargetBitmap((int)(size.Width * scale), (int)(size.Height * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
         bitmap.Render(view);
 
         var encoder = new PngBitmapEncoder();

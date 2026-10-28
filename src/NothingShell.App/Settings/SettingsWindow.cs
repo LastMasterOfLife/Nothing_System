@@ -22,6 +22,8 @@ public interface IShellSettingsActions
 
     bool MailInNotch { get; set; }
 
+    bool AccessAnimations { get; set; }
+
     string NotificationAccessText { get; }
 
     bool CanRequestNotificationAccess { get; }
@@ -99,6 +101,11 @@ public sealed class SettingsWindow : Window
                 Rebuild();
             }));
         Note("Swipe sul notch aperto (touchpad, rotellina o trascinamento) per Posta, Timer e Sistema.", Theme.GreyBrush);
+
+        Section("ACCESSO");
+        ToggleRow("Animazioni di blocco e sblocco", "Card con il tuo account prima e dopo il blocco di Windows",
+            _shell.AccessAnimations, v => _shell.AccessAnimations = v);
+        Note("Password, PIN e Windows Hello restano a Windows: Nothing Shell anima solo il prima e il dopo.", Theme.GreyBrush);
 
         Section("WIDGET");
         foreach (var (id, name) in _shell.Widgets)

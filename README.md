@@ -23,6 +23,12 @@ client che manda notifiche di Windows: Outlook, Posta, Thunderbird, Gmail nel br
 Sul notch aperto, uno swipe (touchpad a due dita, rotellina o trascinamento) scorre le pagine
 Home · Posta · Timer · Sistema. Dettagli in [docs/08-notch-mail-pages.md](docs/08-notch-mail-pages.md).
 
+**Accesso Nothing**: *Blocca* nel launcher (o `NothingShell.exe --lock`, comodo in una scorciatoia)
+chiude lo schermo con un'animazione a iride e la card del tuo account, poi passa al blocco di
+Windows. Allo sblocco (PIN, viso, password: sempre Windows) parte il bentornato e l'iride si apre
+sul desktop. Con Win+L c'è solo il bentornato. Si spegne in Impostazioni › Accesso.
+Dettagli e limiti in [docs/09-access.md](docs/09-access.md).
+
 Il launcher si apre con il tasto Win (da solo) o con il pulsante ⁘ della barra: si scrive per
 cercare, ↑↓ e Invio per avviare. Le combinazioni Win+qualcosa restano a Windows; lo Start di
 Windows è nel menu col tasto destro della barra, dove si può anche disattivare l'uso del tasto Win.

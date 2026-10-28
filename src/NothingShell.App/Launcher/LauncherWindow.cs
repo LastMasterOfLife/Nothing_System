@@ -109,6 +109,9 @@ public sealed class LauncherWindow : Window
     /// <summary>Voce interna scelta (es. <see cref="AppCatalog.SettingsEntry"/>).</summary>
     public event Action<string>? CommandRequested;
 
+    /// <summary>Pulsante Blocca: lo gestisce l'accesso Nothing (docs/09-access.md).</summary>
+    public event Action? LockRequested;
+
     /// <summary>Prepara il contenuto senza mostrare la finestra, con icone caricate subito (per <c>--snapshot</c>).</summary>
     public void PrepareSnapshot(string? query)
     {
@@ -219,7 +222,7 @@ public sealed class LauncherWindow : Window
         footer.Children.Add(user);
 
         var power = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        power.Children.Add(PowerButton(DotIcons.Lock, "Blocca", confirm: false, PowerActions.Lock));
+        power.Children.Add(PowerButton(DotIcons.Lock, "Blocca", confirm: false, () => LockRequested?.Invoke()));
         power.Children.Add(PowerButton(DotIcons.Sleep, "Sospendi", confirm: true, PowerActions.Sleep));
         power.Children.Add(PowerButton(DotIcons.Restart, "Riavvia", confirm: true, PowerActions.Restart));
         power.Children.Add(PowerButton(DotIcons.Power, "Spegni", confirm: true, PowerActions.PowerOff));

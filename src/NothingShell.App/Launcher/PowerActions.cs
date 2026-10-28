@@ -6,7 +6,8 @@ namespace NothingShell.App.Launcher;
 /// <summary>Azioni di alimentazione del launcher (docs/06-launcher.md).</summary>
 public static class PowerActions
 {
-    public static void Lock() => LockWorkStation();
+    /// <summary>Blocco di Windows; false se non è riuscito.</summary>
+    public static bool Lock() => LockWorkStation();
 
     public static void Sleep() => SetSuspendState(false, false, false);
 

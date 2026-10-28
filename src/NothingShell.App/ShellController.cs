@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Threading;
+using NothingShell.App.Access;
 using NothingShell.App.Bar;
 using NothingShell.App.Launcher;
 using NothingShell.App.Notch;
@@ -38,6 +39,7 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
     private readonly NotchWindow _notch;
     private readonly BarWindow _bar;
     private readonly WidgetHost _widgets;
+    private readonly AccessController _access = new();
 
     private ShellSettings _settings;
     private SettingsWindow? _settingsWindow;
@@ -56,6 +58,8 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
             if (id == AppCatalog.SettingsEntry.Id)
                 OpenSettings();
         };
+        _launcher.LockRequested += Lock;
+        _access.Enabled = _settings.Access;
 
         _notch = new NotchWindow(_media);
         _bar = new BarWindow(_tracker, new AppIcons(), _taskbar, _launcher);
@@ -125,6 +129,16 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
         }
     }
 
+    public bool AccessAnimations
+    {
+        get => _settings.Access;
+        set
+        {
+            Update(_settings with { Access = value });
+            _access.Enabled = value;
+        }
+    }
+
     public string NotificationAccessText => _notifications.Access switch
     {
         UserNotificationListenerAccessStatus.Allowed => "Accesso alle notifiche consentito",
@@ -164,6 +178,7 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
             _notifications.Start();
         RefreshMailPage();
 
+        await _access.StartAsync();
         await _media.StartAsync();
         try
         {
@@ -191,6 +206,9 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
         LoadPlugins();
     }
 
+    /// <summary>Blocca il PC con l'animazione Nothing (launcher, <c>--lock</c>).</summary>
+    public void Lock() => _access.Lock();
+
     public void OpenSettings()
     {
         if (_settingsWindow is { IsVisible: true })
@@ -207,6 +225,7 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
     public void Dispose()
     {
         _taskbar.Show();
+        _access.Dispose();
         _plugins.Dispose();
         _notifications.Dispose();
         _winKey.Dispose();

@@ -9,7 +9,8 @@ public sealed record ShellSettings(
     bool Bar,
     IReadOnlyList<string> DisabledWidgets,
     bool MailInNotch = true,
-    IReadOnlyList<string>? ExtraMailApps = null)
+    IReadOnlyList<string>? ExtraMailApps = null,
+    bool Access = true)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
 
