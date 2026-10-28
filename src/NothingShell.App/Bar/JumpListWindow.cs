@@ -10,6 +10,7 @@ using NothingShell.App.Rendering;
 using NothingShell.Core.Bar;
 using NothingShell.Core.Design;
 using NothingShell.Core.DotMatrix;
+using NothingShell.Core.Widgets;
 
 namespace NothingShell.App.Bar;
 
@@ -74,22 +75,33 @@ public sealed class JumpListWindow : Window
         };
     }
 
-    /// <summary>Apre l'elenco sopra la barra, centrato su <paramref name="anchorX"/> (DIP, schermo principale).</summary>
-    public void Open(JumpListModel model, double anchorX)
+    /// <summary>
+    /// Apre l'elenco sopra la barra di <paramref name="monitor"/>, centrato su <paramref name="anchorX"/>
+    /// (pixel fisici).
+    /// </summary>
+    public void Open(JumpListModel model, double anchorX, DisplayMonitor monitor)
     {
         ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(monitor);
         _closing = false;
         Build(model);
         _panel.Measure(new Size(PanelWidth, double.PositiveInfinity));
         Height = _panel.DesiredSize.Height;
-        Left = Math.Clamp(anchorX - PanelWidth / 2, ScreenMargin, SystemParameters.PrimaryScreenWidth - PanelWidth - ScreenMargin);
-        Top = SystemParameters.WorkArea.Bottom - Height - Gap;
+
+        var s = monitor.Scale;
+        var (width, height) = (PanelWidth * s, Height * s);
+        var left = Math.Clamp(anchorX - width / 2, monitor.Bounds.X + ScreenMargin * s, monitor.Bounds.Right - width - ScreenMargin * s);
+        var top = MultiMonitorBar.Place(monitor).Y - height - Gap * s;
+        var bounds = new Rect2(Math.Round(left), Math.Round(top), Math.Round(width), Math.Round(height));
+        var hwnd = new WindowInteropHelper(this).EnsureHandle();
+        WindowNative.Place(hwnd, bounds);
 
         Opacity = 0;
         _slide.Y = 10;
         Show();
+        WindowNative.Place(hwnd, bounds); // WPF può riapplicare la sua posizione alla prima apparizione
         // La barra non prende il focus: senza attivazione l'elenco non si chiuderebbe cliccando altrove.
-        WindowNative.BringToFront(new WindowInteropHelper(this).Handle);
+        WindowNative.BringToFront(hwnd);
         Activate();
         BeginAnimation(OpacityProperty, new DoubleAnimation(1, OpenDuration));
         _slide.BeginAnimation(TranslateTransform.YProperty,

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using NothingShell.Core.Notch;
 using NothingShell.Core.Storage;
 
 namespace NothingShell.Core.Settings;
@@ -10,7 +11,8 @@ public sealed record ShellSettings(
     IReadOnlyList<string> DisabledWidgets,
     bool MailInNotch = true,
     IReadOnlyList<string>? ExtraMailApps = null,
-    bool Access = true)
+    bool Access = true,
+    MailAccount? MailAccount = null)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
 

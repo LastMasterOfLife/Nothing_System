@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using NothingShell.App.Rendering;
 using NothingShell.Core.DotMatrix;
+using NothingShell.Core.Notch;
 using NothingShell.Core.Plugins;
 
 namespace NothingShell.App.Settings;
@@ -28,7 +29,36 @@ public interface IShellSettingsActions
 
     bool CanRequestNotificationAccess { get; }
 
+    bool NotificationAccessAllowed { get; }
+
     Task RequestNotificationAccessAsync();
+
+    /// <summary>App proposte come "app di posta" e se lo sono già (<c>extraMailApps</c>).</summary>
+    IReadOnlyList<(string App, bool IsMail)> MailAppCandidates { get; }
+
+    void SetMailApp(string app, bool isMail);
+
+    /// <summary>Ultima mail rilevata dalle notifiche; null se nessuna finora.</summary>
+    MailItem? LastMail { get; }
+
+    /// <summary>Avviso mail di prova nel notch, per verificare che si veda.</summary>
+    void ShowTestMailAlert();
+
+    /// <summary>Casella IMAP collegata (null se nessuna); la password è nel Gestore credenziali.</summary>
+    MailAccount? MailAccount { get; }
+
+    string MailAccountStatus { get; }
+
+    bool MailAccountConnected { get; }
+
+    event Action? MailAccountChanged;
+
+    /// <summary>Prova l'accesso e, se riesce, collega la casella; altrimenti restituisce il motivo.</summary>
+    Task<string?> ConnectMailAccountAsync(MailAccount account, string password);
+
+    void DisconnectMailAccount();
+
+    void ReconnectMailAccount();
 
     IEnumerable<(string Id, string Name)> Widgets { get; }
 
@@ -55,6 +85,7 @@ public sealed class SettingsWindow : Window
 
     private readonly IShellSettingsActions _shell;
     private readonly StackPanel _sections = new() { Margin = new Thickness(0, 0, 8, 0) };
+    private TextBlock? _mailStatus;
 
     public SettingsWindow(IShellSettingsActions shell)
     {
@@ -76,12 +107,16 @@ public sealed class SettingsWindow : Window
             if (e.Key == Key.Escape)
                 Close();
         };
+        // Lo stato della casella cambia da solo (connessione, errori): si aggiorna la riga senza rifare il modulo.
+        _shell.MailAccountChanged += OnMailAccountChanged;
+        Closed += (_, _) => _shell.MailAccountChanged -= OnMailAccountChanged;
     }
 
     /// <summary>Ridisegna le sezioni (dopo una ricarica dei plugin cambiano i widget e gli errori).</summary>
     public void Rebuild()
     {
         _sections.Children.Clear();
+        _mailStatus = null;
 
         Section("GENERALE");
         ToggleRow("Avvia con Windows", "Solo per questo utente", Autostart.IsEnabled, Autostart.Set);
@@ -92,15 +127,9 @@ public sealed class SettingsWindow : Window
         ToggleRow("Tasto Win apre il launcher", "Le combinazioni Win+… restano a Windows", _shell.UseWinKey, v => _shell.UseWinKey = v);
 
         Section("NOTCH");
-        ToggleRow("Mail nel notch", "Mostra l'oggetto delle mail in arrivo", _shell.MailInNotch, v => _shell.MailInNotch = v);
-        Note(_shell.NotificationAccessText, Theme.GreyBrush);
-        if (_shell.CanRequestNotificationAccess)
-            ButtonRow(("CONSENTI ACCESSO", async () =>
-            {
-                await _shell.RequestNotificationAccessAsync();
-                Rebuild();
-            }));
         Note("Swipe sul notch aperto (touchpad, rotellina o trascinamento) per Posta, Timer e Sistema.", Theme.GreyBrush);
+
+        MailSection();
 
         Section("ACCESSO");
         ToggleRow("Animazioni di blocco e sblocco", "Card con il tuo account prima e dopo il blocco di Windows",
@@ -132,6 +161,214 @@ public sealed class SettingsWindow : Window
         ButtonRow(("APRI CARTELLA DEI DATI", () => OpenFolder(_shell.DataFolder)));
     }
 
+    /// <summary>
+    /// Come collegare la posta al notch (docs/08-notch-mail-pages.md). Due strade: la casella collegata
+    /// direttamente (IMAP, consigliata) oppure le notifiche che un'app di posta mostra in Windows.
+    /// </summary>
+    private void MailSection()
+    {
+        Section("POSTA NEL NOTCH");
+        ToggleRow("Mail nel notch", "Busta e oggetto per qualche secondo, elenco nella pagina Posta",
+            _shell.MailInNotch, v =>
+            {
+                _shell.MailInNotch = v;
+                Rebuild();
+            });
+        if (!_shell.MailInNotch)
+            return;
+
+        Heading("Collega la tua casella", "consigliato");
+        Note("Nothing Shell si collega direttamente alla casella (IMAP) e avvisa appena arriva una mail, senza " +
+             "altre app aperte. Legge solo mittente e oggetto della Posta in arrivo, non modifica né segna come " +
+             "lette le mail. La password resta cifrata nel Gestore credenziali di Windows.", Theme.GreyBrush);
+        if (_shell.MailAccount is { } account)
+        {
+            _mailStatus = Note(_shell.MailAccountStatus, _shell.MailAccountConnected ? Theme.WhiteBrush : Theme.RedBrush);
+            Note($"Utente: {account.Login} · server {account.Server}:{account.Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+                Theme.GreyBrush);
+            ButtonRow(
+                ("RICOLLEGA", _shell.ReconnectMailAccount),
+                ("SCOLLEGA", () =>
+                {
+                    _shell.DisconnectMailAccount();
+                    Rebuild();
+                }));
+        }
+        else
+            MailAccountForm();
+
+        Heading("Oppure: le notifiche di un'app di posta", null);
+        Note("Per Gmail, Outlook.com o un programma di posta già configurato sul PC: Nothing Shell legge le " +
+             "notifiche che mostrano in Windows. Le webmail aziendali (Exchange) di solito non ne mandano: per " +
+             "quelle usa la casella collegata qui sopra.", Theme.GreyBrush);
+
+        var allowed = _shell.NotificationAccessAllowed;
+        Step(1, "Consenti l'accesso alle notifiche", done: allowed);
+        Note(_shell.NotificationAccessText, allowed ? Theme.GreyBrush : Theme.RedBrush);
+        if (_shell.CanRequestNotificationAccess)
+            ButtonRow(("CONSENTI ACCESSO", async () =>
+            {
+                await _shell.RequestNotificationAccessAsync();
+                Rebuild();
+            }));
+        else if (!allowed)
+            ButtonRow(("APRI PRIVACY › NOTIFICHE", () => OpenUri("ms-settings:privacy-notifications")));
+
+        Step(2, "Usa un'app di posta con le notifiche attive", done: null);
+        Note("Riconosciute da sole: Outlook (classico e nuovo), Posta, Thunderbird, eM Client, Mailbird, Spark.",
+            Theme.GreyBrush);
+        Note("Webmail nel browser (Gmail, Outlook.com, Yahoo, Proton): consenti le notifiche al sito " +
+             "(lucchetto accanto all'indirizzo › Notifiche › Consenti) e lascia aperta una scheda.", Theme.GreyBrush);
+        Note("In Windows l'app deve avere le notifiche attive e Non disturbare deve essere spento.", Theme.GreyBrush);
+        ButtonRow(("APRI NOTIFICHE DI WINDOWS", () => OpenUri("ms-settings:notifications")));
+
+        Step(3, "La tua app non è riconosciuta?", done: null);
+        var candidates = _shell.MailAppCandidates;
+        if (candidates.Count == 0)
+            Note("Qui compaiono le app che hanno mandato notifiche da quando Nothing Shell è avviato. " +
+                 "Mandati una mail di prova, poi premi Aggiorna.", Theme.GreyBrush);
+        else
+        {
+            Note("Accendi l'app che ti avvisa delle mail: le sue notifiche diventano mail nel notch.", Theme.GreyBrush);
+            foreach (var (app, isMail) in candidates)
+                ToggleRow(app, null, isMail, v => _shell.SetMailApp(app, v));
+        }
+
+        var last = _shell.LastMail;
+        Heading("Verifica", null);
+        Note(last is null
+                ? "Nessuna mail rilevata finora."
+                : $"Ultima mail rilevata alle {last.Received.ToLocalTime():HH:mm} da {last.App}: «{last.Subject}»",
+            Theme.GreyBrush);
+        ButtonRow(("PROVA L'AVVISO", _shell.ShowTestMailAlert), ("AGGIORNA", Rebuild));
+    }
+
+    /// <summary>Modulo per collegare la casella: si salva solo se l'accesso di prova riesce.</summary>
+    private void MailAccountForm()
+    {
+        var address = Field("Indirizzo email", "");
+        var server = Field("Server IMAP (lo trovi nelle istruzioni del provider, es. mail.dominio.it)", "");
+        var port = Field("Porta", MailAccount.DefaultPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var user = Field(@"Utente: lascia vuoto se è l'indirizzo email (alcuni server Exchange vogliono DOMINIO\nome)", "");
+        var password = new PasswordBox();
+        AddField("Password", password);
+
+        // Il server si propone dall'indirizzo, finché l'utente non ne scrive uno.
+        address.LostFocus += (_, _) =>
+        {
+            if (server.Text.Length == 0 && ImapSetup.SuggestServer(address.Text) is { } suggested)
+                server.Text = suggested;
+        };
+
+        var result = Note(string.Empty, Theme.GreyBrush);
+        var busy = false;
+        ButtonRow(("COLLEGA", async () =>
+        {
+            if (busy)
+                return;
+            busy = true;
+            result.Foreground = Theme.GreyBrush;
+            result.Text = "Prova di accesso in corso…";
+            var account = new MailAccount(
+                address.Text.Trim(),
+                server.Text.Trim(),
+                int.TryParse(port.Text.Trim(), System.Globalization.CultureInfo.InvariantCulture, out var p) ? p : 0,
+                string.IsNullOrWhiteSpace(user.Text) ? null : user.Text.Trim());
+            var error = await _shell.ConnectMailAccountAsync(account, password.Password);
+            busy = false;
+            if (error is null)
+            {
+                Rebuild();
+                return;
+            }
+            result.Foreground = Theme.RedBrush;
+            result.Text = error;
+        }));
+    }
+
+    private TextBox Field(string label, string text)
+    {
+        var box = new TextBox { Text = text };
+        AddField(label, box);
+        return box;
+    }
+
+    /// <summary>Campo in stile Nothing: etichetta grigia, riquadro scuro con bordo Outline e angoli arrotondati.</summary>
+    private void AddField(string label, Control input)
+    {
+        var caption = Label(label, 11, Theme.GreyBrush);
+        caption.TextWrapping = TextWrapping.Wrap;
+        caption.Margin = new Thickness(0, 10, 0, 4);
+        _sections.Children.Add(caption);
+
+        input.Background = Brushes.Transparent;
+        input.BorderThickness = new Thickness(0);
+        input.Foreground = Theme.WhiteBrush;
+        input.FontFamily = Theme.BodyFont;
+        input.FontSize = 13;
+        input.VerticalContentAlignment = VerticalAlignment.Center;
+        switch (input)
+        {
+            case TextBox t:
+                t.CaretBrush = Theme.WhiteBrush;
+                break;
+            case PasswordBox p:
+                p.CaretBrush = Theme.WhiteBrush;
+                break;
+        }
+        _sections.Children.Add(new Border
+        {
+            Background = Theme.SurfaceBrush,
+            BorderBrush = Theme.OutlineBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(10, 6, 10, 6),
+            Child = input,
+        });
+    }
+
+    private void Heading(string title, string? tag)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 18, 0, 4) };
+        var label = Label(title, 14, Theme.WhiteBrush);
+        label.FontWeight = FontWeights.SemiBold;
+        row.Children.Add(label);
+        if (tag is not null)
+        {
+            var badge = Label(tag.ToUpperInvariant(), 10, Theme.RedBrush);
+            badge.VerticalAlignment = VerticalAlignment.Center;
+            badge.Margin = new Thickness(10, 1, 0, 0);
+            row.Children.Add(badge);
+        }
+        _sections.Children.Add(row);
+    }
+
+    private void OnMailAccountChanged()
+    {
+        if (_mailStatus is null)
+            return;
+        _mailStatus.Text = _shell.MailAccountStatus;
+        _mailStatus.Foreground = _shell.MailAccountConnected ? Theme.WhiteBrush : Theme.RedBrush;
+    }
+
+    /// <summary>Passo numerato: numero a punti rosso finché c'è da fare, grigio quando è a posto.</summary>
+    private void Step(int number, string title, bool? done)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 14, 0, 4) };
+        row.Children.Add(new DotMatrixView
+        {
+            Pitch = 2,
+            Dots = DotText.Render(number.ToString("00", System.Globalization.CultureInfo.InvariantCulture)),
+            DotColor = done == true ? Theme.Grey : Theme.Red,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 10, 0),
+        });
+        var label = Label(done == true ? $"{title}  ·  fatto" : title, 14, Theme.WhiteBrush);
+        label.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(label);
+        _sections.Children.Add(row);
+    }
+
     private Border BuildVisualTree()
     {
         var header = new Grid { Margin = new Thickness(0, 0, 0, 18), Background = Brushes.Transparent };
@@ -161,13 +398,20 @@ public sealed class SettingsWindow : Window
         };
         close.MouseEnter += (_, _) => close.Background = Theme.SurfaceBrush;
         close.MouseLeave += (_, _) => close.Background = Brushes.Transparent;
+        // La pressione va fermata qui: arrivando all'intestazione avvierebbe DragMove, che cattura il mouse
+        // fino al rilascio, e il clic sulla X non arriverebbe mai.
+        close.MouseLeftButtonDown += (_, e) => e.Handled = true;
         close.MouseLeftButtonUp += (_, e) =>
         {
             e.Handled = true;
             Close();
         };
         header.Children.Add(close);
-        header.MouseLeftButtonDown += (_, _) => DragMove();
+        header.MouseLeftButtonDown += (_, e) =>
+        {
+            if (e.ButtonState == MouseButtonState.Pressed)
+                DragMove();
+        };
 
         var scroll = new ScrollViewer
         {
@@ -250,18 +494,31 @@ public sealed class SettingsWindow : Window
         _sections.Children.Add(row);
     }
 
-    private void Note(string text, Brush brush)
+    private TextBlock Note(string text, Brush brush)
     {
         var note = Label(text, 12, brush);
         note.TextWrapping = TextWrapping.Wrap;
         note.Margin = new Thickness(0, 2, 0, 2);
         _sections.Children.Add(note);
+        return note;
     }
 
     private static void OpenFolder(string path)
     {
         System.IO.Directory.CreateDirectory(path);
         Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true })?.Dispose();
+    }
+
+    private static void OpenUri(string uri)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true })?.Dispose();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // pagina delle impostazioni non disponibile in questa versione di Windows
+        }
     }
 
     private static TextBlock Label(string text, double size, Brush foreground) => new()

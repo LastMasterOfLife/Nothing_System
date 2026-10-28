@@ -14,10 +14,12 @@ namespace NothingShell.App.Services;
 public sealed class NotificationService : IDisposable
 {
     public const int RecentCapacity = 10;
+    private const int RecentAppsCapacity = 8;
 
     private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
     private readonly List<MailItem> _recent = [];
+    private readonly List<string> _apps = [];
     private HashSet<uint> _seen = [];
     private UserNotificationListener? _listener;
     private bool _primed;
@@ -35,6 +37,9 @@ public sealed class NotificationService : IDisposable
     public UserNotificationListenerAccessStatus Access { get; private set; } = UserNotificationListenerAccessStatus.Unspecified;
 
     public IReadOnlyList<MailItem> Recent => _recent;
+
+    /// <summary>App che hanno mandato notifiche da quando la shell è avviata, la più recente per prima.</summary>
+    public IReadOnlyList<string> NotifyingApps => _apps;
 
     /// <summary>Mail nuova arrivata dopo l'avvio (quelle già presenti non generano avvisi).</summary>
     public event Action<MailItem>? MailArrived;
@@ -107,6 +112,7 @@ public sealed class NotificationService : IDisposable
                 if (_seen.Contains(n.Id))
                     continue;
                 var (app, texts) = Read(n);
+                RememberApp(app);
                 if (!MailDetector.IsMail(app, texts, ExtraMailApps()))
                     continue;
                 if (MailDetector.Extract(app, texts, n.CreationTime) is not { } mail)
@@ -133,6 +139,17 @@ public sealed class NotificationService : IDisposable
         {
             _busy = false;
         }
+    }
+
+    /// <summary>Solo il nome dell'app, mai il contenuto: serve alle impostazioni per scegliere le app di posta.</summary>
+    private void RememberApp(string app)
+    {
+        if (string.IsNullOrWhiteSpace(app))
+            return;
+        _apps.RemoveAll(a => a.Equals(app, StringComparison.OrdinalIgnoreCase));
+        _apps.Insert(0, app);
+        if (_apps.Count > RecentAppsCapacity)
+            _apps.RemoveAt(_apps.Count - 1);
     }
 
     private static (string App, IReadOnlyList<string> Texts) Read(UserNotification notification)

@@ -48,11 +48,43 @@ dopo un cambio pagina c'è una pausa di 400 ms, così uno swipe sposta **una** s
 Le pagine non ricominciano dall'inizio: alla prima e all'ultima lo swipe si ferma.
 Un trascinamento che cambia pagina non attiva i pulsanti sotto il dito.
 
+### Sorgente: casella collegata (IMAP)
+Per le caselle la cui webmail non manda notifiche (tipicamente Exchange aziendale, es. OWA on-premise),
+Nothing Shell si collega direttamente al server IMAP con MailKit:
+- TLS su 993 (`SslOnConnect`), STARTTLS se offerto sulle altre porte; utente = indirizzo o quello indicato
+  (`DOMINIO\nome` per alcuni Exchange). PLAIN/NTLM scelti da MailKit in base al server.
+- **Posta in arrivo in sola lettura**: nessun flag cambiato, nessuna mail segnata come letta.
+- **IDLE**: il server avvisa appena arriva una mail; l'attesa si rinnova ogni 9 minuti. Senza IDLE,
+  controllo ogni minuto.
+- Primo controllo: le ultime 10 mail riempiono la pagina Posta senza avvisi. Poi sono nuove le mail con
+  UID maggiore dell'ultimo visto; se il server cambia `UIDVALIDITY` si riparte senza avvisi
+  (Core `ImapCursor`, testato).
+- Rete assente o server giù: nuovo tentativo dopo 10 s, raddoppiando fino a 5 minuti. Accesso rifiutato:
+  nessun nuovo tentativo (eviterebbe il blocco dell'account), lo stato chiede di ricollegare.
+- Password nel **Gestore credenziali di Windows** (credenziale generica `NothingShell:imap:<utente>@<server>`),
+  mai in `settings.json`; *Scollega* la cancella.
+- Con casella collegata e notifiche insieme (es. anche Outlook aperto), la stessa mail (stesso oggetto,
+  stesso mittente, entro 3 minuti) dà un solo avviso e una sola riga (Core `MailFeed`, testato).
+
 ## Impostazioni
-Nuove voci: *Mail nel notch* (interruttore) e stato dell'accesso alle notifiche, con il pulsante
-*Consenti accesso* se Windows non l'ha ancora concesso. `settings.json`: `mailInNotch`,
-`extraMailApps`.
+Sezione **POSTA NEL NOTCH**: interruttore *Mail nel notch*, poi:
+- **Collega la tua casella** (consigliato): indirizzo, server IMAP (proposto dall'indirizzo: provider noti
+  o `imap.dominio`, Core `ImapSetup`), porta (993), utente se diverso dall'indirizzo, password.
+  *Collega* prova l'accesso e salva solo se riesce, con l'errore in italiano altrimenti. Collegata: stato
+  dal vivo (bianco se collegata, rosso se in errore), *Ricollega*, *Scollega*.
+- **Oppure: le notifiche di un'app di posta**, in tre passi numerati a punti (rosso = da fare, grigio = fatto):
+  1. **Accesso alle notifiche**: stato; *Consenti accesso* se Windows non l'ha ancora chiesto,
+     altrimenti, se negato, *Apri Privacy › Notifiche* (`ms-settings:privacy-notifications`).
+  2. **App di posta con notifiche attive**: client riconosciuti, come abilitare le notifiche della
+     webmail nel browser, *Apri notifiche di Windows* (`ms-settings:notifications`, anche per Non disturbare).
+  3. **App non riconosciuta**: le app che hanno mandato notifiche da quando la shell è avviata (solo il
+     nome, in memoria, ultime 8), esclusi i client già riconosciuti; un interruttore le aggiunge a
+     `extraMailApps`. Core: `MailDetector.SetupCandidates`, `WithExtraApp` (testati).
+- **Verifica**: ultima mail rilevata da qualsiasi fonte; *Prova l'avviso* mostra un avviso finto nel
+  notch; *Aggiorna* rilegge lo stato.
+
+`settings.json`: `mailInNotch`, `extraMailApps`, `mailAccount` (`address`, `server`, `port`, `userName`).
 
 ## Logica nel Core (testata)
 `NotchStateMachine` (stato Alert e scadenze), `NotchPager`, `SwipeDetector`, `Countdown`,
-`MailDetector`.
+`MailDetector`, `ImapSetup`, `ImapCursor`, `MailFeed`.

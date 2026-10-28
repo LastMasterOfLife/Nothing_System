@@ -1,4 +1,5 @@
 using NothingShell.Core.Bar;
+using NothingShell.Core.Notch;
 using NothingShell.Core.Widgets;
 
 namespace NothingShell.Core.Tests;
@@ -224,5 +225,100 @@ public class JumpListTests
     {
         Assert.Equal(@"""C:\\""", JumpLists.Quote(@"C:\"));
         Assert.Equal(@"""C:\a b""", JumpLists.Quote(@"C:\a b"));
+    }
+}
+
+public class MultiMonitorBarTests
+{
+    private static readonly DisplayMonitor Main = new(1, "D1", new Rect2(0, 0, 2560, 1440), new Rect2(0, 0, 2560, 1392), true, 1);
+    private static readonly DisplayMonitor Right = new(2, "D2", new Rect2(2560, 0, 2560, 1440), new Rect2(2560, 0, 2560, 1392), false, 1);
+
+    private static AppWindow W(nint h, string app, nint monitor) => new(h, app, $"{app}-{h}", false, (int)h, monitor);
+
+    private static readonly AppGroup[] Groups =
+    [
+        new("CODE", [W(1, "CODE", 1), W(2, "CODE", 2)], new PinnedApp("code", "Code", "code.lnk", null, false)),
+        new("TEAMS", [], new PinnedApp("teams", "Teams", @"shell:AppsFolder\teams", null, false)),
+        new("EDGE", [W(3, "EDGE", 1)]),
+        new("SLACK", [W(4, "SLACK", 2)]),
+    ];
+
+    [Fact]
+    public void BarFillsReservedStripOfEachMonitor()
+    {
+        Assert.Equal(new Rect2(0, 1392, 2560, 48), MultiMonitorBar.Place(Main));
+        Assert.Equal(new Rect2(2560, 1392, 2560, 48), MultiMonitorBar.Place(Right));
+    }
+
+    [Fact]
+    public void AutoHiddenTaskbarGetsScaledFallbackHeight()
+    {
+        var hidden = Right with { WorkArea = Right.Bounds, Scale = 1.5 };
+        Assert.Equal(new Rect2(2560, 1368, 2560, 72), MultiMonitorBar.Place(hidden));
+    }
+
+    [Fact]
+    public void AllTaskbarsShowEverything() =>
+        Assert.Same(Groups, MultiMonitorBar.GroupsFor(Groups, 2, isMain: false, MultiMonitorMode.AllTaskbars));
+
+    [Fact]
+    public void MainAndWhereOpen()
+    {
+        Assert.Same(Groups, MultiMonitorBar.GroupsFor(Groups, 1, isMain: true, MultiMonitorMode.MainAndWhereOpen));
+
+        var right = MultiMonitorBar.GroupsFor(Groups, 2, isMain: false, MultiMonitorMode.MainAndWhereOpen);
+        Assert.Equal(["CODE", "SLACK"], right.Select(g => g.AppKey));
+        Assert.Equal([(nint)2], right[0].Windows.Select(w => w.Handle));
+    }
+
+    [Fact]
+    public void WhereOpenKeepsPinsOnlyOnMain()
+    {
+        var main = MultiMonitorBar.GroupsFor(Groups, 1, isMain: true, MultiMonitorMode.WhereOpen);
+        Assert.Equal(["CODE", "TEAMS", "EDGE"], main.Select(g => g.AppKey));
+        Assert.Equal([(nint)1], main[0].Windows.Select(w => w.Handle));
+
+        var right = MultiMonitorBar.GroupsFor(Groups, 2, isMain: false, MultiMonitorMode.WhereOpen);
+        Assert.Equal(["CODE", "SLACK"], right.Select(g => g.AppKey));
+    }
+
+    [Fact]
+    public void MovingAWindowToAnotherMonitorIsAChange()
+    {
+        var model = new TaskbarModel();
+        model.Update([W(1, "CODE", 1)]);
+        Assert.True(model.Update([W(1, "CODE", 2)]));
+    }
+}
+
+public class WindowPreviewsTests
+{
+    [Fact]
+    public void ThumbnailKeepsWindowProportions()
+    {
+        Assert.Equal(new Size2(240, 135), WindowPreviews.Contain(new Size2(2560, 1440), WindowPreviews.MaxThumbnail));
+        Assert.Equal(new Size2(100, 150), WindowPreviews.Contain(new Size2(400, 600), WindowPreviews.MaxThumbnail));
+    }
+
+    [Fact]
+    public void ThumbnailsThatFitAreNotShrunk()
+    {
+        var sizes = WindowPreviews.Fit([new Size2(1920, 1080), new Size2(1920, 1080)], available: 1000, gap: 8);
+        Assert.All(sizes, s => Assert.Equal(new Size2(240, 135), s));
+    }
+
+    [Fact]
+    public void ManyThumbnailsShrinkTogetherToFit()
+    {
+        var sizes = WindowPreviews.Fit(Enumerable.Repeat(new Size2(1920, 1080), 6).ToArray(), available: 1000, gap: 8);
+        Assert.True(sizes.Sum(s => s.Width) + 8 * 5 <= 1000 + 6);
+        Assert.All(sizes, s => Assert.Equal(sizes[0], s));
+    }
+
+    [Fact]
+    public void ShrinkingStopsAtMinimumWidth()
+    {
+        var sizes = WindowPreviews.Fit(Enumerable.Repeat(new Size2(1920, 1080), 40).ToArray(), available: 1000, gap: 8);
+        Assert.All(sizes, s => Assert.Equal(WindowPreviews.MinThumbnailWidth, s.Width));
     }
 }

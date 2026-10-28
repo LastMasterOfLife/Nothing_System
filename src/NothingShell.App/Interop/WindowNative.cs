@@ -1,4 +1,6 @@
 ﻿using System.Runtime.InteropServices;
+using NothingShell.Core.Bar;
+using NothingShell.Core.Widgets;
 
 namespace NothingShell.App.Interop;
 
@@ -40,12 +42,17 @@ internal static partial class WindowNative
     private const uint MonitorDefaultToNearest = 2;
     private const uint MonitorDefaultToPrimary = 1;
     private const uint KeyEventKeyUp = 0x0002;
+    private const uint MonitorInfoFPrimary = 0x1;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
     private const uint ShgfiIcon = 0x100;
     private const uint ShgfiUseFileAttributes = 0x10;
     private const uint FileAttributeDirectory = 0x10;
     private const uint FileAttributeNormal = 0x80;
 
     public delegate bool EnumWindowsProc(nint hwnd, nint lParam);
+
+    private delegate bool MonitorEnumProc(nint monitor, nint dc, nint rect, nint lParam);
 
     public delegate void WinEventProc(nint hook, uint eventType, nint hwnd, int idObject, int idChild, uint thread, uint time);
 
@@ -68,6 +75,24 @@ internal static partial class WindowNative
         public string DisplayName;
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
         public string TypeName;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct MonitorInfoEx
+    {
+        public uint Size;
+        public Rect Monitor;
+        public Rect Work;
+        public uint Flags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string Device;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -175,6 +200,25 @@ internal static partial class WindowNative
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool DestroyIcon(nint icon);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumDisplayMonitors(nint dc, nint clip, MonitorEnumProc callback, nint lParam);
+
+    [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfoEx(nint monitor, ref MonitorInfoEx info);
+
+    [LibraryImport("shcore.dll")]
+    private static partial int GetDpiForMonitor(nint monitor, int type, out uint dpiX, out uint dpiY);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetCursorPos(out NativePoint point);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetWindowPos(nint hwnd, nint insertAfter, int x, int y, int cx, int cy, uint flags);
+
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern nint SHGetFileInfo(string path, uint attributes, ref ShFileInfo info, uint size, uint flags);
 
@@ -243,6 +287,40 @@ internal static partial class WindowNative
             : 0;
     }
 
+    /// <summary>Monitor collegati, in pixel fisici, con la loro scala.</summary>
+    public static IReadOnlyList<DisplayMonitor> Monitors()
+    {
+        var monitors = new List<DisplayMonitor>();
+        EnumDisplayMonitors(0, 0, (monitor, _, _, _) =>
+        {
+            var info = new MonitorInfoEx { Size = (uint)Marshal.SizeOf<MonitorInfoEx>() };
+            if (!GetMonitorInfoEx(monitor, ref info))
+                return true;
+            var scale = GetDpiForMonitor(monitor, 0, out var dpi, out _) == 0 ? dpi / 96.0 : 1.0;
+            monitors.Add(new DisplayMonitor(monitor, info.Device, ToRect2(info.Monitor), ToRect2(info.Work),
+                (info.Flags & MonitorInfoFPrimary) != 0, scale));
+            return true;
+        }, 0);
+        return monitors;
+    }
+
+    /// <summary>HMONITOR del monitor più vicino alla finestra.</summary>
+    public static nint MonitorOf(nint hwnd) => MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+
+    /// <summary>HMONITOR del monitor sotto il puntatore del mouse.</summary>
+    public static nint MonitorAtCursor() =>
+        GetCursorPos(out var p) ? MonitorFromPoint(((long)p.Y << 32) | (uint)p.X, MonitorDefaultToNearest) : 0;
+
+    /// <summary>
+    /// Sposta e ridimensiona in pixel fisici. Due passaggi: se la finestra cambia monitor e DPI, WPF si
+    /// riscala al primo e il secondo rimette le misure esatte.
+    /// </summary>
+    public static void Place(nint hwnd, Rect2 rect)
+    {
+        for (var i = 0; i < 2; i++)
+            SetWindowPos(hwnd, 0, (int)rect.X, (int)rect.Y, (int)rect.Width, (int)rect.Height, SwpNoZOrder | SwpNoActivate);
+    }
+
     /// <summary>Rettangolo (pixel fisici) del monitor che contiene la finestra, e se è il principale.</summary>
     public static (Rect Bounds, bool IsPrimary) GetMonitor(nint hwnd)
     {
@@ -273,6 +351,8 @@ internal static partial class WindowNative
         foreach (var k in keys.Reverse())
             keybd_event(k, 0, KeyEventKeyUp, 0);
     }
+
+    private static Rect2 ToRect2(Rect r) => new(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
 
     private static string ReadString(nint hwnd, int capacity, Func<nint, char[], int, int> read)
     {

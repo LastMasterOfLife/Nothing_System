@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 using NothingShell.App.Access;
@@ -10,6 +10,7 @@ using NothingShell.App.Services;
 using NothingShell.App.Settings;
 using NothingShell.App.Widgets;
 using NothingShell.Core.Launcher;
+using NothingShell.Core.Notch;
 using NothingShell.Core.Plugins;
 using NothingShell.Core.Settings;
 using NothingShell.Core.Storage;
@@ -36,16 +37,17 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
     private readonly AppCatalog _catalog = new();
     private readonly PluginHost _plugins = new();
     private readonly NotificationService _notifications = new();
+    private readonly ImapMailService _imap = new();
     private readonly LauncherWindow _launcher;
     private readonly WinKeyHook _winKey;
     private readonly NotchWindow _notch;
-    private readonly BarWindow _bar;
+    private readonly BarHost _bars;
     private readonly WidgetHost _widgets;
     private readonly AccessController _access = new();
 
     private ShellSettings _settings;
     private SettingsWindow? _settingsWindow;
-    private bool _fullscreen;
+    private bool _fullscreen; // app a schermo intero sul monitor principale: lì sta il notch
 
     public ShellController()
     {
@@ -55,7 +57,7 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
 
         _launcher = new LauncherWindow(_catalog, shellIcons, new LauncherSettingsStore(LauncherSettingsStore.DefaultPath));
         _winKey = new WinKeyHook { Enabled = _launcher.UseWinKey };
-        _winKey.Pressed += () => Application.Current.Dispatcher.BeginInvoke(_launcher.Toggle);
+        _winKey.Pressed += () => Application.Current.Dispatcher.BeginInvoke(() => _launcher.Toggle());
         _launcher.UseWinKeyChanged += enabled => _winKey.Enabled = enabled;
         _launcher.CommandRequested += id =>
         {
@@ -66,32 +68,46 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
         _access.Enabled = _settings.Access;
 
         _notch = new NotchWindow(_media);
-        _bar = new BarWindow(_tracker, new AppIcons(), shellIcons, _catalog, _taskbar, _launcher);
+        var appIcons = new AppIcons();
+        _bars = new BarHost((monitor, mode) =>
+            new BarWindow(_tracker, appIcons, shellIcons, _catalog, _taskbar, _launcher, monitor, mode));
         _pins.Changed += ApplyPins;
         _widgets = new WidgetHost(_clock, _monitor, new WidgetSettingsStore(WidgetSettingsStore.DefaultPath));
 
         _notch.SettingsRequested += OpenSettings;
-        _bar.SettingsRequested += OpenSettings;
+        _bars.SettingsRequested += OpenSettings;
         _widgets.SettingsRequested += OpenSettings;
 
         _clock.MinuteChanged += _notch.SetTime;
-        _clock.MinuteChanged += _bar.SetTime;
-        _monitor.BatteryChanged += _bar.SetBattery;
+        _clock.MinuteChanged += _bars.SetTime;
+        _monitor.BatteryChanged += _bars.SetBattery;
         _monitor.BatteryChanged += _notch.SetBattery;
         _monitor.StatsChanged += _notch.SetSystem;
 
         _notifications.ExtraMailApps = () => _settings.ExtraMailApps ?? [];
+        // Casella collegata e notifiche possono vedere la stessa mail (es. Outlook aperto): un solo avviso.
         _notifications.MailArrived += mail =>
         {
-            if (_settings.MailInNotch)
+            if (_settings.MailInNotch && !_imap.Recent.Any(m => MailFeed.IsSame(m, mail)))
+                _notch.ShowMailAlert(mail);
+        };
+        _imap.MailArrived += mail =>
+        {
+            if (_settings.MailInNotch && !_notifications.Recent.Any(m => MailFeed.IsSame(m, mail)))
                 _notch.ShowMailAlert(mail);
         };
         _notifications.RecentChanged += RefreshMailPage;
-        _network.Changed += _bar.SetNetwork;
-        _bar.SetNetwork(_network.Current);
-        _tracker.FullscreenChanged += fullscreen =>
+        _imap.Changed += () =>
         {
-            _fullscreen = fullscreen;
+            RefreshMailPage();
+            MailAccountChanged?.Invoke();
+        };
+        _network.Changed += _bars.SetNetwork;
+        _bars.SetNetwork(_network.Current);
+        _tracker.FullscreenChanged += monitor =>
+        {
+            _fullscreen = monitor != 0 && Interop.WindowNative.Monitors().Any(m => m.Handle == monitor && m.IsPrimary);
+            _bars.FullscreenMonitor = monitor;
             ApplyTopLevelVisibility();
         };
     }
@@ -127,9 +143,16 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
         {
             Update(_settings with { MailInNotch = value });
             if (value)
+            {
                 _notifications.Start();
+                if (_settings.MailAccount is { } account)
+                    _imap.Start(account);
+            }
             else
+            {
                 _notifications.Stop();
+                _imap.Stop();
+            }
             RefreshMailPage();
         }
     }
@@ -153,6 +176,70 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
     };
 
     public bool CanRequestNotificationAccess => _notifications.Access == UserNotificationListenerAccessStatus.Unspecified;
+
+    public bool NotificationAccessAllowed => _notifications.Access == UserNotificationListenerAccessStatus.Allowed;
+
+    public IReadOnlyList<(string App, bool IsMail)> MailAppCandidates =>
+        MailDetector.SetupCandidates(_notifications.NotifyingApps, _settings.ExtraMailApps ?? []);
+
+    public void SetMailApp(string app, bool isMail) =>
+        Update(_settings with { ExtraMailApps = MailDetector.WithExtraApp(_settings.ExtraMailApps ?? [], app, isMail) });
+
+    public MailItem? LastMail => Mails is [var first, ..] ? first : null;
+
+    public MailAccount? MailAccount => _settings.MailAccount;
+
+    public string MailAccountStatus => _imap.Status;
+
+    public bool MailAccountConnected => _imap.IsConnected;
+
+    public event Action? MailAccountChanged;
+
+    /// <summary>Prova la casella; se l'accesso riesce salva la password nel Gestore credenziali e la collega.</summary>
+    public async Task<string?> ConnectMailAccountAsync(MailAccount account, string password)
+    {
+        ArgumentNullException.ThrowIfNull(account);
+        ArgumentNullException.ThrowIfNull(password);
+        if (ImapSetup.Validate(account, password) is { } invalid)
+            return invalid;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        if (await ImapMailService.TestAsync(account, password, timeout.Token) is { } failed)
+            return failed;
+        if (!Interop.CredentialStore.Write(account.CredentialTarget, account.Login, password))
+            return "Impossibile salvare la password nel Gestore credenziali di Windows.";
+
+        if (_settings.MailAccount is { } previous && previous.CredentialTarget != account.CredentialTarget)
+            Interop.CredentialStore.Delete(previous.CredentialTarget);
+        Update(_settings with { MailAccount = account });
+        if (_settings.MailInNotch)
+            _imap.Start(account);
+        return null;
+    }
+
+    public void DisconnectMailAccount()
+    {
+        _imap.Stop();
+        if (_settings.MailAccount is { } account)
+            Interop.CredentialStore.Delete(account.CredentialTarget);
+        Update(_settings with { MailAccount = null });
+        RefreshMailPage();
+    }
+
+    public void ReconnectMailAccount()
+    {
+        if (_settings.MailAccount is { } account && _settings.MailInNotch)
+            _imap.Start(account);
+    }
+
+    /// <summary>Mail della casella collegata e delle notifiche, le più recenti per prime e senza doppioni.</summary>
+    private IReadOnlyList<MailItem> Mails => MailFeed.Merge(_imap.Recent, _notifications.Recent, NotificationService.RecentCapacity);
+
+    public void ShowTestMailAlert()
+    {
+        if (!_settings.Notch)
+            return;
+        _notch.ShowMailAlert(new MailItem("Nothing Shell", "Prova: la posta nel notch funziona", "Nothing Shell", DateTimeOffset.Now));
+    }
 
     public async Task RequestNotificationAccessAsync()
     {
@@ -179,10 +266,15 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
         _pins.Start();
         ApplyPins();
         _tracker.Start();
+        _bars.Rebuild();
         ApplyTopLevelVisibility();
         _winKey.Start();
         if (_settings.MailInNotch)
+        {
             _notifications.Start();
+            if (_settings.MailAccount is { } account)
+                _imap.Start(account);
+        }
         RefreshMailPage();
 
         await _access.StartAsync();
@@ -236,8 +328,10 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
         _access.Dispose();
         _plugins.Dispose();
         _notifications.Dispose();
+        _imap.Dispose();
         _winKey.Dispose();
         _pins.Dispose();
+        _bars.Dispose();
         _tracker.Dispose();
         _media.Dispose();
     }
@@ -253,9 +347,10 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
     private void RefreshMailPage()
     {
         var empty = !_settings.MailInNotch ? "Mail nel notch disattivate (Impostazioni)"
-            : _notifications.Access == UserNotificationListenerAccessStatus.Allowed ? "Nessuna mail recente"
-            : "Consenti l'accesso alle notifiche nelle impostazioni di Nothing Shell";
-        _notch.SetMail(_settings.MailInNotch ? _notifications.Recent : [], empty);
+            : _imap.IsConnected || _notifications.Access == UserNotificationListenerAccessStatus.Allowed ? "Nessuna mail recente"
+            : _settings.MailAccount is not null ? _imap.Status
+            : "Collega la casella nelle impostazioni di Nothing Shell";
+        _notch.SetMail(_settings.MailInNotch ? Mails : [], empty);
     }
 
     private void LoadPlugins()
@@ -273,7 +368,7 @@ public sealed class ShellController : IShellSettingsActions, IDisposable
     private void ApplyTopLevelVisibility()
     {
         SetVisible(_notch, _settings.Notch && !_fullscreen);
-        SetVisible(_bar, _settings.Bar && !_fullscreen);
+        _bars.Visible = _settings.Bar; // le barre si nascondono da sole sui monitor a schermo intero
 
         // La taskbar di Windows torna solo se la barra è spenta per scelta, non per lo schermo intero.
         if (_settings.Bar)

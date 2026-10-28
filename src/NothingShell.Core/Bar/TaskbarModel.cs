@@ -2,8 +2,8 @@ using NothingShell.Core.Widgets;
 
 namespace NothingShell.Core.Bar;
 
-/// <summary>Finestra elencabile nella barra. <see cref="ZOrder"/>: 0 = più in alto (più recente).</summary>
-public sealed record AppWindow(nint Handle, string AppKey, string Title, bool IsMinimized, int ZOrder);
+/// <summary>Finestra elencabile nella barra. <see cref="ZOrder"/>: 0 = più in alto (più recente); <see cref="Monitor"/>: HMONITOR.</summary>
+public sealed record AppWindow(nint Handle, string AppKey, string Title, bool IsMinimized, int ZOrder, nint Monitor = 0);
 
 /// <summary>
 /// Finestre della stessa app, in ordine stabile (ordine di comparsa). Un'app appuntata ha <see cref="Pin"/>
@@ -124,7 +124,8 @@ public sealed class TaskbarModel
             p.First.Windows.Zip(p.Second.Windows).All(w =>
                 w.First.Handle == w.Second.Handle &&
                 w.First.Title == w.Second.Title &&
-                w.First.IsMinimized == w.Second.IsMinimized));
+                w.First.IsMinimized == w.Second.IsMinimized &&
+                w.First.Monitor == w.Second.Monitor));
 }
 
 public static class Fullscreen

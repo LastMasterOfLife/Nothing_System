@@ -57,6 +57,10 @@ public partial class App : Application
                 await DumpWindows(file);
                 Shutdown();
                 return;
+            case ["--preview-demo", var image]:
+                await PreviewDemo(image);
+                Shutdown();
+                return;
             case ["--restore-taskbar"]:
                 WindowsTaskbar.ForceShow();
                 Shutdown();
@@ -252,6 +256,42 @@ public partial class App : Application
 
         public Task RequestNotificationAccessAsync() => Task.CompletedTask;
 
+        public bool NotificationAccessAllowed => true;
+
+        public IReadOnlyList<(string App, bool IsMail)> MailAppCandidates => [("Aruba Webmail", true), ("Slack", false)];
+
+        public void SetMailApp(string app, bool isMail)
+        {
+        }
+
+        public MailItem? LastMail => new("Mario Rossi", "Preventivo sito", "Outlook", DateTimeOffset.Now);
+
+        public void ShowTestMailAlert()
+        {
+        }
+
+        public MailAccount? MailAccount => null;
+
+        public string MailAccountStatus => "Nessuna casella collegata";
+
+        public bool MailAccountConnected => false;
+
+        public event Action? MailAccountChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Task<string?> ConnectMailAccountAsync(MailAccount account, string password) => Task.FromResult<string?>(null);
+
+        public void DisconnectMailAccount()
+        {
+        }
+
+        public void ReconnectMailAccount()
+        {
+        }
+
         public IEnumerable<(string Id, string Name)> Widgets =>
             new[] { ("Clock", "Orologio"), ("Battery", "Batteria"), ("System", "Sistema"), ("Calendar", "Calendario") }
                 .Concat(results.Where(r => r.Manifest is not null).Select(r => (r.Manifest!.WidgetId, $"{r.Manifest.Name} (plugin)")));
@@ -302,6 +342,38 @@ public partial class App : Application
         File.WriteAllLines(file, lines);
     }
 
+    /// <summary>
+    /// Anteprime dal vivo dell'app con più finestre, sul monitor principale, catturate dallo schermo in PNG
+    /// (le miniature le disegna DWM: un rendering WPF non le vedrebbe).
+    /// </summary>
+    private static async Task PreviewDemo(string image)
+    {
+        var catalog = new AppCatalog();
+        await catalog.RefreshAsync();
+        var pins = TaskbarPins.Read();
+        var resolver = new AppIdResolver();
+        resolver.SetSources(pins, catalog.Apps);
+        using var tracker = new WindowTracker(resolver);
+        tracker.Refresh();
+        var monitor = Interop.WindowNative.Monitors().First(m => m.IsPrimary);
+        if (tracker.Groups.MaxBy(g => g.Windows.Count) is not { IsRunning: true } group)
+            return;
+
+        var preview = new PreviewWindow();
+        preview.Open(group, null, 0, monitor.Bounds.X + monitor.Bounds.Width / 2, monitor);
+        await Task.Delay(1000);
+        var hwnd = new WindowInteropHelper(preview).Handle;
+        if (Interop.WindowNative.GetWindowRect(hwnd, out var r) &&
+            Interop.NativeMethods.CaptureScreen(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top) is { } shot)
+        {
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(shot));
+            using var file = File.Create(image);
+            encoder.Save(file);
+        }
+        preview.Close();
+    }
+
     /// <summary>Barra con le app appuntate e aperte, ed elenco dei recenti della prima app che ne ha, in PNG.</summary>
     private static async Task RenderBarSnapshots(string folder)
     {
@@ -313,15 +385,22 @@ public partial class App : Application
         using var tracker = new WindowTracker(resolver);
         var shellIcons = new ShellIcons();
         var launcher = new LauncherWindow(catalog, shellIcons, new LauncherSettingsStore(LauncherSettingsStore.DefaultPath));
-        var bar = new BarWindow(tracker, new AppIcons(), shellIcons, catalog, new WindowsTaskbar(), launcher);
         tracker.SetPinned(pins);
         tracker.Refresh();
-        bar.SetTime(DateTime.Now);
 
-        var root = (FrameworkElement)bar.Content;
-        root.Width = SystemParameters.PrimaryScreenWidth;
-        root.Height = 48;
-        SaveSnapshot(root, Path.Combine(folder, "bar.png"), scale: 1);
+        // Una barra per monitor (bar-1.png sul principale), come le crea BarHost
+        var monitors = Interop.WindowNative.Monitors().OrderByDescending(m => m.IsPrimary).ToArray();
+        for (var i = 0; i < monitors.Length; i++)
+        {
+            var bar = new BarWindow(tracker, new AppIcons(), shellIcons, catalog, new WindowsTaskbar(), launcher,
+                monitors[i], NothingShell.Core.Bar.MultiMonitorMode.AllTaskbars);
+            bar.SetTime(DateTime.Now);
+            var root = (FrameworkElement)bar.Content;
+            var rect = NothingShell.Core.Bar.MultiMonitorBar.Place(monitors[i]);
+            root.Width = rect.Width / monitors[i].Scale;
+            root.Height = rect.Height / monitors[i].Scale;
+            SaveSnapshot(root, Path.Combine(folder, $"bar-{i + 1}.png"), scale: 1);
+        }
 
         var appIcons = new AppIcons();
         foreach (var pin in pins)

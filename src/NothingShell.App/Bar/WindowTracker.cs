@@ -8,7 +8,7 @@ namespace NothingShell.App.Bar;
 /// <summary>
 /// Elenca le finestre "da taskbar" e le osserva con SetWinEventHook, senza polling
 /// (docs/05-bar.md); le raggruppa per AppUserModelID e le unisce alle app appuntate.
-/// Rileva anche le app a schermo intero sul monitor principale.
+/// Rileva anche le app a schermo intero, per monitor.
 /// </summary>
 public sealed class WindowTracker : IDisposable
 {
@@ -21,12 +21,13 @@ public sealed class WindowTracker : IDisposable
     private readonly AppIdResolver _resolver;
     private readonly Dictionary<nint, string> _exePaths = [];
     private readonly Dictionary<nint, string?> _appIds = [];
+    private readonly Dictionary<nint, nint> _monitors = [];
     private readonly DispatcherTimer _debounce = new() { Interval = TimeSpan.FromMilliseconds(150) };
     private readonly WindowNative.WinEventProc _callback; // tenuto in vita finché esistono gli hook
     private readonly List<nint> _hooks = [];
     private readonly uint _ownProcessId = (uint)Environment.ProcessId;
     private int _resolverVersion;
-    private bool _fullscreen;
+    private nint _fullscreenMonitor;
 
     public WindowTracker(AppIdResolver? resolver = null)
     {
@@ -47,8 +48,8 @@ public sealed class WindowTracker : IDisposable
 
     public event Action<nint>? ForegroundChanged;
 
-    /// <summary>Un'app a schermo intero è in primo piano sul monitor principale (true) o non più (false).</summary>
-    public event Action<bool>? FullscreenChanged;
+    /// <summary>Monitor (HMONITOR) su cui un'app a schermo intero è in primo piano; 0 = nessuno.</summary>
+    public event Action<nint>? FullscreenChanged;
 
     public void Start()
     {
@@ -108,6 +109,7 @@ public sealed class WindowTracker : IDisposable
         {
             _exePaths.Remove(gone);
             _appIds.Remove(gone);
+            _monitors.Remove(gone);
         }
 
         if (_model.Update(windows))
@@ -172,6 +174,9 @@ public sealed class WindowTracker : IDisposable
         {
             if (hwnd == Foreground)
                 CheckFullscreen();
+            // Finestra spostata su un altro monitor: cambia la barra in cui compare.
+            if (_monitors.TryGetValue(hwnd, out var monitor) && WindowNative.MonitorOf(hwnd) != monitor)
+                _debounce.Start();
             return;
         }
 
@@ -182,17 +187,17 @@ public sealed class WindowTracker : IDisposable
     private void CheckFullscreen()
     {
         var hwnd = Foreground;
-        var fullscreen = false;
+        nint fullscreen = 0;
         if (hwnd != 0 && WindowNative.GetWindowRect(hwnd, out var r))
         {
-            var (monitor, isPrimary) = WindowNative.GetMonitor(hwnd);
-            fullscreen = isPrimary && Fullscreen.IsFullscreen(
-                ToRect(r), ToRect(monitor), WindowNative.GetClassName(hwnd));
+            var (bounds, _) = WindowNative.GetMonitor(hwnd);
+            if (Fullscreen.IsFullscreen(ToRect(r), ToRect(bounds), WindowNative.GetClassName(hwnd)))
+                fullscreen = WindowNative.MonitorOf(hwnd);
         }
 
-        if (fullscreen == _fullscreen)
+        if (fullscreen == _fullscreenMonitor)
             return;
-        _fullscreen = fullscreen;
+        _fullscreenMonitor = fullscreen;
         FullscreenChanged?.Invoke(fullscreen);
     }
 
@@ -261,7 +266,9 @@ public sealed class WindowTracker : IDisposable
         var key = appId is not null ? AppIds.Key(appId)
             : className == "ApplicationFrameWindow" ? $"{exe}|{title}"
             : exe.ToUpperInvariant();
-        return new AppWindow(hwnd, key, title, WindowNative.IsIconic(hwnd), zOrder);
+        var monitor = WindowNative.MonitorOf(hwnd);
+        _monitors[hwnd] = monitor;
+        return new AppWindow(hwnd, key, title, WindowNative.IsIconic(hwnd), zOrder, monitor);
     }
 
     private static AppWindow? Reject(string why, out string reason)

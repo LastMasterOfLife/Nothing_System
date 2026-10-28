@@ -10,9 +10,11 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using NothingShell.App.Interop;
 using NothingShell.App.Rendering;
+using NothingShell.Core.Bar;
 using NothingShell.Core.Design;
 using NothingShell.Core.DotMatrix;
 using NothingShell.Core.Launcher;
+using NothingShell.Core.Widgets;
 
 namespace NothingShell.App.Launcher;
 
@@ -123,26 +125,32 @@ public sealed class LauncherWindow : Window
         root.Height = PanelHeight;
     }
 
-    public void Toggle()
+    /// <summary>Apre o chiude il launcher sopra la barra di <paramref name="monitor"/> (null: monitor del mouse).</summary>
+    public void Toggle(DisplayMonitor? monitor = null)
     {
         if (IsVisible)
             Dismiss();
         else
-            Open();
+            Open(monitor);
     }
 
-    public void Open()
+    public void Open(DisplayMonitor? monitor = null)
     {
         _closing = false;
-        PositionAboveBar();
         _search.Text = string.Empty;
         ShowCurrentMode();
         _scroll.ScrollToTop();
 
+        var bounds = PlacementAboveBar(monitor);
+        var hwnd = new WindowInteropHelper(this).EnsureHandle();
+        if (bounds is { } b)
+            WindowNative.Place(hwnd, b);
         Opacity = 0;
         _slide.Y = 12;
         Show();
-        WindowNative.BringToFront(new WindowInteropHelper(this).Handle);
+        if (bounds is { } again)
+            WindowNative.Place(hwnd, again); // WPF può riapplicare la sua posizione alla prima apparizione
+        WindowNative.BringToFront(hwnd);
         Activate();
         _search.Focus();
         Keyboard.Focus(_search);
@@ -499,11 +507,22 @@ public sealed class LauncherWindow : Window
         }
     }
 
-    private void PositionAboveBar()
+    /// <summary>Centrato sopra la barra del monitor, in pixel fisici; null se non si trovano monitor.</summary>
+    private static Rect2? PlacementAboveBar(DisplayMonitor? monitor)
     {
-        var work = SystemParameters.WorkArea;
-        Left = (SystemParameters.PrimaryScreenWidth - PanelWidth) / 2;
-        Top = work.Bottom - PanelHeight - BottomGap;
+        if (monitor is null)
+        {
+            var monitors = WindowNative.Monitors();
+            var atCursor = WindowNative.MonitorAtCursor();
+            monitor = monitors.FirstOrDefault(m => m.Handle == atCursor) ?? monitors.FirstOrDefault(m => m.IsPrimary);
+            if (monitor is null)
+                return null;
+        }
+        var s = monitor.Scale;
+        var (width, height) = (PanelWidth * s, PanelHeight * s);
+        var left = monitor.Bounds.X + (monitor.Bounds.Width - width) / 2;
+        var top = MultiMonitorBar.Place(monitor).Y - height - BottomGap * s;
+        return new Rect2(Math.Round(left), Math.Round(top), Math.Round(width), Math.Round(height));
     }
 
     private void MakeToolWindow()
