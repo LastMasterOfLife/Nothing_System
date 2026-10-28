@@ -161,6 +161,8 @@ public sealed class SettingsWindow : Window
         };
         close.MouseEnter += (_, _) => close.Background = Theme.SurfaceBrush;
         close.MouseLeave += (_, _) => close.Background = Brushes.Transparent;
+        // Senza questo il click risale all'header, il cui DragMove cattura il mouse e si mangia il MouseLeftButtonUp.
+        close.MouseLeftButtonDown += (_, e) => e.Handled = true;
         close.MouseLeftButtonUp += (_, e) =>
         {
             e.Handled = true;
