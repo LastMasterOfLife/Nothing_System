@@ -4,7 +4,12 @@ namespace NothingShell.Core.Notch;
 /// Casella IMAP collegata al notch (docs/08-notch-mail-pages.md). La password non è qui: sta nel Gestore
 /// credenziali di Windows, sotto <see cref="CredentialTarget"/>.
 /// </summary>
-public sealed record MailAccount(string Address, string Server, int Port = MailAccount.DefaultPort, string? UserName = null)
+public sealed record MailAccount(
+    string Address,
+    string Server,
+    int Port = MailAccount.DefaultPort,
+    string? UserName = null,
+    string? Webmail = null)
 {
     public const int DefaultPort = 993;
 
@@ -120,15 +125,23 @@ public static class MailFeed
                && (a.Received - b.Received).Duration() <= SameMailWindow;
     }
 
-    /// <summary>Le più recenti per prime, senza doppioni, al massimo <paramref name="max"/>.</summary>
+    /// <summary>
+    /// Le più recenti per prime, senza doppioni, al massimo <paramref name="max"/>. Dei doppioni resta quella
+    /// della casella collegata: si può riaprire dal server.
+    /// </summary>
     public static IReadOnlyList<MailItem> Merge(IEnumerable<MailItem> first, IEnumerable<MailItem> second, int max)
     {
         ArgumentNullException.ThrowIfNull(first);
         ArgumentNullException.ThrowIfNull(second);
         var merged = new List<MailItem>();
         foreach (var mail in first.Concat(second).OrderByDescending(m => m.Received))
-            if (!merged.Any(m => IsSame(m, mail)))
+        {
+            var same = merged.FindIndex(m => IsSame(m, mail));
+            if (same < 0)
                 merged.Add(mail);
+            else if (merged[same].Imap is null && mail.Imap is not null)
+                merged[same] = mail;
+        }
         return merged.Take(max).ToArray();
     }
 }

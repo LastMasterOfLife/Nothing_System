@@ -1,13 +1,17 @@
 using System.Windows;
 using System.Windows.Controls;
 using NothingShell.App.Rendering;
+using NothingShell.App.Services;
 using NothingShell.Core.DotMatrix;
 using NothingShell.Core.Notch;
 using NothingShell.Core.Sensors;
 
 namespace NothingShell.App.Notch;
 
-/// <summary>Pagina Sistema: CPU, RAM e batteria con percentuale e barra a punti.</summary>
+/// <summary>
+/// Pagina Sistema: CPU, RAM e batteria con percentuale e barra a punti; sotto, chi usa microfono e webcam
+/// e i download in corso.
+/// </summary>
 public sealed class SystemPage : NotchPageView
 {
     private const double BarPitch = 6;
@@ -19,6 +23,8 @@ public sealed class SystemPage : NotchPageView
     private readonly (DotMatrixView Bar, DotMatrixView Value) _ram;
     private readonly (DotMatrixView Bar, DotMatrixView Value) _battery;
     private readonly Grid _batteryRow;
+    private readonly TextBlock _privacy = NotchUi.Text(11, Theme.RedBrush);
+    private readonly TextBlock _download = NotchUi.Text(11, Theme.GreyBrush);
 
     public SystemPage()
     {
@@ -26,6 +32,12 @@ public sealed class SystemPage : NotchPageView
         (_cpu, _) = AddRow(stack, "CPU");
         (_ram, _) = AddRow(stack, "RAM");
         (_battery, _batteryRow) = AddRow(stack, "BATTERIA");
+        _privacy.Margin = new Thickness(0, 4, 0, 0);
+        _privacy.Visibility = Visibility.Collapsed;
+        _download.Margin = new Thickness(0, 2, 0, 0);
+        _download.Visibility = Visibility.Collapsed;
+        stack.Children.Add(_privacy);
+        stack.Children.Add(_download);
         Children.Add(stack);
     }
 
@@ -43,6 +55,29 @@ public sealed class SystemPage : NotchPageView
         ArgumentNullException.ThrowIfNull(battery);
         _batteryRow.Visibility = battery.HasBattery ? Visibility.Visible : Visibility.Collapsed;
         Set(_battery, battery.BarFraction, battery.IsLow);
+    }
+
+    public void SetActivities(PrivacyState privacy, IReadOnlyList<Core.Notch.ActiveDownload> downloads)
+    {
+        ArgumentNullException.ThrowIfNull(privacy);
+        ArgumentNullException.ThrowIfNull(downloads);
+        var mic = string.Join(", ", privacy.Microphone);
+        var cam = string.Join(", ", privacy.Camera);
+        _privacy.Text = (mic.Length, cam.Length) switch
+        {
+            (> 0, > 0) when mic == cam => $"Microfono e webcam in uso: {mic}",
+            (> 0, > 0) => $"Microfono: {mic}  ·  Webcam: {cam}",
+            (> 0, _) => $"Microfono in uso: {mic}",
+            (_, > 0) => $"Webcam in uso: {cam}",
+            _ => string.Empty,
+        };
+        _privacy.Visibility = privacy.Any ? Visibility.Visible : Visibility.Collapsed;
+
+        if (downloads is [var first, ..])
+            _download.Text = $"Download: {first.Name} · {Core.Notch.DownloadTracker.FormatBytes(first.Bytes)}"
+                             + (first.BytesPerSecond > 0 ? $" · {Core.Notch.DownloadTracker.FormatBytes((long)first.BytesPerSecond)}/s" : string.Empty)
+                             + (downloads.Count > 1 ? $" (+{downloads.Count - 1})" : string.Empty);
+        _download.Visibility = downloads.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private static void Set((DotMatrixView Bar, DotMatrixView Value) row, double fraction, bool alert)

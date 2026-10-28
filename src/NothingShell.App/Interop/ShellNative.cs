@@ -162,6 +162,12 @@ internal static class ShellNative
         return null;
     }
 
+    /// <summary>Cartella Download dell'utente (anche se spostata su un altro disco).</summary>
+    public static string? DownloadsFolder => GetKnownFolderPath("{374DE290-123F-4565-9164-39C4925E467B}");
+
+    /// <summary>Cartella Screenshot (Immagini\Screenshot, dove Windows salva le catture).</summary>
+    public static string? ScreenshotsFolder => GetKnownFolderPath("{B7BEDE81-DF94-4682-A7D8-57A52620B86F}");
+
     private static string? GetKnownFolderPath(string id)
     {
         var guid = new Guid(id);

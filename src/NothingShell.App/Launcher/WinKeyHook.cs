@@ -6,7 +6,8 @@ namespace NothingShell.App.Launcher;
 /// <summary>
 /// Hook di tastiera di basso livello su un thread dedicato con il proprio ciclo di messaggi:
 /// Windows rimuove gli hook che rispondono lentamente, quindi non deve mai dipendere dal thread UI.
-/// Solleva <see cref="Pressed"/> (sul thread dell'hook) quando Win viene premuto da solo.
+/// Solleva <see cref="Pressed"/> (sul thread dell'hook) quando Win viene premuto da solo; se richiesto,
+/// prende i tasti del volume (<see cref="VolumeKey"/>) così l'indicatore di Windows non compare.
 /// </summary>
 public sealed class WinKeyHook : IDisposable
 {
@@ -20,12 +21,15 @@ public sealed class WinKeyHook : IDisposable
     private const uint LlkhfInjected = 0x10;
     private const uint KeyEventExtendedKey = 0x0001;
     private const uint KeyEventKeyUp = 0x0002;
+    private const int VkVolumeMute = 0xAD;
+    private const int VkVolumeUp = 0xAF;
 
     private readonly WinKeyGesture _gesture = new();
     private readonly HookProc _keyboardProc;
     private readonly HookProc _mouseProc;
     private Thread? _thread;
     private uint _threadId;
+    private volatile bool _interceptVolumeKeys;
 
     public WinKeyHook()
     {
@@ -36,6 +40,16 @@ public sealed class WinKeyHook : IDisposable
     private delegate nint HookProc(int code, nint wParam, nint lParam);
 
     public event Action? Pressed;
+
+    /// <summary>Tasto del volume premuto (0xAD muto, 0xAE giù, 0xAF su), sul thread dell'hook: va solo inoltrato.</summary>
+    public event Action<int>? VolumeKey;
+
+    /// <summary>I tasti del volume li gestisce la shell (volume nel notch) invece di Windows.</summary>
+    public bool InterceptVolumeKeys
+    {
+        get => _interceptVolumeKeys;
+        set => _interceptVolumeKeys = value;
+    }
 
     public bool Enabled
     {
@@ -95,6 +109,12 @@ public sealed class WinKeyHook : IDisposable
                 keybd_event((byte)data.VirtualKey, 0, KeyEventExtendedKey | KeyEventKeyUp, 0);
                 Pressed?.Invoke();
                 return 1;
+            }
+            if (_interceptVolumeKeys && !injected && data.VirtualKey is >= VkVolumeMute and <= VkVolumeUp)
+            {
+                if (down)
+                    VolumeKey?.Invoke((int)data.VirtualKey);
+                return 1; // anche il rilascio: Windows non deve vedere il tasto
             }
         }
         return CallNextHookEx(0, code, wParam, lParam);

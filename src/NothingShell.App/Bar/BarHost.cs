@@ -42,6 +42,8 @@ public sealed class BarHost : IDisposable
 
     public event Action? SettingsRequested;
 
+    public event Action<BarWindow>? QuickPanelRequested;
+
     /// <summary>Barre accese (impostazione Barra); restano nascoste sui monitor con un'app a schermo intero.</summary>
     public bool Visible
     {
@@ -84,6 +86,7 @@ public sealed class BarHost : IDisposable
             }
             var bar = _create(monitor, mode);
             bar.SettingsRequested += () => SettingsRequested?.Invoke();
+            bar.QuickPanelRequested += b => QuickPanelRequested?.Invoke(b);
             if (_time is { } time)
                 bar.SetTime(time);
             if (_battery is not null)

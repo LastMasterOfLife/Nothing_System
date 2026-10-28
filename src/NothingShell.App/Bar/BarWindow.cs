@@ -110,6 +110,9 @@ public sealed class BarWindow : Window
 
     public event Action? SettingsRequested;
 
+    /// <summary>Clic sul pulsante rete e batteria: pannello rapido di Nothing (docs/11-agenda-pannello-rapido.md).</summary>
+    public event Action<BarWindow>? QuickPanelRequested;
+
     public DisplayMonitor Monitor { get; private set; }
 
     /// <summary>Monitor o impostazione di Windows cambiati: riposiziona la barra e rifà l'elenco delle app.</summary>
@@ -172,8 +175,15 @@ public sealed class BarWindow : Window
         quick.Children.Add(_network);
         quick.Children.Add(_battery);
         var quickButton = Button(quick, double.NaN);
-        quickButton.ToolTip = "Impostazioni rapide";
-        quickButton.MouseLeftButtonUp += (_, e) => Press(e, VkLeftWin, VkA);
+        quickButton.ToolTip = "Pannello rapido";
+        quickButton.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            if (QuickPanelRequested is null)
+                WindowNative.PressKeys(VkLeftWin, VkA);
+            else
+                QuickPanelRequested(this);
+        };
 
         var clock = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 12, 0) };
         _date.Margin = new Thickness(0, 4, 0, 0);

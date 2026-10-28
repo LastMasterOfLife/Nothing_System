@@ -60,6 +60,30 @@ public interface IShellSettingsActions
 
     void ReconnectMailAccount();
 
+    /// <summary>Webmail aperta dal lettore di posta: quella indicata o quella proposta dalla casella.</summary>
+    string? WebmailAddress { get; }
+
+    void SetWebmail(string? url);
+
+    /// <summary>Attività dal vivo del notch (volume, download…), accese o spente.</summary>
+    bool IsActivityEnabled(LiveActivity activity);
+
+    void SetActivityEnabled(LiveActivity activity, bool enabled);
+
+    /// <summary>Link iCal (.ics) dei calendari, oltre al calendario di Windows (docs/11-agenda-pannello-rapido.md).</summary>
+    IReadOnlyList<string> CalendarFeeds { get; }
+
+    /// <summary>Salva i link; restituisce l'errore se un indirizzo non è valido.</summary>
+    string? SetCalendarFeeds(IReadOnlyList<string> feeds);
+
+    string CalendarStatus { get; }
+
+    event Action? CalendarChanged;
+
+    void RefreshCalendar();
+
+    void ShowMorningBriefNow();
+
     IEnumerable<(string Id, string Name)> Widgets { get; }
 
     IReadOnlyList<PluginLoadResult> PluginResults { get; }
@@ -86,6 +110,7 @@ public sealed class SettingsWindow : Window
     private readonly IShellSettingsActions _shell;
     private readonly StackPanel _sections = new() { Margin = new Thickness(0, 0, 8, 0) };
     private TextBlock? _mailStatus;
+    private TextBlock? _calendarStatus;
 
     public SettingsWindow(IShellSettingsActions shell)
     {
@@ -109,7 +134,12 @@ public sealed class SettingsWindow : Window
         };
         // Lo stato della casella cambia da solo (connessione, errori): si aggiorna la riga senza rifare il modulo.
         _shell.MailAccountChanged += OnMailAccountChanged;
-        Closed += (_, _) => _shell.MailAccountChanged -= OnMailAccountChanged;
+        _shell.CalendarChanged += OnCalendarChanged;
+        Closed += (_, _) =>
+        {
+            _shell.MailAccountChanged -= OnMailAccountChanged;
+            _shell.CalendarChanged -= OnCalendarChanged;
+        };
     }
 
     /// <summary>Ridisegna le sezioni (dopo una ricarica dei plugin cambiano i widget e gli errori).</summary>
@@ -117,6 +147,7 @@ public sealed class SettingsWindow : Window
     {
         _sections.Children.Clear();
         _mailStatus = null;
+        _calendarStatus = null;
 
         Section("GENERALE");
         ToggleRow("Avvia con Windows", "Solo per questo utente", Autostart.IsEnabled, Autostart.Set);
@@ -127,8 +158,15 @@ public sealed class SettingsWindow : Window
         ToggleRow("Tasto Win apre il launcher", "Le combinazioni Win+… restano a Windows", _shell.UseWinKey, v => _shell.UseWinKey = v);
 
         Section("NOTCH");
-        Note("Swipe sul notch aperto (touchpad, rotellina o trascinamento) per Posta, Timer e Sistema.", Theme.GreyBrush);
+        Note("Swipe sul notch aperto (touchpad, rotellina o trascinamento) per Agenda, Posta, Timer e Sistema.", Theme.GreyBrush);
+        ActivityRow(LiveActivity.Volume, "Volume", "Con i tasti del volume, al posto dell'indicatore di Windows");
+        ActivityRow(LiveActivity.Brightness, "Luminosità", "Schermo del portatile (i monitor esterni non la comunicano)");
+        ActivityRow(LiveActivity.Privacy, "Microfono e webcam in uso", "Icone rosse nel notch, le app nella pagina Sistema");
+        ActivityRow(LiveActivity.Downloads, "Download", "In corso dalla cartella Download, poi Apri e Cartella");
+        ActivityRow(LiveActivity.Screenshots, "Screenshot rapido", "Strumento di cattura (Win+Maiusc+S, Stamp) e Greenshot: anteprima da trascinare");
+        ActivityRow(LiveActivity.Bluetooth, "Cuffie Bluetooth", "Collegamento e batteria");
 
+        AgendaSection();
         MailSection();
 
         Section("ACCESSO");
@@ -161,6 +199,66 @@ public sealed class SettingsWindow : Window
         ButtonRow(("APRI CARTELLA DEI DATI", () => OpenFolder(_shell.DataFolder)));
     }
 
+    /// <summary>Prossimo appuntamento e riepilogo del mattino, con i calendari da cui leggere gli appuntamenti.</summary>
+    private void AgendaSection()
+    {
+        Section("AGENDA");
+        ActivityRow(LiveActivity.Agenda, "Prossimo appuntamento", "Sotto l'ora, nella pagina Agenda e 10 minuti prima, con Partecipa");
+        ActivityRow(LiveActivity.MorningBrief, "Riepilogo del mattino", "Al primo accesso della giornata: appuntamenti e mail da leggere");
+        Note("Nothing Shell legge il calendario di Windows (se Windows lo consente alle app desktop) e i link iCal " +
+             "(.ics) che aggiungi qui. Outlook: Impostazioni › Calendario › Calendari condivisi › Pubblica un " +
+             "calendario, link ICS. Google Calendar: impostazioni del calendario › Indirizzo segreto in formato iCal. " +
+             "I link si leggono soltanto.", Theme.GreyBrush);
+
+        var feeds = _shell.CalendarFeeds;
+        foreach (var feed in feeds)
+        {
+            var row = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+            var label = Label(feed, 12, Theme.WhiteBrush);
+            label.TextTrimming = TextTrimming.CharacterEllipsis;
+            label.VerticalAlignment = VerticalAlignment.Center;
+            label.Margin = new Thickness(0, 0, 90, 0);
+            label.ToolTip = feed;
+            row.Children.Add(label);
+            var remove = Label("RIMUOVI", 11, Theme.RedBrush);
+            remove.HorizontalAlignment = HorizontalAlignment.Right;
+            remove.VerticalAlignment = VerticalAlignment.Center;
+            remove.Cursor = Cursors.Hand;
+            remove.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                _shell.SetCalendarFeeds(feeds.Where(f => f != feed).ToArray());
+                Rebuild();
+            };
+            row.Children.Add(remove);
+            _sections.Children.Add(row);
+        }
+
+        var link = Field("Aggiungi un link iCal (https:// o webcal://)", "");
+        var result = Note(string.Empty, Theme.RedBrush);
+        result.Visibility = Visibility.Collapsed;
+        ButtonRow(
+            ("AGGIUNGI", () =>
+            {
+                if (_shell.SetCalendarFeeds([.. feeds, link.Text]) is { } error)
+                {
+                    result.Text = error;
+                    result.Visibility = Visibility.Visible;
+                    return;
+                }
+                Rebuild();
+            }),
+            ("AGGIORNA", _shell.RefreshCalendar),
+            ("PROVA RIEPILOGO", _shell.ShowMorningBriefNow));
+        _calendarStatus = Note(_shell.CalendarStatus, Theme.GreyBrush);
+    }
+
+    private void OnCalendarChanged()
+    {
+        if (_calendarStatus is not null)
+            _calendarStatus.Text = _shell.CalendarStatus;
+    }
+
     /// <summary>
     /// Come collegare la posta al notch (docs/08-notch-mail-pages.md). Due strade: la casella collegata
     /// direttamente (IMAP, consigliata) oppure le notifiche che un'app di posta mostra in Windows.
@@ -179,13 +277,21 @@ public sealed class SettingsWindow : Window
 
         Heading("Collega la tua casella", "consigliato");
         Note("Nothing Shell si collega direttamente alla casella (IMAP) e avvisa appena arriva una mail, senza " +
-             "altre app aperte. Legge solo mittente e oggetto della Posta in arrivo, non modifica né segna come " +
-             "lette le mail. La password resta cifrata nel Gestore credenziali di Windows.", Theme.GreyBrush);
+             "altre app aperte. Un clic su una mail nel notch la apre nel lettore di Nothing: la mail resta non " +
+             "letta finché non premi Segna come letta, l'unica modifica che Nothing Shell fa alla casella. " +
+             "La password resta cifrata nel Gestore credenziali di Windows.", Theme.GreyBrush);
         if (_shell.MailAccount is { } account)
         {
             _mailStatus = Note(_shell.MailAccountStatus, _shell.MailAccountConnected ? Theme.WhiteBrush : Theme.RedBrush);
             Note($"Utente: {account.Login} · server {account.Server}:{account.Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
                 Theme.GreyBrush);
+            var webmail = Field("Webmail (per «Apri in…» e gli allegati; se è installata come app di Edge si apre l'app)",
+                _shell.WebmailAddress ?? string.Empty);
+            webmail.LostFocus += (_, _) =>
+            {
+                if (webmail.Text.Trim() != (_shell.WebmailAddress ?? string.Empty))
+                    _shell.SetWebmail(webmail.Text);
+            };
             ButtonRow(
                 ("RICOLLEGA", _shell.ReconnectMailAccount),
                 ("SCOLLEGA", () =>
@@ -440,6 +546,9 @@ public sealed class SettingsWindow : Window
         label.Margin = new Thickness(0, _sections.Children.Count == 0 ? 0 : 22, 0, 8);
         _sections.Children.Add(label);
     }
+
+    private void ActivityRow(LiveActivity activity, string title, string description) =>
+        ToggleRow(title, description, _shell.IsActivityEnabled(activity), v => _shell.SetActivityEnabled(activity, v));
 
     private void ToggleRow(string title, string? description, bool isOn, Action<bool> changed)
     {

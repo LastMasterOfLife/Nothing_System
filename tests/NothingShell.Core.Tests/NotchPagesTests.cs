@@ -70,10 +70,10 @@ public class NotchPagerTests
         var pager = new NotchPager();
         Assert.False(pager.Apply(SwipeDirection.Previous)); // già alla prima
         Assert.True(pager.Apply(SwipeDirection.Next));
-        Assert.Equal(NotchPage.Mail, pager.Current);
+        Assert.Equal(NotchPage.Agenda, pager.Current);
         pager.Show(NotchPage.System);
         Assert.False(pager.Apply(SwipeDirection.Next)); // già all'ultima
-        Assert.Equal(3, pager.Index);
+        Assert.Equal(4, pager.Index);
     }
 }
 
@@ -340,4 +340,88 @@ public class MailFeedTests
     [Fact]
     public void SameSubjectHoursApartIsAnotherMail() =>
         Assert.False(MailFeed.IsSame(new MailItem("A", "Ciao", "x", T), new MailItem("A", "Ciao", "x", T.AddHours(2))));
+
+    [Fact]
+    public void DuplicateKeepsTheMailThatCanBeReopened()
+    {
+        var imap = new MailItem("Mario Rossi", "Preventivo", "mail.b.it", T) { Imap = new ImapMessageRef(7, 42) };
+        var toast = new MailItem("Mario Rossi", "preventivo", "Outlook", T.AddMinutes(1));
+
+        var merged = MailFeed.Merge([imap], [toast], 10);
+
+        Assert.Equal(new ImapMessageRef(7, 42), Assert.Single(merged).Imap);
+    }
+}
+
+public class MailTextTests
+{
+    [Fact]
+    public void HtmlBecomesReadableLines()
+    {
+        const string html = """
+            <html><head><title>x</title><style>p{color:red}</style></head>
+            <body><p>Ciao&nbsp;Mario,</p><div>ecco il <b>preventivo</b> &amp; il listino.<br>A presto</div>
+            <!-- tracking --><ul><li>uno</li><li>due</li></ul><script>alert(1)</script></body></html>
+            """;
+
+        Assert.Equal("Ciao Mario,\n\necco il preventivo & il listino.\nA presto\n\n• uno\n• due", MailText.FromHtml(html));
+    }
+
+    [Fact]
+    public void NormalizeKeepsAtMostOneBlankLine() =>
+        Assert.Equal("a\n\nb", MailText.Normalize("  a  \r\n\r\n\r\n\t\r\nb\n\n"));
+}
+
+public class MailCodesTests
+{
+    [Theory]
+    [InlineData("Il tuo codice di verifica è 482913", "482913")]
+    [InlineData("G-731204 è il tuo codice di verifica Google", "731204")]
+    [InlineData("Codice OTP: 123 456. Scade tra 10 minuti", "123456")]
+    [InlineData("Riunione 2026: codice sala 4821", "4821")]
+    [InlineData("Your verification code is 90210", "90210")]
+    public void FindsTheCode(string text, string code) => Assert.Equal(code, MailCodes.Find(text));
+
+    [Theory]
+    [InlineData("Fattura 2026 n. 123456 del 28/10")] // nessuna parola chiave
+    [InlineData("Codice cliente: totale 1500 €")] // importo
+    [InlineData("Conferma ordine del 28.10.2026")] // data
+    public void IgnoresNumbersThatAreNotCodes(string text) => Assert.Null(MailCodes.Find(text));
+
+    [Fact]
+    public void SubjectFirstThenBody() =>
+        Assert.Equal("777111", MailCodes.Find("Accesso al tuo account", "Usa il codice 777111 per entrare"));
+}
+
+public class MailLinksTests
+{
+    [Fact]
+    public void WebmailOfKnownProviderOrServer()
+    {
+        Assert.Equal("https://mail.google.com/", MailLinks.Webmail(new MailAccount("a@gmail.com", "imap.gmail.com"))?.ToString());
+        Assert.Equal("https://mail.b.it/", MailLinks.Webmail(new MailAccount("a@b.it", "mail.b.it"))?.ToString());
+        Assert.Equal("https://posta.b.it/owa/",
+            MailLinks.Webmail(new MailAccount("a@b.it", "mail.b.it", Webmail: "posta.b.it/owa/"))?.ToString());
+    }
+
+    [Fact]
+    public void EdgeWebAppOfTheSiteIsPreferred()
+    {
+        var apps = new[]
+        {
+            new NothingShell.Core.Launcher.AppEntry("Microsoft.Office.OUTLOOK.EXE.15", "Outlook"),
+            new NothingShell.Core.Launcher.AppEntry("mail.b.it-17472CD0_nb9wzx8vsex3w!App", "Outlook (PWA)"),
+        };
+
+        Assert.Equal("Outlook (PWA)", MailLinks.InstalledWebApp(new Uri("https://mail.b.it/owa/"), apps)?.Name);
+        Assert.Null(MailLinks.InstalledWebApp(new Uri("https://b.it/"), apps));
+    }
+
+    [Fact]
+    public void ReplyAddsReOnce()
+    {
+        Assert.Equal("mailto:mario@b.it?subject=Re%3A%20Preventivo%20%26%20listino", MailLinks.Reply("mario@b.it", "Preventivo & listino"));
+        Assert.Equal("mailto:mario@b.it?subject=RE%3A%20x", MailLinks.Reply("mario@b.it", "RE: x"));
+        Assert.Null(MailLinks.Reply(null, "x"));
+    }
 }

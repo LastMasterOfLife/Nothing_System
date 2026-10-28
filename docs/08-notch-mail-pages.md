@@ -66,12 +66,34 @@ Nothing Shell si collega direttamente al server IMAP con MailKit:
 - Con casella collegata e notifiche insieme (es. anche Outlook aperto), la stessa mail (stesso oggetto,
   stesso mittente, entro 3 minuti) dà un solo avviso e una sola riga (Core `MailFeed`, testato).
 
+## Aprire una mail
+Un clic su una mail della pagina Posta (righe evidenziate al passaggio del mouse, punto rosso = non letta):
+- **casella collegata** → **lettore di posta** di Nothing (880 × 600): a sinistra le ultime mail con data e
+  non lette, a destra la mail scelta (↑↓ per scorrere, Esc per chiudere). La mail si scarica con una
+  connessione a parte, Posta in arrivo in sola lettura e `BODY.PEEK`: **aprirla non la segna come letta**.
+  Testo semplice se c'è, altrimenti l'HTML ripulito (Core `MailText`); degli allegati solo i nomi.
+  Contenuti solo in memoria, finché il lettore è aperto.
+- **notifica** → si apre l'app che l'ha mandata (AppUserModelID della notifica, se è nello Start); altrimenti
+  il lettore mostra oggetto e mittente.
+
+Azioni del lettore:
+| Azione | Cosa fa |
+|---|---|
+| *Rispondi* | `mailto:` al mittente (o Reply-To) con "Re: oggetto", nell'app di posta predefinita (Core `MailLinks.Reply`) |
+| *Apri in …* | la webmail: quella indicata nelle impostazioni, dei provider noti o `https://<server>/`. Se il sito è installato come **app di Edge** (AppUserModelID `host-…`) si apre l'app (Core `MailLinks`) |
+| *Segna come letta* | aggiunge `\Seen` sul server (connessione in lettura e scrittura solo per questo): l'unica modifica alla casella, e solo su richiesta |
+| *Copia codice* | codici di verifica di 4–8 cifre vicini a parole come "codice", "OTP", "verification" (non anni, date o importi; Core `MailCodes`) negli appunti |
+
+Non lette: a ogni controllo si rileggono busta e flag delle ultime 10 mail e il numero di `UNSEEN`;
+IDLE si sveglia anche quando una mail viene letta o eliminata da un altro client.
+
 ## Impostazioni
 Sezione **POSTA NEL NOTCH**: interruttore *Mail nel notch*, poi:
 - **Collega la tua casella** (consigliato): indirizzo, server IMAP (proposto dall'indirizzo: provider noti
   o `imap.dominio`, Core `ImapSetup`), porta (993), utente se diverso dall'indirizzo, password.
   *Collega* prova l'accesso e salva solo se riesce, con l'errore in italiano altrimenti. Collegata: stato
-  dal vivo (bianco se collegata, rosso se in errore), *Ricollega*, *Scollega*.
+  dal vivo (bianco se collegata, rosso se in errore), campo *Webmail* (proposto, modificabile), *Ricollega*,
+  *Scollega*.
 - **Oppure: le notifiche di un'app di posta**, in tre passi numerati a punti (rosso = da fare, grigio = fatto):
   1. **Accesso alle notifiche**: stato; *Consenti accesso* se Windows non l'ha ancora chiesto,
      altrimenti, se negato, *Apri Privacy › Notifiche* (`ms-settings:privacy-notifications`).
@@ -83,8 +105,9 @@ Sezione **POSTA NEL NOTCH**: interruttore *Mail nel notch*, poi:
 - **Verifica**: ultima mail rilevata da qualsiasi fonte; *Prova l'avviso* mostra un avviso finto nel
   notch; *Aggiorna* rilegge lo stato.
 
-`settings.json`: `mailInNotch`, `extraMailApps`, `mailAccount` (`address`, `server`, `port`, `userName`).
+`settings.json`: `mailInNotch`, `extraMailApps`, `mailAccount` (`address`, `server`, `port`, `userName`, `webmail`).
 
 ## Logica nel Core (testata)
 `NotchStateMachine` (stato Alert e scadenze), `NotchPager`, `SwipeDetector`, `Countdown`,
-`MailDetector`, `ImapSetup`, `ImapCursor`, `MailFeed`.
+`MailDetector`, `ImapSetup`, `ImapCursor`, `MailFeed` (dei doppioni tiene la mail della casella, che si
+può riaprire), `MailText`, `MailCodes`, `MailLinks`.

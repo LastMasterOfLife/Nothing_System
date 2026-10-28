@@ -111,13 +111,14 @@ public sealed class NotificationService : IDisposable
                 current.Add(n.Id);
                 if (_seen.Contains(n.Id))
                     continue;
-                var (app, texts) = Read(n);
+                var (app, appId, texts) = Read(n);
                 RememberApp(app);
                 if (!MailDetector.IsMail(app, texts, ExtraMailApps()))
                     continue;
                 if (MailDetector.Extract(app, texts, n.CreationTime) is not { } mail)
                     continue;
 
+                mail = mail with { AppId = appId }; // per aprire l'app dal notch
                 _recent.Insert(0, mail);
                 if (_recent.Count > RecentCapacity)
                     _recent.RemoveAt(_recent.Count - 1);
@@ -152,11 +153,13 @@ public sealed class NotificationService : IDisposable
             _apps.RemoveAt(_apps.Count - 1);
     }
 
-    private static (string App, IReadOnlyList<string> Texts) Read(UserNotification notification)
+    private static (string App, string? AppId, IReadOnlyList<string> Texts) Read(UserNotification notification)
     {
         string app;
+        string? appId = null;
         try
         {
+            appId = notification.AppInfo.AppUserModelId;
             app = notification.AppInfo.DisplayInfo.DisplayName;
         }
         catch (Exception ex) when (ex is COMException or ArgumentException)
@@ -167,6 +170,6 @@ public sealed class NotificationService : IDisposable
         var visual = notification.Notification.Visual;
         var binding = visual?.GetBinding(KnownNotificationBindings.ToastGeneric) ?? visual?.Bindings.FirstOrDefault();
         var texts = binding?.GetTextElements().Select(t => t.Text ?? string.Empty).ToArray() ?? [];
-        return (app, texts);
+        return (app, appId, texts);
     }
 }

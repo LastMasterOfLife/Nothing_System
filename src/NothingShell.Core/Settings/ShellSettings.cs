@@ -12,9 +12,22 @@ public sealed record ShellSettings(
     bool MailInNotch = true,
     IReadOnlyList<string>? ExtraMailApps = null,
     bool Access = true,
-    MailAccount? MailAccount = null)
+    MailAccount? MailAccount = null,
+    IReadOnlyList<LiveActivity>? DisabledActivities = null,
+    IReadOnlyList<string>? CalendarFeeds = null,
+    DateOnly? MorningBriefShown = null)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
+
+    public bool IsActivityEnabled(LiveActivity activity) => DisabledActivities?.Contains(activity) != true;
+
+    public ShellSettings WithActivity(LiveActivity activity, bool enabled)
+    {
+        var disabled = (DisabledActivities ?? []).Where(a => a != activity).ToList();
+        if (!enabled)
+            disabled.Add(activity);
+        return this with { DisabledActivities = disabled };
+    }
 
     public bool IsWidgetEnabled(string widgetId) => !DisabledWidgets.Contains(widgetId, StringComparer.Ordinal);
 
@@ -33,6 +46,7 @@ public sealed class ShellSettingsStore(string path)
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
     public static string DefaultPath { get; } = Path.Combine(AtomicFile.DataFolder, "settings.json");

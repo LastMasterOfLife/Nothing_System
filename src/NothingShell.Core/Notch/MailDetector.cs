@@ -1,7 +1,19 @@
 namespace NothingShell.Core.Notch;
 
-/// <summary>Mail ricevuta, ricavata da una notifica. Resta solo in memoria.</summary>
-public sealed record MailItem(string Sender, string Subject, string App, DateTimeOffset Received);
+/// <summary>Mail ricevuta, dalla casella collegata o da una notifica. Resta solo in memoria.</summary>
+public sealed record MailItem(string Sender, string Subject, string App, DateTimeOffset Received)
+{
+    /// <summary>Posizione nella casella collegata, per riaprirla dal server; null per le mail dalle notifiche.</summary>
+    public ImapMessageRef? Imap { get; init; }
+
+    /// <summary>AppUserModelID dell'app che ha mandato la notifica, per aprirla; null se non noto.</summary>
+    public string? AppId { get; init; }
+
+    public string? SenderAddress { get; init; }
+
+    /// <summary>Non ancora letta (solo casella collegata: le notifiche non lo dicono).</summary>
+    public bool IsUnread { get; init; }
+}
 
 /// <summary>Riconosce le notifiche di posta e ne estrae mittente e oggetto (docs/08-notch-mail-pages.md).</summary>
 public static class MailDetector

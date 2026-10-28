@@ -5,6 +5,7 @@ using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Search;
 using MailKit.Security;
+using MimeKit;
 using NothingShell.App.Interop;
 using NothingShell.Core.Notch;
 
@@ -23,11 +24,18 @@ public sealed class ImapMailService : IDisposable
     private static readonly TimeSpan FirstRetry = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan MaxRetry = TimeSpan.FromMinutes(5);
 
+    private const MessageSummaryItems SummaryItems =
+        MessageSummaryItems.UniqueId | MessageSummaryItems.Envelope | MessageSummaryItems.InternalDate | MessageSummaryItems.Flags;
+
     private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
     private readonly List<MailItem> _recent = [];
     private CancellationTokenSource? _stop;
+    private MailAccount? _account;
 
     public IReadOnlyList<MailItem> Recent => _recent;
+
+    /// <summary>Mail non lette nella Posta in arrivo (anche oltre le ultime 10).</summary>
+    public int UnreadCount { get; private set; }
 
     public string Status { get; private set; } = "Nessuna casella collegata";
 
@@ -49,6 +57,7 @@ public sealed class ImapMailService : IDisposable
             return;
         }
         _stop = new CancellationTokenSource();
+        _account = account;
         SetStatus($"Connessione a {account.Server}…", connected: false);
         var token = _stop.Token;
         _ = Task.Run(() => RunAsync(account, password, token), token);
@@ -59,8 +68,69 @@ public sealed class ImapMailService : IDisposable
         _stop?.Cancel();
         _stop?.Dispose();
         _stop = null;
+        _account = null;
         _recent.Clear();
+        UnreadCount = 0;
         SetStatus("Nessuna casella collegata", connected: false);
+    }
+
+    /// <summary>
+    /// Scarica la mail intera con una connessione a parte (quella principale è in IDLE). La casella è aperta in
+    /// sola lettura e MailKit chiede <c>BODY.PEEK</c>: aprirla qui non la segna come letta.
+    /// </summary>
+    public async Task<(MailContent? Content, string? Error)> LoadAsync(ImapMessageRef message, CancellationToken cancellation)
+    {
+        if (Credentials() is not ({ } account, { } password))
+            return (null, "La casella non è collegata.");
+        using var client = new ImapClient { Timeout = 30_000 };
+        try
+        {
+            await ConnectAsync(client, account, password, cancellation);
+            await client.Inbox.OpenAsync(FolderAccess.ReadOnly, cancellation);
+            if (client.Inbox.UidValidity != message.UidValidity)
+                return (null, "La casella è stata riorganizzata dal server: la mail non si trova più.");
+            var mime = await client.Inbox.GetMessageAsync(new UniqueId(message.UidValidity, message.Uid), cancellation);
+            await client.DisconnectAsync(true, cancellation);
+            return (ToContent(mime), null);
+        }
+        catch (MessageNotFoundException)
+        {
+            return (null, "La mail non c'è più: forse è stata spostata o eliminata.");
+        }
+        catch (Exception ex) when (Describe(ex) is { } reason)
+        {
+            return (null, reason);
+        }
+    }
+
+    /// <summary>Segna la mail come letta sul server: l'unica modifica che Nothing Shell fa, e solo se richiesta.</summary>
+    public async Task<string?> MarkReadAsync(ImapMessageRef message, CancellationToken cancellation)
+    {
+        if (Credentials() is not ({ } account, { } password))
+            return "La casella non è collegata.";
+        using var client = new ImapClient { Timeout = 30_000 };
+        try
+        {
+            await ConnectAsync(client, account, password, cancellation);
+            await client.Inbox.OpenAsync(FolderAccess.ReadWrite, cancellation);
+            if (client.Inbox.UidValidity != message.UidValidity)
+                return "La casella è stata riorganizzata dal server: la mail non si trova più.";
+            await client.Inbox.AddFlagsAsync(new UniqueId(message.UidValidity, message.Uid), MessageFlags.Seen, true, cancellation);
+            await client.DisconnectAsync(true, cancellation);
+        }
+        catch (Exception ex) when (Describe(ex) is { } reason)
+        {
+            return reason;
+        }
+        // La connessione principale riceverà il cambio dal server; intanto si aggiorna subito.
+        var index = _recent.FindIndex(m => m.Imap == message);
+        if (index >= 0 && _recent[index].IsUnread)
+        {
+            _recent[index] = _recent[index] with { IsUnread = false };
+            UnreadCount = Math.Max(0, UnreadCount - 1);
+            Changed?.Invoke();
+        }
+        return null;
     }
 
     /// <summary>Prova accesso e apertura della Posta in arrivo; null se riesce, altrimenti il motivo in italiano.</summary>
@@ -144,7 +214,10 @@ public sealed class ImapMailService : IDisposable
         }
     }
 
-    /// <summary>Con IDLE il server avvisa appena arriva qualcosa; l'attesa si rinnova ogni 9 minuti.</summary>
+    /// <summary>
+    /// Con IDLE il server avvisa appena arriva una mail o cambia lo stato di una (letta altrove, eliminata);
+    /// l'attesa si rinnova ogni 9 minuti.
+    /// </summary>
     private static async Task WaitForChangeAsync(ImapClient client, IMailFolder inbox, CancellationToken stop)
     {
         if (!client.Capabilities.HasFlag(ImapCapabilities.Idle))
@@ -154,53 +227,51 @@ public sealed class ImapMailService : IDisposable
             return;
         }
         using var done = new CancellationTokenSource(IdleRestart);
-        void OnCountChanged(object? sender, EventArgs e) => done.Cancel();
-        inbox.CountChanged += OnCountChanged;
+        void OnChanged(object? sender, EventArgs e) => done.Cancel();
+        inbox.CountChanged += OnChanged;
+        inbox.MessageFlagsChanged += OnChanged;
         try
         {
             await client.IdleAsync(done.Token, stop);
         }
         finally
         {
-            inbox.CountChanged -= OnCountChanged;
+            inbox.CountChanged -= OnChanged;
+            inbox.MessageFlagsChanged -= OnChanged;
         }
     }
 
+    /// <summary>
+    /// Rilegge le ultime mail (pochi KB: busta e flag) e il numero di non lette; avvisa solo per quelle con UID
+    /// nuovo. Al primo controllo prende solo il punto di partenza.
+    /// </summary>
     private async Task CheckAsync(IMailFolder inbox, ImapCursor cursor, CancellationToken stop)
     {
-        const MessageSummaryItems items = MessageSummaryItems.UniqueId | MessageSummaryItems.Envelope | MessageSummaryItems.InternalDate;
+        var latest = inbox.Count == 0 ? [] : await inbox.FetchAsync(Math.Max(0, inbox.Count - RecentCount), -1, SummaryItems, stop);
+        var mails = latest.OrderByDescending(m => m.UniqueId.Id).Select(ToMail).ToArray();
+        var unread = (await inbox.SearchAsync(SearchQuery.NotSeen, stop)).Count;
+
+        MailItem[] arrived = [];
         if (!cursor.IsPrimed || cursor.UidValidity != inbox.UidValidity)
         {
-            // Primo controllo: le ultime mail riempiono la pagina Posta, senza avvisi.
-            var latest = inbox.Count == 0 ? [] : await inbox.FetchAsync(Math.Max(0, inbox.Count - RecentCount), -1, items, stop);
             var lastUid = latest.Count > 0 ? latest.Max(m => m.UniqueId.Id) : (inbox.UidNext?.Id ?? 1) - 1;
             cursor.Prime(inbox.UidValidity, lastUid);
-            var mails = latest.OrderByDescending(m => m.UniqueId.Id).Select(ToMail).ToArray();
-            Post(() =>
-            {
-                _recent.Clear();
-                _recent.AddRange(mails);
-                Changed?.Invoke();
-            }, stop);
-            return;
+        }
+        else
+        {
+            var range = new UniqueIdRange(new UniqueId(inbox.UidValidity, cursor.LastUid + 1), UniqueId.MaxValue);
+            var found = await inbox.SearchAsync(SearchQuery.Uids(range), stop);
+            var fresh = cursor.Advance(inbox.UidValidity, found.Select(u => u.Id)).ToHashSet();
+            arrived = mails.Where(m => m.Imap is { } r && fresh.Contains(r.Uid)).Reverse().ToArray(); // dalla più vecchia
         }
 
-        var range = new UniqueIdRange(new UniqueId(inbox.UidValidity, cursor.LastUid + 1), UniqueId.MaxValue);
-        var found = await inbox.SearchAsync(SearchQuery.Uids(range), stop);
-        var fresh = cursor.Advance(inbox.UidValidity, found.Select(u => u.Id));
-        if (fresh.Count == 0)
-            return;
-        var summaries = await inbox.FetchAsync(fresh.Select(u => new UniqueId(inbox.UidValidity, u)).ToList(), items, stop);
-        var arrived = summaries.OrderBy(m => m.UniqueId.Id).Select(ToMail).ToArray();
         Post(() =>
         {
+            _recent.Clear();
+            _recent.AddRange(mails);
+            UnreadCount = unread;
             foreach (var mail in arrived)
-            {
-                _recent.Insert(0, mail);
                 MailArrived?.Invoke(mail);
-            }
-            if (_recent.Count > RecentCount)
-                _recent.RemoveRange(RecentCount, _recent.Count - RecentCount);
             Changed?.Invoke();
         }, stop);
     }
@@ -211,8 +282,36 @@ public sealed class ImapMailService : IDisposable
         var sender = string.IsNullOrWhiteSpace(from?.Name) ? from?.Address ?? string.Empty : from.Name;
         var subject = string.IsNullOrWhiteSpace(summary.Envelope?.Subject) ? "(senza oggetto)" : summary.Envelope.Subject;
         var received = summary.InternalDate ?? summary.Envelope?.Date ?? DateTimeOffset.Now;
-        return new MailItem(sender, subject, "Casella collegata", received);
+        return new MailItem(sender, subject, "Casella collegata", received)
+        {
+            Imap = new ImapMessageRef(summary.UniqueId.Validity, summary.UniqueId.Id),
+            SenderAddress = from?.Address,
+            IsUnread = summary.Flags is { } flags && !flags.HasFlag(MessageFlags.Seen),
+        };
     }
+
+    /// <summary>Testo semplice se c'è, altrimenti l'HTML ripulito; degli allegati solo il nome.</summary>
+    private static MailContent ToContent(MimeMessage mime)
+    {
+        var from = mime.From.Mailboxes.FirstOrDefault();
+        var body = mime.TextBody is { Length: > 0 } text ? MailText.Normalize(text)
+            : mime.HtmlBody is { } html ? MailText.FromHtml(html)
+            : string.Empty;
+        return new MailContent(
+            from is null ? string.Empty : string.IsNullOrWhiteSpace(from.Name) ? from.Address : $"{from.Name} <{from.Address}>",
+            string.Join(", ", mime.To.Mailboxes.Select(m => string.IsNullOrWhiteSpace(m.Name) ? m.Address : m.Name)),
+            mime.Date,
+            string.IsNullOrWhiteSpace(mime.Subject) ? "(senza oggetto)" : mime.Subject,
+            body,
+            mime.Attachments.Select(a => a.ContentDisposition?.FileName ?? a.ContentType.Name ?? "allegato").ToArray(),
+            mime.ReplyTo.Mailboxes.FirstOrDefault()?.Address ?? from?.Address);
+    }
+
+    /// <summary>Casella collegata e password dal Gestore credenziali; null se scollegata.</summary>
+    private (MailAccount Account, string Password)? Credentials() =>
+        _account is { } account && CredentialStore.Read(account.CredentialTarget) is { Length: > 0 } password
+            ? (account, password)
+            : null;
 
     /// <summary>Errori di rete e di protocollo in parole semplici; null per gli errori che non conosciamo.</summary>
     private static string? Describe(Exception ex) => ex switch
