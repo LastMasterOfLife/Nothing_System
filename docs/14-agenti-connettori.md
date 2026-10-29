@@ -93,13 +93,19 @@ e, per quelli che eseguono comandi o hanno pulsanti, il permesso con la descrizi
 `connectors/<nome>.json` (con `"template"`: da quale connettore viene), mette token e password nel Gestore credenziali,
 dà il permesso se richiesto e accende i connettori se erano spenti.
 
+Lo stesso connettore si attiva **quante volte serve**: un sito, un server, un processo per volta, ognuno col suo file
+(id dal nome, senza ripetizioni: `negozio`, `negozio-2`…). Il file ricorda i valori del modulo (`"values"`, mai i
+segreti), così ogni scheda ha **Modifica** (riscrive lo stesso connettore; il token vuoto resta quello salvato) e
+**Duplica** (il modulo già compilato per una copia da cambiare).
+
 | Categoria | Connettori |
 |---|---|
 | Questo PC | Spazio su disco, Servizio di Windows (Avvia, Riavvia), App in esecuzione (Termina), Docker, File di log |
 | Rete e web | Dispositivo in rete (ping), Sito o servizio web, IP pubblico, Stato di un servizio online (Statuspage: Claude, GitHub…) |
 | Casa | Home Assistant (Accendi/spegni), Sensori MQTT, Presa Shelly, Presa Tasmota, Stampante 3D OctoPrint e Klipper |
 | Server | Server Linux via SSH e Raspberry Pi (Riavvia), Prometheus con node_exporter |
-| Sviluppo e AI | GitHub: PR da rivedere, GitHub: ultima CI, Ollama |
+| Sicurezza | Microsoft Defender (Scansione rapida), Firewall di Windows, Aggiornamenti di Windows, Certificato SSL di un sito, Intestazioni di sicurezza, Porte esposte, Amministratori del PC, Accessi SSH falliti, Vulnerabilità sfruttate (CISA KEV) |
+| Sviluppo e AI | GitHub: PR da rivedere, GitHub: ultima CI, Ollama, Costi API Anthropic, Sito con LLM: costi |
 | Informazioni | Meteo e Qualità dell'aria (Open-Meteo), Cambio valuta (BCE), Criptovaluta (CoinGecko) |
 | Personalizzati | API JSON, File di stato, Comando PowerShell |
 
@@ -134,6 +140,46 @@ Campi comuni: `name`, `refreshSeconds` (di serie 60, almeno 5), `secret` (token 
 Gli stati più comuni di Home Assistant si leggono in italiano (on → ACCESO, open → APERTO…). Un errore passeggero lascia i
 valori di prima con il motivo accanto.
 
+Negli indirizzi `{today}` e `{monthStart}` diventano la mezzanotte UTC di oggi e del primo del mese (ISO 8601).
+
+### Costi LLM
+Un connettore `http`, `command` o `file` verso un sito che usa un modello (Claude, GPT…) può tenere traccia di quanto
+spende, **in euro**: scheda del connettore › *Costi LLM*, oppure il blocco `"llm"` nel file. I valori **LLM oggi**,
+**LLM mese**, **Chiamate oggi** e **Token oggi** si aggiungono a quelli del connettore: pagina Dispositivi, widget, avvisi.
+In cima a Impostazioni › Connettori il riepilogo di tutti i siti (oggi, mese, budget, totale) ed *Esporta CSV*
+(`costi-llm-<data>.csv` nella cartella dei dati: un giorno per riga e per sito).
+
+Il sito deve esporre l'uso del modello in JSON (o un comando stamparlo). Due forme:
+- **singole chiamate** (`"mode": "calls"`): un elenco, ogni chiamata con un id, contata una volta sola anche dopo un riavvio
+  (gli ultimi 2000 id restano nel registro); con `at` va nel suo giorno. Esempio di risposta:
+  `{"calls": [{"id": "c1", "model": "claude-sonnet-5-5", "input_tokens": 1200, "output_tokens": 300, "at": "2026-10-29T10:00:00Z"}]}`
+- **totali** (`"mode": "totals"`, di serie): contatori che crescono, anche uno per modello in un elenco; si conta la
+  differenza da un giro all'altro, un contatore che riparte da zero vale per intero. La prima lettura fa da punto di
+  partenza, se non c'è `"countFirst": true` (contatori del giorno, come l'Admin API).
+
+| Campo di `"llm"` | |
+|---|---|
+| `list` | percorso dell'elenco (`calls`, `data[0].results`); senza, la risposta è una voce sola |
+| `model` | `"{model}"` o un nome fisso |
+| `input`, `output`, `cacheRead`, `cacheWrite`, `cacheWrite1h` | token, come segnaposto (`"{usage.input_tokens}"`) |
+| `requests` | numero di chiamate (nei totali) |
+| `id`, `at` | id e ora della chiamata (`calls`) |
+| `cost`, `costCurrency`, `costScale` | costo calcolato dal sito, `USD` o `EUR`, `0.01` se in centesimi: vince sul listino |
+| `price` | `{"input": 0.5, "output": 1.5, "currency": "EUR"}` per milione di token, per modelli fuori listino |
+| `dailyBudget`, `monthlyBudget` | euro oltre i quali il valore è un avviso nel notch |
+| `usdToEur` | cambio fisso; senza, quello del giorno della BCE (Frankfurter), una volta al giorno |
+
+Il costo viene, nell'ordine, dal sito, dai prezzi propri o dal listino di Anthropic (`AgentPricing`); un modello senza
+prezzo conta i token e segna il costo come parziale (`LLM oggi*`). La tariffa per i prompt lunghi di Haiku 5.5 vale solo
+con le singole chiamate (sui totali non si sa quanto era lunga ogni richiesta). I dollari restano dollari nel registro e si
+convertono col cambio di quando si mostrano. Registro in `%USERPROFILE%\.nothing-shell\llm-costs.json` (400 giorni);
+*Azzera i costi* lo svuota per un connettore, *Rimuovi* anche. Il blocco `"llm"` non esegue nulla: cambiarlo dalle
+impostazioni non toglie il permesso dato.
+
+**Admin API di Anthropic** (*Costi API Anthropic*): con una chiave Admin (`sk-ant-admin…`, nel Gestore credenziali) legge
+`/v1/organizations/usage_report/messages?starting_at={today}&bucket_width=1d&group_by[]=model`, facoltativamente filtrato
+su una chiave API (`api_key_ids[]`): una chiave per sito dà i costi di ogni sito. Ogni 5 minuti.
+
 ### Azioni e permessi
 La shell può fare quello che fa una shell, ma **solo con il permesso dell'utente**:
 - leggere (`http`, `homeassistant`, `prometheus`, `mqtt`, `ping`, `file`) non cambia nulla e parte da sé;
@@ -166,4 +212,5 @@ quella dei connettori) con i valori o l'errore. I comandi partono solo con `--es
 
 ## Logica nel Core (testata)
 `ClaudeTranscript`, `AgentSession`, `AgentPricing`, `AgentProtocol`, `AgentFormat`, `ConnectorParser`, `ConnectorReadings`,
-`ConnectorAlerts`, `Mqtt`, `ShellSettings.WithConnectorGrant`.
+`ConnectorAlerts`, `Mqtt`, `ShellSettings.WithConnectorGrant`, `LlmSpec`, `LlmLedger`, `ConnectorCatalog.Create` (valori,
+Modifica), `ConnectorWidgetLayout`.

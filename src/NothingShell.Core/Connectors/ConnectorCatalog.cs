@@ -63,12 +63,13 @@ public static partial class ConnectorCatalog
     private const string HttpUrl = @"^https?://\S+$";
     private const string HostName = @"^[\w.\-:\[\]]+$";
     private const string SshTarget = @"^([\w.\-]+@)?[\w.\-]+$";
+    private const string JsonPath = @"^[\w.\[\]\-]+$";
     private const string Coordinate = @"^-?\d{1,3}([.,]\d+)?$";
     private const double Gigabyte = 1024d * 1024 * 1024;
 
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    public static IReadOnlyList<string> Categories { get; } = ["Questo PC", "Rete e web", "Casa", "Server", "Sviluppo e AI", "Informazioni", "Personalizzati"];
+    public static IReadOnlyList<string> Categories { get; } = ["Questo PC", "Rete e web", "Casa", "Server", "Sicurezza", "Sviluppo e AI", "Informazioni", "Personalizzati"];
 
     public static IReadOnlyList<ConnectorTemplate> All { get; } =
     [
@@ -298,6 +299,182 @@ public static partial class ConnectorCatalog
                     Reading("Modello", "{models[0].name}"),
                     Reading("VRAM", "{models[0].size_vram}", "GB").With("scale", 1 / Gigabyte).With("decimals", 1))))),
 
+        new("anthropic-costi", "Costi API Anthropic", "Sviluppo e AI",
+            "Quanto spende in euro, oggi e nel mese, una chiave API (un sito, un'app) o tutta l'organizzazione, per modello.",
+            [
+                new("key", "Chiave Admin API", FieldKind.Secret) { Hint = "sk-ant-admin… (Console › Impostazioni › Admin keys)" },
+                new("keyId", "Id della chiave API da seguire") { Hint = "apikey_01… (vuoto = tutta l'organizzazione)", Optional = true, Pattern = @"^[\w\-]+$" },
+                new("daily", "Budget al giorno (€)", FieldKind.Number) { Optional = true },
+                new("monthly", "Budget al mese (€)", FieldKind.Number) { Optional = true },
+            ],
+            v => Obj(("type", "http"), ("refreshSeconds", 300),
+                ("url", "https://api.anthropic.com/v1/organizations/usage_report/messages?starting_at={today}&bucket_width=1d&group_by[]=model" +
+                        (v.Has("keyId") ? "&api_key_ids[]=" + v["keyId"] : string.Empty)),
+                ("headers", Obj(("anthropic-version", "2023-06-01"))),
+                ("secretHeader", "x-api-key"), ("secretFormat", "{secret}"),
+                ("llm", Obj(("list", "data[0].results"), ("model", "{model}"), ("input", "{uncached_input_tokens}"), ("output", "{output_tokens}"),
+                    ("cacheRead", "{cache_read_input_tokens}"), ("cacheWrite", "{cache_creation.ephemeral_5m_input_tokens}"),
+                    ("cacheWrite1h", "{cache_creation.ephemeral_1h_input_tokens}"), ("countFirst", true),
+                    ("dailyBudget", v.Number("daily")), ("monthlyBudget", v.Number("monthly")))))),
+        new("sito-llm", "Sito con LLM: costi", "Sviluppo e AI",
+            "Costi in euro delle chiamate al modello fatte da un tuo sito, da un indirizzo che ne espone l'uso (chiamate o totali).",
+            [
+                new("url", "Indirizzo dell'uso") { Hint = "https://miosito.it/admin/llm-usage", Pattern = HttpUrl },
+                new("token", "Token (Authorization: Bearer)", FieldKind.Secret) { Optional = true },
+                new("mode", "Formato") { Default = "chiamate", Hint = "chiamate (un elenco) o totali (contatori)", Pattern = "^(chiamate|totali)$" },
+                new("list", "Campo dell'elenco") { Default = "calls", Hint = "calls (vuoto = la risposta è una voce sola)", Optional = true, Pattern = JsonPath },
+                new("model", "Campo del modello o nome fisso") { Default = "model", Hint = "model, oppure claude-sonnet-5-5", Pattern = JsonPath },
+                new("input", "Campo dei token in entrata") { Default = "input_tokens", Pattern = JsonPath },
+                new("output", "Campo dei token in uscita") { Default = "output_tokens", Pattern = JsonPath },
+                new("cost", "Campo del costo, se lo calcola il sito") { Hint = "cost", Optional = true, Pattern = JsonPath },
+                new("currency", "Valuta del costo") { Default = "USD", Pattern = "^(USD|EUR|usd|eur)$" },
+                new("priceIn", "Prezzo in entrata (€ per milione), per modelli non Anthropic", FieldKind.Number) { Optional = true },
+                new("priceOut", "Prezzo in uscita (€ per milione)", FieldKind.Number) { Optional = true },
+                new("daily", "Budget al giorno (€)", FieldKind.Number) { Optional = true },
+                new("monthly", "Budget al mese (€)", FieldKind.Number) { Optional = true },
+            ],
+            v =>
+            {
+                var calls = v["mode"] == "chiamate";
+                // un nome con trattini o punti e senza campi annidati è il modello fisso, non un campo
+                var model = v["model"].StartsWith("claude-", StringComparison.OrdinalIgnoreCase) || v["model"].StartsWith("gpt-", StringComparison.OrdinalIgnoreCase)
+                    ? v["model"] : "{" + v["model"] + "}";
+                var llm = Obj(("mode", calls ? "calls" : "totals"), ("list", v.Has("list") ? v["list"] : null), ("model", model),
+                    ("input", "{" + v["input"] + "}"), ("output", "{" + v["output"] + "}"),
+                    ("cost", v.Has("cost") ? "{" + v["cost"] + "}" : null), ("costCurrency", v.Has("cost") ? v["currency"].ToUpperInvariant() : null),
+                    ("id", calls ? "{id}" : null), ("at", calls ? "{at}" : null),
+                    ("price", v.Number("priceIn") is { } pin && v.Number("priceOut") is { } pout
+                        ? Obj(("input", pin), ("output", pout), ("currency", "EUR")) : null),
+                    ("dailyBudget", v.Number("daily")), ("monthlyBudget", v.Number("monthly")));
+                return Obj(("type", "http"), ("url", v["url"]), ("refreshSeconds", 60), ("secret", v.Has("token") ? true : null), ("llm", llm));
+            }),
+
+        // ── Sicurezza ─────────────────────────────────────────────────────────────
+        new("defender", "Microsoft Defender", "Sicurezza",
+            "Antivirus e protezione in tempo reale accesi, età delle firme, minacce degli ultimi 7 giorni; Scansione rapida.",
+            [],
+            _ =>
+            {
+                var o = PowerShell(
+                    "$s = Get-MpComputerStatus; $t = @(Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object { $_.InitialDetectionTime -gt (Get-Date).AddDays(-7) }).Count; " +
+                    "@{ antivirus = $(if ($s.AntivirusEnabled) { 'ATTIVO' } else { 'SPENTO' }); tempo = $(if ($s.RealTimeProtectionEnabled) { 'ATTIVA' } else { 'SPENTA' }); firme = $s.AntivirusSignatureAge; minacce = $t } | ConvertTo-Json",
+                    300,
+                    Reading("Antivirus", "{antivirus}").With("alertOn", "SPENTO"),
+                    Reading("Tempo reale", "{tempo}").With("alertOn", "SPENTA"),
+                    Reading("Firme", "{firme}", "giorni").With("above", 3),
+                    Reading("Minacce 7 gg", "{minacce}").With("above", 0));
+                o["actions"] = new JsonArray(PowerShellAction("Scansione rapida",
+                    "Start-Process -WindowStyle Hidden \"$env:ProgramFiles\\Windows Defender\\MpCmdRun.exe\" -ArgumentList '-Scan','-ScanType','1'", confirm: false));
+                return o;
+            })
+        {
+            Permission = "Esegue PowerShell per leggere lo stato di Defender (Get-MpComputerStatus) e, col pulsante, avvia una scansione rapida.",
+        },
+        new("firewall", "Firewall di Windows", "Sicurezza", "Se il firewall è acceso per le reti di dominio, private e pubbliche: spento diventa un avviso.",
+            [],
+            _ => PowerShell(
+                "$p = @{}; Get-NetFirewallProfile | ForEach-Object { $p[$_.Name] = $(if ($_.Enabled) { 'ATTIVO' } else { 'SPENTO' }) }; " +
+                "@{ dominio = $p['Domain']; privata = $p['Private']; pubblica = $p['Public'] } | ConvertTo-Json",
+                300,
+                Reading("Dominio", "{dominio}").With("alertOn", "SPENTO"),
+                Reading("Privata", "{privata}").With("alertOn", "SPENTO"),
+                Reading("Pubblica", "{pubblica}").With("alertOn", "SPENTO")))
+        {
+            Permission = "Esegue PowerShell per leggere i profili del firewall (Get-NetFirewallProfile).",
+        },
+        new("aggiornamenti", "Aggiornamenti di Windows", "Sicurezza", "Da quanti giorni non si installano aggiornamenti e se Windows aspetta un riavvio.",
+            [new("days", "Avvisa dopo (giorni)", FieldKind.Number) { Default = "35" }],
+            v => PowerShell(
+                "$h = Get-HotFix | Where-Object InstalledOn | Sort-Object InstalledOn -Descending | Select-Object -First 1; " +
+                "@{ giorni = [math]::Floor(((Get-Date) - $h.InstalledOn).TotalDays); ultimo = \"$($h.HotFixID)\"; " +
+                "riavvio = $(if (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired') { 'SI' } else { 'NO' }) } | ConvertTo-Json",
+                3600,
+                Reading("Ultimo", "{giorni}", "giorni fa").With("above", v.Number("days")),
+                Reading("Pacchetto", "{ultimo}"),
+                Reading("Riavvio", "{riavvio}").With("alertOn", "SI")))
+        {
+            Permission = "Esegue PowerShell per leggere gli aggiornamenti installati (Get-HotFix) e il riavvio in sospeso.",
+        },
+        new("certificato", "Certificato SSL di un sito", "Sicurezza", "Quanti giorni mancano alla scadenza del certificato HTTPS, se è valido e chi lo emette.",
+            [
+                new("host", "Sito") { Hint = "miosito.it", Pattern = @"^[\w.\-]+$" },
+                new("port", "Porta", FieldKind.Number) { Default = "443" },
+                new("min", "Avvisa sotto (giorni)", FieldKind.Number) { Default = "14" },
+            ],
+            v =>
+            {
+                var host = Quote(v["host"]);
+                return PowerShell(
+                    $"$c = New-Object Net.Sockets.TcpClient({host}, {(int)(v.Number("port") ?? 443)}); " +
+                    "$s = New-Object Net.Security.SslStream($c.GetStream(), $false, ({ $true } -as [Net.Security.RemoteCertificateValidationCallback])); " +
+                    $"$s.AuthenticateAsClient({host}); $x = [Security.Cryptography.X509Certificates.X509Certificate2]$s.RemoteCertificate; $s.Dispose(); $c.Dispose(); " +
+                    "@{ giorni = [math]::Floor(($x.NotAfter - (Get-Date)).TotalDays); valido = $(if ($x.Verify()) { 'SI' } else { 'NO' }); emittente = $x.GetNameInfo('SimpleName', $true) } | ConvertTo-Json",
+                    3600,
+                    Reading("Scade tra", "{giorni}", "giorni").With("below", v.Number("min")),
+                    Reading("Valido", "{valido}").With("alertOn", "NO"),
+                    Reading("Emittente", "{emittente}"));
+            })
+        {
+            Permission = "Esegue PowerShell per aprire una connessione TLS al sito e leggere il certificato.",
+        },
+        new("intestazioni", "Intestazioni di sicurezza", "Sicurezza", "Quali difese HTTP manda un sito (HSTS, CSP, X-Frame-Options…) e quali mancano.",
+            [new("url", "Indirizzo") { Hint = "https://miosito.it", Pattern = HttpUrl }],
+            v => PowerShell(
+                $"$h = (Invoke-WebRequest -Uri {Quote(v["url"])} -UseBasicParsing -MaximumRedirection 5 -TimeoutSec 10).Headers; " +
+                "$need = 'Strict-Transport-Security','Content-Security-Policy','X-Content-Type-Options','X-Frame-Options','Referrer-Policy'; " +
+                "$miss = @($need | Where-Object { -not $h[$_] }); " +
+                "@{ presenti = \"$($need.Count - $miss.Count)/$($need.Count)\"; mancanti = $miss.Count; quali = $(if ($miss.Count) { $miss -join ', ' } else { 'nessuna' }) } | ConvertTo-Json",
+                3600,
+                Reading("Presenti", "{presenti}"),
+                Reading("Mancanti", "{mancanti}").With("above", 0),
+                Reading("Quali", "{quali}")))
+        {
+            Permission = "Esegue PowerShell per scaricare la pagina e leggerne le intestazioni (Invoke-WebRequest).",
+        },
+        new("porte", "Porte esposte", "Sicurezza", "Quante porte TCP del PC ascoltano sulla rete (non solo su localhost) e quali.",
+            [new("max", "Avvisa sopra (porte)", FieldKind.Number) { Optional = true }],
+            v => PowerShell(
+                "$p = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -notin '127.0.0.1','::1' } | Select-Object -ExpandProperty LocalPort | Sort-Object -Unique); " +
+                "@{ esposte = $p.Count; quali = ($p | Select-Object -First 12) -join ', ' } | ConvertTo-Json",
+                300,
+                Reading("Esposte", "{esposte}").With("above", v.Number("max")),
+                Reading("Quali", "{quali}")))
+        {
+            Permission = "Esegue PowerShell per elencare le porte in ascolto (Get-NetTCPConnection).",
+        },
+        new("amministratori", "Amministratori del PC", "Sicurezza", "Quanti e quali account sono amministratori: uno nuovo diventa un avviso.",
+            [new("max", "Avvisa sopra (account)", FieldKind.Number) { Default = "2" }],
+            v => PowerShell(
+                "$m = @(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop | ForEach-Object { $_.Name.Split('\\')[-1] }); " +
+                "@{ numero = $m.Count; chi = $m -join ', ' } | ConvertTo-Json",
+                600,
+                Reading("Amministratori", "{numero}").With("above", v.Number("max")),
+                Reading("Chi", "{chi}")))
+        {
+            Permission = "Esegue PowerShell per leggere il gruppo Administrators (Get-LocalGroupMember).",
+        },
+        new("ssh-accessi", "Accessi SSH falliti", "Sicurezza", "Tentativi di accesso falliti a un server Linux nelle ultime 24 ore e sessioni aperte. Serve l'accesso con chiave.",
+            [
+                new("target", "Utente e host") { Hint = "utente@server.local", Pattern = SshTarget },
+                new("max", "Avvisa sopra (tentativi)", FieldKind.Number) { Default = "20" },
+            ],
+            v => Obj(("type", "command"), ("command", "ssh"), ("refreshSeconds", 600),
+                ("args", Array("-o", "BatchMode=yes", "-o", "ConnectTimeout=5", v["target"],
+                    "journalctl -q _COMM=sshd --since '24 hours ago' 2>/dev/null | grep -c -E 'Failed password|Invalid user'; who | wc -l")),
+                ("readings", new JsonArray(
+                    Reading("Falliti 24 h", "{lines[0]}").With("above", v.Number("max")),
+                    Reading("Sessioni", "{lines[1]}")))))
+        {
+            Permission = "Esegue ssh verso il server per leggere il registro di sshd (journalctl: l'utente deve poterlo leggere, gruppo adm o systemd-journal).",
+        },
+        new("kev", "Vulnerabilità sfruttate (CISA)", "Sicurezza", "Il catalogo CISA delle vulnerabilità sfruttate davvero: quante sono e quando è cambiato.",
+            [],
+            _ => Obj(("type", "http"), ("url", "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"), ("refreshSeconds", 21600),
+                ("readings", new JsonArray(
+                    Reading("Nel catalogo", "{count}"),
+                    Reading("Ultima", "{vulnerabilities[0].cveID}").With("label", "Ultima aggiunta"),
+                    Reading("Aggiornato", "{dateReleased}"))))),
+
         // ── Informazioni ──────────────────────────────────────────────────────────
         new("meteo", "Meteo", "Informazioni", "Temperatura, umidità, vento e pioggia di adesso (Open-Meteo, senza chiave).",
             [
@@ -381,18 +558,27 @@ public static partial class ConnectorCatalog
 
     /// <summary>
     /// Controlla i campi e costruisce il file: nome del connettore, tipo e letture. Il segreto torna a parte (va nel
-    /// Gestore credenziali). L'id viene dal nome e non ripete quelli già usati.
+    /// Gestore credenziali). L'id viene dal nome e non ripete quelli già usati; con <paramref name="replaceId"/> si
+    /// riscrive quel connettore (Modifica). I valori del modulo, senza segreti, restano nel file (<c>"values"</c>):
+    /// servono a Modifica e Duplica. Lo stesso connettore si può attivare quante volte serve (più siti, più server).
     /// </summary>
-    public static TemplateResult Create(ConnectorTemplate template, string? name, IReadOnlyDictionary<string, string> values, IReadOnlyCollection<string> existingIds)
+    public static TemplateResult Create(ConnectorTemplate template, string? name, IReadOnlyDictionary<string, string> values, IReadOnlyCollection<string> existingIds,
+        string? replaceId = null, bool keepSecret = false)
     {
         ArgumentNullException.ThrowIfNull(template);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(existingIds);
         var clean = new Dictionary<string, string>(StringComparer.Ordinal);
         string? secret = null;
+        var keptSecret = false;
         foreach (var field in template.Fields)
         {
             var value = values.TryGetValue(field.Key, out var raw) ? raw.Trim() : string.Empty;
+            if (value.Length == 0 && field.Kind == FieldKind.Secret && keepSecret)
+            {
+                keptSecret = true; // Modifica: resta il token già nel Gestore credenziali
+                continue;
+            }
             if (value.Length == 0 && field.Kind != FieldKind.Secret)
                 value = field.Default ?? string.Empty;
             if (value.Length == 0)
@@ -421,13 +607,30 @@ public static partial class ConnectorCatalog
             body.Remove(key);
             root[key] = node;
         }
-        if (secret is not null)
+        if (secret is not null || keptSecret)
             root["secret"] = true;
+        var remembered = new JsonObject();
+        foreach (var field in template.Fields.Where(f => f.Kind != FieldKind.Secret && clean.ContainsKey(f.Key)))
+            remembered[field.Key] = clean[field.Key];
+        if (remembered.Count > 0)
+            root["values"] = remembered;
 
-        var id = UniqueId(Slug(display) ?? template.Id, existingIds);
+        var id = replaceId ?? UniqueId(Slug(display) ?? template.Id, existingIds);
         var json = root.ToJsonString(Indented);
         var parsed = ConnectorParser.Parse(id, json);
         return parsed.Error is { } error ? Fail(error) : new TemplateResult(id, json, secret, null);
+    }
+
+    /// <summary>Mette (o toglie, con null) il blocco <c>"llm"</c> nel file di un connettore.</summary>
+    public static string WithLlm(string json, LlmSpec? llm)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+        var root = JsonNode.Parse(json, documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true })!.AsObject();
+        if (llm is null)
+            root.Remove("llm");
+        else
+            root["llm"] = llm.ToJson();
+        return root.ToJsonString(Indented);
     }
 
     /// <summary>"Stampante 3D (Klipper)" → "stampante-3d-klipper": minuscole, cifre e trattini, al massimo 40.</summary>

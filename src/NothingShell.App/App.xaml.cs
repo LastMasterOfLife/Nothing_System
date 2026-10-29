@@ -365,6 +365,15 @@ public partial class App : Application
         foreach (var page in NotchPager.Pages)
             SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, page),
                 Path.Combine(folder, $"notch-{page}.png".ToLowerInvariant()));
+        notch.SetPhone(new PhonePageData(true,
+            new NothingShell.Core.Phone.PhoneDevice("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", "Nothing Phone (2)", true, true)
+            {
+                Battery = new NothingShell.Core.Phone.PhoneBattery(18, false, true),
+                Signal = new NothingShell.Core.Phone.PhoneSignal("4G", 2),
+                Shares = ["batteria", "segnale", "notifiche", "chiamate"],
+            },
+            "Collegato", null, [], []));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Phone), Path.Combine(folder, "notch-phone-only.png"));
 
         var reader = new MailReaderWindow(new SnapshotMail(demo));
         reader.Select(demo[0]);
@@ -532,6 +541,13 @@ public partial class App : Application
         settings.ShowConnectorTemplate("homeassistant");
         root.Height = settings.Height;
         SaveSnapshot(root, Path.Combine(folder, "settings-connector-form.png"));
+        var shop = new SnapshotSettings(plugins.Results).ConnectorResults.Select(r => r.Manifest).OfType<ConnectorManifest>().First(m => m.Id == "negozio");
+        root.Height = 2200;
+        settings.EditConnectorCosts(shop);
+        SaveSnapshot(root, Path.Combine(folder, "settings-connector-costs.png"));
+        settings.EditConnector(shop, duplicate: true);
+        root.Height = settings.Height;
+        SaveSnapshot(root, Path.Combine(folder, "settings-connector-duplicate.png"));
     }
 
     /// <summary>
@@ -816,8 +832,36 @@ public partial class App : Application
             ConnectorParser.Parse("casa", """{"name":"Casa","template":"homeassistant","type":"homeassistant","url":"http://homeassistant.local:8123","secret":true,"readings":[{"entity":"sensor.soggiorno"}],"actions":[{"label":"Luci off","service":"light.turn_off","data":{"entity_id":"all"}}]}"""),
             ConnectorParser.Parse("raspberry", """{"name":"Raspberry","type":"command","command":"ssh","args":["pi@raspberry","vcgencmd measure_temp"]}"""),
             ConnectorParser.Parse("router", """{"name":"Router","type":"ping","host":"192.168.1.1"}"""),
+            ConnectorParser.Parse("negozio", """{"name":"Negozio online","template":"sito-llm","type":"http","url":"https://negozio.example/llm-usage","values":{"url":"https://negozio.example/llm-usage","mode":"chiamate"},"llm":{"mode":"calls","list":"calls","model":"{model}","input":"{input_tokens}","output":"{output_tokens}","id":"{id}","dailyBudget":2,"monthlyBudget":40}}"""),
+            ConnectorParser.Parse("blog", """{"name":"Blog","template":"anthropic-costi","type":"http","url":"https://api.anthropic.com/v1/organizations/usage_report/messages?starting_at={today}","secret":true,"llm":{"list":"data[0].results","model":"{model}","input":"{uncached_input_tokens}","output":"{output_tokens}","countFirst":true,"dailyBudget":1}}"""),
             new ConnectorLoadResult("vecchio", null, "manca \"name\""),
         ];
+
+        public double? UsdToEur => 0.9214;
+
+        public LlmSummary ConnectorCosts(ConnectorManifest manifest)
+        {
+            var today = new LlmDay { Calls = manifest.Id == "negozio" ? 148 : 31, Input = 412_000, Output = 96_000, Usd = manifest.Id == "negozio" ? 1.42 : 1.31 };
+            var month = new LlmDay { Calls = 3_120, Input = 9_800_000, Output = 2_100_000, Usd = manifest.Id == "negozio" ? 27.6 : 9.4 };
+            return new LlmSummary(today, month, today.InEuro(UsdToEur), month.InEuro(UsdToEur));
+        }
+
+        public IReadOnlyList<LlmCall> ConnectorCalls(ConnectorManifest manifest) =>
+        [
+            new(DateTimeOffset.Now.AddMinutes(-3), "claude-sonnet-5-5", 2_400, 610, 1, 0.011, 0, true),
+            new(DateTimeOffset.Now.AddMinutes(-9), "claude-haiku-5-5", 1_100, 220, 1, 0.0002, 0, true),
+            new(DateTimeOffset.Now.AddMinutes(-15), "gpt-x", 900, 300, 1, 0, 0, false),
+        ];
+
+        public string? SetConnectorLlm(ConnectorManifest manifest, LlmSpec? llm) => null;
+
+        public void ResetConnectorCosts(ConnectorManifest manifest)
+        {
+        }
+
+        public void ExportConnectorCosts()
+        {
+        }
 
         public string ConnectorFolder => ConnectorHost.Folder;
 
@@ -833,7 +877,7 @@ public partial class App : Application
         {
         }
 
-        public string? AddConnector(ConnectorTemplate connector, string? name, IReadOnlyDictionary<string, string> values, bool grant) => null;
+        public string? AddConnector(ConnectorTemplate connector, string? name, IReadOnlyDictionary<string, string> values, bool grant, ConnectorManifest? replace = null) => null;
 
         public void RemoveConnector(ConnectorManifest manifest)
         {
@@ -1006,6 +1050,25 @@ public partial class App : Application
         var low = new BatteryWidget();
         low.Update(new BatteryStatus(true, 12, false));
         SaveSnapshot(low, Path.Combine(folder, "battery-low.png"));
+
+        // Widget dei connettori nelle tre taglie
+        var at = DateTimeOffset.Now.AddMinutes(-2);
+        (string Json, ConnectorReading[] Readings)[] connectors =
+        [
+            ("""{"name":"Router","type":"ping","host":"192.168.1.1"}""", [new("Latenza", "3", "ms", ReadingLevel.Normal)]),
+            ("""{"name":"Casa","type":"homeassistant","url":"http://h:8123","readings":[{"entity":"sensor.a"},{"entity":"sensor.b"},{"entity":"sensor.c"}]}""",
+                [new("Soggiorno", "21.5", "°C", ReadingLevel.Normal), new("Umidità", "48", "%", ReadingLevel.Normal), new("Porta", "APERTO", null, ReadingLevel.Warning)]),
+            ("""{"name":"Server","type":"prometheus","url":"http://p:9090","readings":[{"query":"a"},{"query":"b"},{"query":"c"},{"query":"d"},{"query":"e"},{"query":"f"}]}""",
+                [new("CPU", "34", "%", ReadingLevel.Normal), new("RAM", "71", "%", ReadingLevel.Normal), new("Disco", "92", "%", ReadingLevel.Warning),
+                 new("Carico", "1.42", null, ReadingLevel.Normal), new("Uptime", "12", "giorni", ReadingLevel.Normal), new("Rete", "Interfaccia eth0 attiva", null, ReadingLevel.Normal)]),
+        ];
+        foreach (var (json, readings) in connectors)
+        {
+            var manifest = ConnectorParser.Parse("demo", json).Manifest!;
+            var widget = new ConnectorWidget(manifest);
+            widget.Update(new ConnectorState(manifest, ConnectorStatus.Ok, readings, null, at));
+            SaveSnapshot(widget, Path.Combine(folder, $"connector-{readings.Length}.png"));
+        }
     }
 
     private static void SaveSnapshot(FrameworkElement view, string path, double scale = 2)

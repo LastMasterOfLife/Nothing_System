@@ -71,8 +71,11 @@ cambiata in "Privata" nelle impostazioni di Windows.
 ## Pagina Telefono
 Pagina alta del notch (scorre con la rotellina, docs/08-notch-mail-pages.md), presente se il telefono è acceso in
 Impostazioni › NOTCH o col collegamento diretto:
-- **Telefono**: nome, batteria (barra a punti, rossa quando è scarica), rete e segnale, *Trova* per farlo squillare.
-- **Condivide**: cosa il telefono dice di mandare (`outgoingCapabilities` della sua identità: batteria, segnale,
+- **Telefono**: nome e stato (collegato, non raggiungibile) con *Trova* per farlo squillare; sotto tre tessere affiancate:
+  **Batteria** (percentuale a punti, barra, in carica o scarica, rossa quando è bassa), **Rete** (5G, 4G… e le tacche del
+  segnale a punti) e **Invia** (*File* e *Appunti* verso il telefono, solo con un clic). Col telefono scollegato le tessere
+  restano grigie con gli ultimi valori.
+- **Condivide**: etichette con cosa il telefono dice di mandare (`outgoingCapabilities` della sua identità: batteria, segnale,
   notifiche, chiamate, appunti, file e link). I permessi si danno e si tolgono **nell'app KDE Connect**, plugin per
   plugin: la shell mostra solo ciò che il telefono ha scelto di condividere.
 - **File ricevuti**: il file in arrivo con percentuale e barra, poi gli ultimi 20 ricevuti (nome, dimensione, da chi,
@@ -80,4 +83,5 @@ Impostazioni › NOTCH o col collegamento diretto:
   `%USERPROFILE%\.nothing-shell\phone-files.json`; i file cancellati o spostati spariscono dall'elenco al riavvio.
 - **Notifiche**: le ultime 10 arrivate dal telefono (anche da Collegamento al telefono), con l'app; le chiamate perse in
   rosso. Solo in memoria.
+Senza file né notifiche, col telefono collegato, la pagina dice come mandargli un file invece di restare vuota.
 Senza collegamento diretto la pagina spiega come accenderlo e mostra le notifiche di Collegamento al telefono.

@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using NothingShell.App.Services;
+using NothingShell.Core.Connectors;
 using NothingShell.Core.Notch;
 using NothingShell.Core.Widgets;
 
@@ -17,6 +18,7 @@ public sealed class WidgetHost
     private readonly SystemMonitor _monitor;
     private readonly WidgetSettingsStore _store;
     private readonly Dictionary<string, WidgetWindow> _windows = new(StringComparer.Ordinal);
+    /// <summary>Posizioni dei widget di plugin (per id del plugin) e connettori (per id del widget).</summary>
     private readonly Dictionary<string, (double X, double Y)> _pluginPositions = new(StringComparer.Ordinal);
     private Func<string, bool> _isEnabled = _ => true;
     private bool _locked;
@@ -87,13 +89,72 @@ public sealed class WidgetHost
     public void AddPlugin(PluginWidget view)
     {
         ArgumentNullException.ThrowIfNull(view);
+        AddPlaced(view);
+    }
+
+    /// <summary>
+    /// Allinea i widget dei connettori a quelli attivi: crea i nuovi (visibili solo se accesi nelle impostazioni),
+    /// aggiorna i valori, chiude quelli dei connettori tolti o spenti.
+    /// </summary>
+    public void SyncConnectors(IReadOnlyList<ConnectorState> states)
+    {
+        ArgumentNullException.ThrowIfNull(states);
+        var ids = states.Select(s => ConnectorWidgetLayout.WidgetId(s.Manifest.Id)).ToHashSet(StringComparer.Ordinal);
+        foreach (var (id, window) in _windows.Where(w => w.Value.View is ConnectorWidget && !ids.Contains(w.Key)).ToArray())
+        {
+            window.Close();
+            _windows.Remove(id);
+        }
+        foreach (var state in states)
+        {
+            if (_windows.TryGetValue(ConnectorWidgetLayout.WidgetId(state.Manifest.Id), out var window) && window.View is ConnectorWidget existing)
+            {
+                existing.Update(state);
+                continue;
+            }
+            var view = new ConnectorWidget(state.Manifest);
+            view.Update(state);
+            view.Resized += OnConnectorResized;
+            AddPlaced(view);
+        }
+    }
+
+    /// <summary>Aggiorna "da quanto" dei widget dei connettori (ogni minuto).</summary>
+    public void RefreshConnectors()
+    {
+        foreach (var w in _windows.Values)
+            if (w.View is ConnectorWidget c)
+                c.Refresh();
+    }
+
+    private void AddPlaced(WidgetView view)
+    {
+        var key = PlacementKey(view)!;
         var size = new Size2(view.Width, view.Height);
-        var (x, y) = _pluginPositions.TryGetValue(view.Manifest.Id, out var saved)
+        var (x, y) = _pluginPositions.TryGetValue(key, out var saved)
             ? WidgetLayout.Settle(new Rect2(saved.X, saved.Y, size.Width, size.Height), VirtualScreen)
             : WidgetLayout.FindFreeSlot(size, OccupiedRects(), WorkArea);
         AddWindow(view, x, y);
-        _pluginPositions[view.Manifest.Id] = (x, y);
+        _pluginPositions[key] = (x, y);
     }
+
+    private void OnConnectorResized(ConnectorWidget view)
+    {
+        if (!_windows.TryGetValue(view.Id, out var window))
+            return;
+        window.Width = view.Width;
+        window.Height = view.Height;
+        var (x, y) = WidgetLayout.Settle(Bounds(window), VirtualScreen);
+        Move(window, x, y);
+    }
+
+    /// <summary>Chiave della posizione salvata per i widget senza posto fisso; null per quelli integrati.</summary>
+    private static string? PlacementKey(WidgetView view) => view switch
+    {
+        PluginWidget p => p.Manifest.Id,
+        ConnectorWidget c => c.Id,
+        _ => null,
+    };
 
     /// <summary>Chiude tutti i widget dei plugin (prima di una ricarica). Le posizioni restano salvate.</summary>
     public void RemovePlugins()
@@ -110,7 +171,16 @@ public sealed class WidgetHost
         if (!_windows.TryGetValue(id, out var window))
             return;
         if (visible)
+        {
+            // un widget di plugin o connettore acceso adesso non deve finire sopra un altro già visibile
+            if (PlacementKey(window.View) is not null && !window.IsVisible && OccupiedRects().Any(Bounds(window).IntersectsWith))
+            {
+                var (x, y) = WidgetLayout.FindFreeSlot(new Size2(window.Width, window.Height), OccupiedRects(), WorkArea);
+                Move(window, x, y);
+                Save();
+            }
             window.Show();
+        }
         else
             window.Hide();
     }
@@ -131,7 +201,7 @@ public sealed class WidgetHost
 
         _pluginPositions.Clear();
         var occupied = _windows.Values.Where(w => w.View.Kind is not null).Select(Bounds).ToList();
-        foreach (var w in _windows.Values.Where(w => w.View is PluginWidget))
+        foreach (var w in _windows.Values.Where(w => w.View.Kind is null).OrderByDescending(w => w.IsVisible).ToArray())
         {
             var (x, y) = WidgetLayout.FindFreeSlot(new Size2(w.Width, w.Height), occupied, WorkArea);
             Move(w, x, y);
@@ -158,8 +228,8 @@ public sealed class WidgetHost
     {
         window.Left = x;
         window.Top = y;
-        if (window.View is PluginWidget plugin)
-            _pluginPositions[plugin.Manifest.Id] = (x, y);
+        if (PlacementKey(window.View) is { } key)
+            _pluginPositions[key] = (x, y);
     }
 
     private void OnDragCompleted(WidgetWindow window)
@@ -189,6 +259,7 @@ public sealed class WidgetHost
     private static string DisplayName(WidgetView view) => view switch
     {
         PluginWidget p => $"{p.Manifest.Name} (plugin)",
+        ConnectorWidget c => $"{c.Manifest.Name} (connettore)",
         _ => view.Kind switch
         {
             WidgetKind.Clock => "Orologio",

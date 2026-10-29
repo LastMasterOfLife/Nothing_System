@@ -21,6 +21,7 @@ public class ConnectorCatalogTests
             "value" => "dati.valore",
             "script" => "Get-Date",
             "token" when !f.Optional => "segreto",
+            "key" => "sk-ant-admin-prova",
             _ => string.Empty,
         });
 

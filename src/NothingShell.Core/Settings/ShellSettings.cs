@@ -1,6 +1,7 @@
 using System.Text.Json;
 using NothingShell.Core.Notch;
 using NothingShell.Core.Storage;
+using NothingShell.Core.Widgets;
 
 namespace NothingShell.Core.Settings;
 
@@ -18,7 +19,8 @@ public sealed record ShellSettings(
     DateOnly? MorningBriefShown = null,
     string? Editor = null,
     bool PhoneDirect = false,
-    IReadOnlyDictionary<string, string>? ConnectorGrants = null)
+    IReadOnlyDictionary<string, string>? ConnectorGrants = null,
+    IReadOnlyList<string>? ConnectorWidgets = null)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
 
@@ -49,10 +51,24 @@ public sealed record ShellSettings(
         return this with { DisabledActivities = disabled };
     }
 
-    public bool IsWidgetEnabled(string widgetId) => !DisabledWidgets.Contains(widgetId, StringComparer.Ordinal);
+    /// <summary>
+    /// I widget integrati e dei plugin ci sono finché non si spengono; quelli dei connettori solo se accesi
+    /// (<see cref="ConnectorWidgets"/>): un connettore non finisce sul desktop da solo.
+    /// </summary>
+    public bool IsWidgetEnabled(string widgetId) =>
+        ConnectorWidgetLayout.IsConnectorWidget(widgetId)
+            ? ConnectorWidgets?.Contains(widgetId, StringComparer.Ordinal) == true
+            : !DisabledWidgets.Contains(widgetId, StringComparer.Ordinal);
 
     public ShellSettings WithWidget(string widgetId, bool enabled)
     {
+        if (ConnectorWidgetLayout.IsConnectorWidget(widgetId))
+        {
+            var shown = (ConnectorWidgets ?? []).Where(w => w != widgetId).ToList();
+            if (enabled)
+                shown.Add(widgetId);
+            return this with { ConnectorWidgets = shown };
+        }
         var disabled = DisabledWidgets.Where(w => w != widgetId).ToList();
         if (!enabled)
             disabled.Add(widgetId);

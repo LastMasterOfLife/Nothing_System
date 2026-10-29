@@ -48,7 +48,7 @@ public static class JsonTemplate
             {
                 foreach (var part in name[bracket..].Split('[', StringSplitOptions.RemoveEmptyEntries))
                 {
-                    if (!int.TryParse(part.TrimEnd(']'), NumberStyles.None, CultureInfo.InvariantCulture, out var index))
+                    if (!int.TryParse(part.TrimEnd(']'), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var index))
                         return false;
                     indexes.Add(index);
                 }
@@ -62,9 +62,12 @@ public static class JsonTemplate
             }
             foreach (var index in indexes)
             {
-                if (value.ValueKind != JsonValueKind.Array || index >= value.GetArrayLength())
+                if (value.ValueKind != JsonValueKind.Array)
                     return false;
-                value = value[index];
+                var at = index < 0 ? value.GetArrayLength() + index : index; // [-1] è l'ultimo
+                if (at < 0 || at >= value.GetArrayLength())
+                    return false;
+                value = value[at];
             }
         }
         return true;

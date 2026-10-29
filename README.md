@@ -70,7 +70,12 @@ ping, siti, pagine di stato, Home Assistant, MQTT, Shelly, Tasmota, stampanti 3D
 Ollama, meteo, aria, cambi…) si attiva scrivendo pochi dati. Sotto, un file JSON per connettore in `%USERPROFILE%\.nothing-shell\connectors\` legge valori da Home Assistant,
 Prometheus, MQTT, ping, API http, file e comandi qualsiasi (PowerShell, ssh…), con soglie e avvisi nella pagina
 **Dispositivi**. Comandi e azioni (accendi, riavvia, pubblica) partono solo col permesso dato nelle impostazioni, legato
-al contenuto del file. Esempi in [connectors/](connectors/), dettagli in [docs/14-agenti-connettori.md](docs/14-agenti-connettori.md).
+al contenuto del file. Lo stesso connettore si attiva quante volte serve (più siti, server, processi) e si modifica o
+duplica dalla sua scheda; ognuno può diventare un **widget** sul desktop. Categoria **Sicurezza**: Defender, firewall,
+aggiornamenti, certificati SSL, intestazioni HTTP, porte esposte, amministratori, accessi SSH falliti, catalogo CISA.
+**Costi LLM**: per un sito che usa un modello, la spesa in euro di oggi e del mese (listino Anthropic, prezzi propri o costo
+del sito; dollari col cambio BCE), budget con avviso ed esportazione CSV; pronto anche per l'Admin API di Anthropic.
+Esempi in [connectors/](connectors/), dettagli in [docs/14-agenti-connettori.md](docs/14-agenti-connettori.md).
 
 **Agenda**: il prossimo appuntamento sotto l'ora nella Home, la pagina Agenda con quelli di oggi e un
 promemoria 10 minuti prima con *Partecipa* per Teams, Meet e Zoom. Al primo accesso del mattino il

@@ -25,7 +25,7 @@ public class DotFontTests
     public void AccentsAreStripped() => Assert.Same(DotFont.Get('E'), DotFont.Get('è'));
 
     [Fact]
-    public void UnknownCharFallsBackToQuestionMark() => Assert.Same(DotFont.Get('?'), DotFont.Get('€'));
+    public void UnknownCharFallsBackToQuestionMark() => Assert.Same(DotFont.Get('?'), DotFont.Get('¶'));
 
     [Fact]
     public void GlyphRejectsRaggedRows() =>

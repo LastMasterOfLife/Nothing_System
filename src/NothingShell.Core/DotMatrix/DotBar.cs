@@ -20,4 +20,28 @@ public static class DotBar
             return 0;
         return Math.Clamp((int)Math.Round(Math.Min(fraction, 1) * columns), 1, columns);
     }
+
+    /// <summary>Intensità delle tacche spente del segnale: si vedono, ma appena.</summary>
+    public const float SignalOff = 0.2f;
+
+    /// <summary>
+    /// Tacche del segnale come sulla barra del telefono: <paramref name="bars"/> colonne doppie che crescono da sinistra,
+    /// accese fino a <paramref name="strength"/>, le altre fioche. Alta quanto il font (7).
+    /// </summary>
+    public static DotGrid Signal(int strength, int bars = 4)
+    {
+        const int height = Design.DotFont.Height;
+        var grid = new DotGrid(bars * 3 - 1, height);
+        for (var i = 0; i < bars; i++)
+        {
+            var barHeight = (int)Math.Round(2 + (height - 2) * i / (double)Math.Max(1, bars - 1));
+            var intensity = i < strength ? 1f : SignalOff;
+            for (var y = height - barHeight; y < height; y++)
+            {
+                grid[i * 3, y] = intensity;
+                grid[i * 3 + 1, y] = intensity;
+            }
+        }
+        return grid;
+    }
 }

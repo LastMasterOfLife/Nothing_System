@@ -217,3 +217,68 @@ public class WidgetSettingsStoreTests
         }
     }
 }
+
+public class ConnectorWidgetTests
+{
+    [Theory]
+    [InlineData(0, 0, 1)]
+    [InlineData(1, 0, 1)]
+    [InlineData(0, 2, 2)] // ping: due valori senza dichiararli
+    [InlineData(3, 1, 3)] // la taglia non salta quando arrivano i primi dati
+    [InlineData(12, 0, ConnectorWidgetLayout.MaxReadings)]
+    public void Count(int declared, int received, int expected) =>
+        Assert.Equal(expected, ConnectorWidgetLayout.Count(declared, received));
+
+    [Theory]
+    [InlineData(1, 168, 168, 1, 1)]
+    [InlineData(2, 352, 168, 2, 1)]
+    [InlineData(4, 352, 168, 2, 2)]
+    [InlineData(5, 352, 352, 2, 3)]
+    [InlineData(8, 352, 352, 2, 4)]
+    public void SizeAndGrid(int count, double width, double height, int columns, int rows)
+    {
+        Assert.Equal(new NothingShell.Core.Notch.Size2(width, height), ConnectorWidgetLayout.Size(count));
+        Assert.Equal(columns, ConnectorWidgetLayout.Columns(count));
+        Assert.Equal(rows, ConnectorWidgetLayout.Rows(count));
+    }
+
+    [Fact]
+    public void ConnectorWidgetsAreOptIn()
+    {
+        var id = ConnectorWidgetLayout.WidgetId("casa");
+        var s = NothingShell.Core.Settings.ShellSettings.Default;
+        Assert.False(s.IsWidgetEnabled(id));
+        Assert.True(s.IsWidgetEnabled("Clock"));
+
+        var on = s.WithWidget(id, true).WithWidget(id, true);
+        Assert.True(on.IsWidgetEnabled(id));
+        Assert.Single(on.ConnectorWidgets!);
+        Assert.Empty(on.DisabledWidgets);
+        Assert.False(on.WithWidget(id, false).IsWidgetEnabled(id));
+    }
+
+    [Fact]
+    public void ConnectorWidgetsSurviveSaving()
+    {
+        var id = ConnectorWidgetLayout.WidgetId("router");
+        var json = NothingShell.Core.Settings.ShellSettingsStore.Serialize(NothingShell.Core.Settings.ShellSettings.Default.WithWidget(id, true));
+        Assert.True(NothingShell.Core.Settings.ShellSettingsStore.Deserialize(json).IsWidgetEnabled(id));
+    }
+}
+
+public class DotSignalTests
+{
+    [Fact]
+    public void BarsGrowAndLightUpToStrength()
+    {
+        var grid = DotBar.Signal(2);
+        Assert.Equal(11, grid.Width);
+        Assert.Equal(7, grid.Height);
+        Assert.Equal(1f, grid[0, 6]);       // prima tacca accesa, in basso
+        Assert.Equal(0f, grid[0, 0]);       // ma bassa
+        Assert.Equal(1f, grid[3, 6]);       // seconda accesa
+        Assert.Equal(DotBar.SignalOff, grid[6, 6]); // terza spenta
+        Assert.Equal(DotBar.SignalOff, grid[9, 0]); // la quarta è alta quanto il font
+        Assert.Equal(0f, grid[2, 6]);       // spazio fra le tacche
+    }
+}

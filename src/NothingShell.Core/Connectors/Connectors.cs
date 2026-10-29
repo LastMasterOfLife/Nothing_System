@@ -119,6 +119,12 @@ public sealed record ConnectorManifest(string Id, string Name, ConnectorKind Kin
     /// <summary>Connettore della libreria da cui è nato il file (<see cref="ConnectorCatalog"/>), se c'è.</summary>
     public string? Template { get; init; }
 
+    /// <summary>Costi LLM del sito (blocco <c>"llm"</c>): null se non si tiene traccia.</summary>
+    public LlmSpec? Llm { get; init; }
+
+    /// <summary>Valori del modulo della libreria (senza segreti): per Modifica e Duplica nelle impostazioni.</summary>
+    public IReadOnlyDictionary<string, string> TemplateValues { get; init; } = new Dictionary<string, string>();
+
     /// <summary>Hash del file: il permesso dato vale solo per questo contenuto.</summary>
     public string Hash { get; init; } = string.Empty;
 
@@ -202,8 +208,22 @@ public static partial class ConnectorParser
                 }
             }
 
+            LlmSpec? llm = null;
+            if (root.TryGetProperty("llm", out var llmElement))
+            {
+                if (k is not (ConnectorKind.Http or ConnectorKind.Command or ConnectorKind.File))
+                    return Fail(id, "\"llm\" vale solo per i connettori http, command e file");
+                llm = LlmSpec.Parse(llmElement, out var llmError);
+                if (llm is null)
+                    return Fail(id, llmError!);
+            }
+
             var manifest = new ConnectorManifest(id, name.Trim(), k, TimeSpan.FromSeconds(refresh), readings)
             {
+                Llm = llm,
+                TemplateValues = root.TryGetProperty("values", out var tv) && tv.ValueKind == JsonValueKind.Object
+                    ? tv.EnumerateObject().Where(v => v.Value.ValueKind == JsonValueKind.String).ToDictionary(v => v.Name, v => v.Value.GetString()!, StringComparer.Ordinal)
+                    : new Dictionary<string, string>(StringComparer.Ordinal),
                 Url = String(root, "url"),
                 Headers = root.TryGetProperty("headers", out var h) && h.ValueKind == JsonValueKind.Object
                     ? h.EnumerateObject().Where(p => p.Value.ValueKind == JsonValueKind.String).ToDictionary(p => p.Name, p => p.Value.GetString()!)
@@ -254,7 +274,7 @@ public static partial class ConnectorParser
                 return "ogni lettura vuole \"topic\"";
         }
         // ping si descrive da solo; comandi e file senza letture mostrano il testo dell'uscita
-        return m.Readings.Count == 0 && m.Kind is ConnectorKind.Http ? "manca \"readings\"" : null;
+        return m.Readings.Count == 0 && m.Llm is null && m.Kind is ConnectorKind.Http ? "manca \"readings\"" : null;
     }
 
     private static ConnectorAction? ParseAction(JsonElement item, ConnectorKind connector)

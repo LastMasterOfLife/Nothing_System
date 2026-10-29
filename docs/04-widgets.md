@@ -13,6 +13,22 @@ visibili anche con "Mostra desktop" (Win+D). Si spostano trascinandoli; la posiz
 
 Senza batteria (desktop fisso) il widget batteria mostra "AC" e la barra piena.
 
+### Widget dei connettori
+Ogni connettore (docs/14-agenti-connettori.md) può avere il suo widget: si accende dalla scheda del connettore
+(*Widget sul desktop*) o da Impostazioni › Widget, ed è **spento di serie** (un connettore non finisce sul desktop da
+solo). Id `connector:<id>`, salvato in `settings.json` (`connectorWidgets`).
+
+| Valori | Taglia (DIP) | Griglia |
+|--------|--------------|---------|
+| 1 | 168 × 168 | un valore grande (passo fino a 7) |
+| 2–4 | 352 × 168 | 2 colonne |
+| 5–8 | 352 × 352 | 2 colonne, fino a 4 righe |
+
+In alto il nome e da quanto è aggiornato (*errore*, *permesso* in rosso); per ogni valore l'etichetta grigia, il valore a
+punti (rosso oltre soglia) e l'unità. Un testo che a punti non entra si scrive normale. La taglia si decide sul numero di
+valori dichiarati o, se sono di più, arrivati (Core `ConnectorWidgetLayout`), così non salta coi primi dati. La posizione
+è salvata con quelle dei plugin; un widget acceso dopo non finisce sopra un altro.
+
 ## Aspetto
 - Riquadro `Surface` con bordo 1 px `Outline` (`#262626`), raggio 24, padding 16.
 - Intestazione: etichetta piccola maiuscola grigia (es. `BATTERIA`).

@@ -7,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using NothingShell.App.Rendering;
 using NothingShell.Core.Connectors;
+using NothingShell.Core.Widgets;
 using NothingShell.Core.DotMatrix;
 using NothingShell.Core.Notch;
 using NothingShell.Core.Plugins;
@@ -123,8 +124,26 @@ public interface IShellSettingsActions
     /// <summary>Token o password nel Gestore credenziali; vuoto lo cancella.</summary>
     void SetConnectorSecret(ConnectorManifest manifest, string secret);
 
-    /// <summary>Connettore dalla libreria (<see cref="ConnectorCatalog"/>): null se attivato, altrimenti il motivo.</summary>
-    string? AddConnector(ConnectorTemplate connector, string? name, IReadOnlyDictionary<string, string> values, bool grant);
+    /// <summary>
+    /// Connettore dalla libreria (<see cref="ConnectorCatalog"/>): null se attivato, altrimenti il motivo. Con
+    /// <paramref name="replace"/> riscrive quel connettore invece di aggiungerne uno.
+    /// </summary>
+    string? AddConnector(ConnectorTemplate connector, string? name, IReadOnlyDictionary<string, string> values, bool grant, ConnectorManifest? replace = null);
+
+    /// <summary>Cambio dollari → euro della BCE in uso per i costi LLM; null finché non arriva.</summary>
+    double? UsdToEur { get; }
+
+    LlmSummary ConnectorCosts(ConnectorManifest manifest);
+
+    /// <summary>Ultime chiamate (o giri, con i totali) registrate, dalla più recente.</summary>
+    IReadOnlyList<LlmCall> ConnectorCalls(ConnectorManifest manifest);
+
+    /// <summary>Costi LLM del connettore (null li spegne): null se fatto, altrimenti il motivo.</summary>
+    string? SetConnectorLlm(ConnectorManifest manifest, LlmSpec? llm);
+
+    void ResetConnectorCosts(ConnectorManifest manifest);
+
+    void ExportConnectorCosts();
 
     void RemoveConnector(ConnectorManifest manifest);
 
@@ -186,6 +205,13 @@ public sealed class SettingsWindow : Window
     private Panel _current;
     private SettingsPage _selected = SettingsPage.General;
     private ConnectorTemplate? _draft;
+
+    /// <summary>Connettore da cui viene il modulo: Modifica lo riscrive, Duplica ne parte per uno nuovo.</summary>
+    private ConnectorManifest? _source;
+    private bool _duplicate;
+
+    /// <summary>Connettore di cui si stanno impostando i costi LLM.</summary>
+    private ConnectorManifest? _llmDraft;
     private string? _libraryCategory;
     private TextBlock? _mailStatus;
     private TextBlock? _calendarStatus;
@@ -212,9 +238,9 @@ public sealed class SettingsWindow : Window
         {
             if (e.Key == Key.Escape)
             {
-                if (_draft is not null)
+                if (_draft is not null || _llmDraft is not null)
                 {
-                    _draft = null;
+                    CloseForms();
                     Rebuild();
                 }
                 else
@@ -247,7 +273,7 @@ public sealed class SettingsWindow : Window
     public void Show(SettingsPage page)
     {
         if (page != _selected)
-            _draft = null;
+            CloseForms();
         _selected = page;
         Rebuild();
         _scroll.ScrollToTop();
@@ -257,9 +283,43 @@ public sealed class SettingsWindow : Window
     public void ShowConnectorTemplate(string id)
     {
         _selected = SettingsPage.Connectors;
+        CloseForms();
         _draft = ConnectorCatalog.Find(id);
         Rebuild();
         _scroll.ScrollToTop();
+    }
+
+    /// <summary>Modulo della libreria già compilato coi valori di un connettore attivo: per modificarlo o duplicarlo.</summary>
+    public void EditConnector(ConnectorManifest manifest, bool duplicate)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        if (manifest.Template is not { } template || ConnectorCatalog.Find(template) is not { } found)
+            return;
+        _selected = SettingsPage.Connectors;
+        CloseForms();
+        _draft = found;
+        _source = manifest;
+        _duplicate = duplicate;
+        Rebuild();
+        _scroll.ScrollToTop();
+    }
+
+    /// <summary>Modulo dei costi LLM di un connettore (anche per le istantanee).</summary>
+    public void EditConnectorCosts(ConnectorManifest manifest)
+    {
+        _selected = SettingsPage.Connectors;
+        CloseForms();
+        _llmDraft = manifest ?? throw new ArgumentNullException(nameof(manifest));
+        Rebuild();
+        _scroll.ScrollToTop();
+    }
+
+    private void CloseForms()
+    {
+        _draft = null;
+        _source = null;
+        _duplicate = false;
+        _llmDraft = null;
     }
 
     /// <summary>Ridisegna il menù e la pagina aperta (dopo una ricarica dei plugin cambiano i widget e gli errori).</summary>
@@ -300,7 +360,9 @@ public sealed class SettingsWindow : Window
                 AgentsPage();
                 break;
             case SettingsPage.Connectors:
-                if (_draft is { } template)
+                if (_llmDraft is { } costs)
+                    LlmForm(costs);
+                else if (_draft is { } template)
                     ConnectorForm(template);
                 else
                     ConnectorsPage();
@@ -403,6 +465,12 @@ public sealed class SettingsWindow : Window
         ActivityRow(LiveActivity.Connectors, "Dispositivi e sistemi", "Pagina Dispositivi e avvisi quando un valore supera la soglia");
 
         var results = _shell.ConnectorResults;
+        var tracked = results.Select(r => r.Manifest).OfType<ConnectorManifest>().Where(m => m.Llm is not null).ToArray();
+        if (tracked.Length > 0)
+        {
+            Heading("COSTI LLM", tracked.Length == 1 ? "1 SITO" : $"{tracked.Length} SITI");
+            Card(() => CostsSummary(tracked));
+        }
         Heading(results.Count == 0 ? "ATTIVI" : $"ATTIVI · {results.Count}");
         if (results.Count == 0)
             Card(() => Note("Nessun connettore: scegline uno dalla libreria qui sotto.", Theme.GreyBrush));
@@ -477,6 +545,13 @@ public sealed class SettingsWindow : Window
         if (m.Actions.Count > 0)
             Note($"Pulsanti: {string.Join(", ", m.Actions.Select(a => a.Label))}", Theme.GreyBrush);
 
+        if (m.Kind is ConnectorKind.Http or ConnectorKind.Command or ConnectorKind.File)
+            LlmCard(m);
+
+        var widget = ConnectorWidgetLayout.WidgetId(m.Id);
+        ToggleRow("Widget sul desktop", "I valori in un riquadro sul desktop; si sposta trascinandolo", _shell.IsWidgetEnabled(widget),
+            v => _shell.SetWidgetEnabled(widget, v));
+
         if (m.NeedsGrant)
         {
             var what = m.Kind == ConnectorKind.Command
@@ -501,12 +576,181 @@ public sealed class SettingsWindow : Window
                 Rebuild();
             }));
         }
+        if (m.Template is { } from && ConnectorCatalog.Find(from) is not null)
+            ButtonRow(("MODIFICA", () => EditConnector(m, duplicate: false)), ("DUPLICA", () => EditConnector(m, duplicate: true)));
         ConfirmButtonRow("RIMUOVI", "CONFERMA RIMOZIONE", () =>
         {
             _shell.RemoveConnector(m);
             Rebuild();
         });
     }
+
+    /// <summary>Spesa di oggi e del mese di ogni sito che tiene i costi LLM, il totale, il cambio e l'esportazione.</summary>
+    private void CostsSummary(ConnectorManifest[] tracked)
+    {
+        double today = 0, month = 0;
+        var complete = true;
+        foreach (var m in tracked)
+        {
+            var c = _shell.ConnectorCosts(m);
+            today += c.TodayEur ?? 0;
+            month += c.MonthEur ?? 0;
+            complete &= c.TodayEur is not null && c.MonthEur is not null;
+            var over = (m.Llm!.DailyBudget is { } d && c.TodayEur > d) || (m.Llm.MonthlyBudget is { } mb && c.MonthEur > mb);
+            var row = Note($"{m.Name}   ·   oggi € {LlmLedger.FormatEuro(c.TodayEur)}{Budget(m.Llm.DailyBudget)}   ·   mese € {LlmLedger.FormatEuro(c.MonthEur)}{Budget(m.Llm.MonthlyBudget)}" +
+                           $"   ·   {c.Today.Calls} chiamate oggi", over ? Theme.RedBrush : Theme.WhiteBrush);
+            row.FontSize = 13;
+        }
+        if (tracked.Length > 1)
+        {
+            var total = Note($"In tutto   ·   oggi € {LlmLedger.FormatEuro(today)}   ·   mese € {LlmLedger.FormatEuro(month)}{(complete ? string.Empty : "  (manca il cambio)")}", Theme.WhiteBrush);
+            total.FontWeight = FontWeights.SemiBold;
+        }
+        Note(_shell.UsdToEur is { } rate
+                ? $"Dollari convertiti col cambio BCE: 1 $ = {rate.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture)} €. I valori compaiono anche nella pagina Dispositivi e nei widget."
+                : "Il cambio della BCE arriva al primo giro con costi in dollari; fino ad allora quei costi restano in sospeso.",
+            Theme.GreyBrush);
+        ButtonRow(("ESPORTA CSV", _shell.ExportConnectorCosts));
+    }
+
+    private static string Budget(double? budget) =>
+        budget is { } b ? $" / {LlmLedger.FormatEuro(b)}" : string.Empty;
+
+    /// <summary>Costi LLM nella scheda del connettore: riepilogo e ultime chiamate, oppure l'invito ad accenderli.</summary>
+    private void LlmCard(ConnectorManifest m)
+    {
+        if (m.Llm is not { } llm)
+        {
+            ToggleRow("Costi LLM", "Il sito usa un modello (Claude, GPT…)? Tieni traccia in euro delle chiamate che fa, con budget e avvisi", false, v =>
+            {
+                if (v)
+                    EditConnectorCosts(m);
+            });
+            return;
+        }
+        var c = _shell.ConnectorCosts(m);
+        var over = (llm.DailyBudget is { } d && c.TodayEur > d) || (llm.MonthlyBudget is { } mb && c.MonthEur > mb);
+        Note($"Costi LLM · oggi € {LlmLedger.FormatEuro(c.TodayEur)}{Budget(llm.DailyBudget)} · mese € {LlmLedger.FormatEuro(c.MonthEur)}{Budget(llm.MonthlyBudget)}" +
+             $" · {c.Today.Calls} chiamate, {NothingShell.Core.Agents.AgentFormat.Tokens(c.Today.Input + c.Today.CacheRead + c.Today.CacheWrite)} in, " +
+             $"{NothingShell.Core.Agents.AgentFormat.Tokens(c.Today.Output)} out oggi" +
+             (c.Today.UnpricedTokens > 0 ? $" · {NothingShell.Core.Agents.AgentFormat.Tokens(c.Today.UnpricedTokens)} token senza prezzo (aggiungi i prezzi)" : string.Empty),
+            over ? Theme.RedBrush : Theme.WhiteBrush);
+        foreach (var call in _shell.ConnectorCalls(m).Take(4))
+        {
+            var euro = call.Priced ? (call.Usd == 0 ? call.Eur : _shell.UsdToEur is { } rate ? call.Eur + call.Usd * rate : (double?)null) : null;
+            Note($"{call.At.ToLocalTime():dd/MM HH:mm} · {(call.Model.Length > 0 ? NothingShell.Core.Agents.AgentPricing.ShortName(call.Model) is { Length: > 0 } s ? s : call.Model : "modello?")}" +
+                 $"{(call.Calls > 1 ? $" · {call.Calls} chiamate" : string.Empty)} · IN {NothingShell.Core.Agents.AgentFormat.Tokens(call.Input)} · OUT {NothingShell.Core.Agents.AgentFormat.Tokens(call.Output)}" +
+                 $" · € {(call.Priced ? LlmLedger.FormatEuro(euro) : "senza prezzo")}", Theme.GreyBrush);
+        }
+        ButtonRow(("COSTI LLM", () => EditConnectorCosts(m)));
+        ConfirmButtonRow("AZZERA I COSTI", "CONFERMA AZZERAMENTO", () =>
+        {
+            _shell.ResetConnectorCosts(m);
+            Rebuild();
+        });
+    }
+
+    /// <summary>
+    /// Modulo dei costi LLM: dove sono modello, token e costo nella risposta del sito, prezzi per i modelli fuori
+    /// listino, budget e cambio. Scrive il blocco "llm" del file del connettore.
+    /// </summary>
+    private void LlmForm(ConnectorManifest m)
+    {
+        var back = Label("‹  CONNETTORI", 11, Theme.GreyBrush);
+        back.Cursor = Cursors.Hand;
+        back.Margin = new Thickness(0, 0, 0, 14);
+        back.MouseLeftButtonDown += (_, e) => e.Handled = true;
+        back.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            CloseForms();
+            Rebuild();
+        };
+        _page.Children.Add(back);
+
+        var spec = m.Llm ?? new LlmSpec { Model = "{model}", Input = "{usage.input_tokens}", Output = "{usage.output_tokens}" };
+        Section("COSTI LLM");
+        CardTitle(m.Name, "EURO", Theme.GreyBrush);
+        Note("Il sito deve rispondere (o il comando stampare) un JSON con l'uso del modello. Scrivi dove sono i valori come nelle " +
+             "letture: {usage.input_tokens}. Con le singole chiamate ognuna si conta una volta (per id); con i totali si conta " +
+             "quanto sono cresciuti da un giro all'altro. Il costo viene dal sito, dai prezzi qui sotto o dal listino di Anthropic " +
+             "per i modelli Claude, in dollari convertiti col cambio BCE del giorno.", Theme.GreyBrush);
+
+        var calls = spec.Mode == LlmMode.Calls;
+        ToggleRow("Singole chiamate", "Il sito dà un elenco di chiamate, ognuna con un id. Spento: contatori totali", calls, v => calls = v);
+        var list = Field("Elenco  ·  facoltativo  ·  es. calls o data[0].results", spec.List ?? string.Empty);
+        var model = Field("Modello  ·  {model} o un nome fisso come claude-sonnet-5-5", spec.Model ?? string.Empty);
+        var input = Field("Token in entrata  ·  es. {usage.input_tokens}", spec.Input ?? string.Empty);
+        var output = Field("Token in uscita  ·  es. {usage.output_tokens}", spec.Output ?? string.Empty);
+        var cacheRead = Field("Token letti dalla cache  ·  facoltativo", spec.CacheRead ?? string.Empty);
+        var cacheWrite = Field("Token scritti in cache (5 minuti)  ·  facoltativo", spec.CacheWrite ?? string.Empty);
+        var cacheWrite1h = Field("Token scritti in cache (1 ora)  ·  facoltativo", spec.CacheWrite1h ?? string.Empty);
+        var requests = Field("Numero di chiamate (con i totali)  ·  facoltativo", spec.Requests ?? string.Empty);
+        var id = Field("Id della chiamata  ·  facoltativo  ·  es. {id}", spec.Id ?? string.Empty);
+        var at = Field("Ora della chiamata  ·  facoltativo  ·  es. {created_at}", spec.At ?? string.Empty);
+
+        Section("COSTO");
+        var cost = Field("Costo calcolato dal sito  ·  facoltativo  ·  vince sul listino", spec.Cost ?? string.Empty);
+        var costCurrency = Field("Valuta del costo  ·  USD o EUR", spec.CostCurrency);
+        var costScale = Field("Scala del costo  ·  0.01 se è in centesimi", Number(spec.CostScale));
+        var priceIn = Field("Prezzo in entrata per milione di token  ·  per modelli fuori listino", spec.Price is { } p1 ? Number(p1.Input) : string.Empty);
+        var priceOut = Field("Prezzo in uscita per milione di token", spec.Price is { } p2 ? Number(p2.Output) : string.Empty);
+        var priceCurrency = Field("Valuta dei prezzi  ·  EUR o USD", spec.Price?.Currency ?? LlmSpec.Eur);
+
+        Section("MONITORAGGIO");
+        var daily = Field("Budget al giorno (€)  ·  oltre diventa un avviso nel notch", spec.DailyBudget is { } d ? Number(d) : string.Empty);
+        var monthly = Field("Budget al mese (€)", spec.MonthlyBudget is { } mo ? Number(mo) : string.Empty);
+        var rate = Field("Cambio fisso 1 $ = … €  ·  vuoto = BCE del giorno", spec.UsdToEur is { } r ? Number(r) : string.Empty);
+        var countFirst = spec.CountFirst;
+        ToggleRow("Conta anche la prima lettura", "Per contatori che ripartono ogni giorno (Admin API di Anthropic). Spento: la prima lettura fa da punto di partenza",
+            countFirst, v => countFirst = v);
+
+        var result = Note(string.Empty, Theme.RedBrush);
+        result.Visibility = Visibility.Collapsed;
+        ButtonRow(primary: true,
+            ("SALVA", () =>
+            {
+                static string? T(TextBox box) => box.Text.Trim() is { Length: > 0 } t ? t : null;
+                static double? N(TextBox box) =>
+                    double.TryParse(box.Text.Trim().Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : null;
+                var currency = T(costCurrency)?.ToUpperInvariant() == LlmSpec.Eur ? LlmSpec.Eur : LlmSpec.Usd;
+                var next = new LlmSpec
+                {
+                    Mode = calls ? LlmMode.Calls : LlmMode.Totals,
+                    List = T(list), Model = T(model), Input = T(input), Output = T(output),
+                    CacheRead = T(cacheRead), CacheWrite = T(cacheWrite), CacheWrite1h = T(cacheWrite1h),
+                    Requests = T(requests), Id = T(id), At = T(at),
+                    Cost = T(cost), CostCurrency = currency, CostScale = N(costScale) ?? 1,
+                    Price = N(priceIn) is { } pin && N(priceOut) is { } pout
+                        ? new LlmPrice(pin, pout, pin / 10, T(priceCurrency)?.ToUpperInvariant() == LlmSpec.Usd ? LlmSpec.Usd : LlmSpec.Eur)
+                        : null,
+                    DailyBudget = N(daily), MonthlyBudget = N(monthly), UsdToEur = N(rate) is > 0 and var fixedRate ? fixedRate : null,
+                    CountFirst = countFirst,
+                };
+                if (_shell.SetConnectorLlm(m, next) is { } error)
+                {
+                    result.Text = error;
+                    result.Visibility = Visibility.Visible;
+                    return;
+                }
+                CloseForms();
+                Rebuild();
+            }),
+            ("ANNULLA", () =>
+            {
+                CloseForms();
+                Rebuild();
+            }));
+        if (m.Llm is not null)
+            ConfirmButtonRow("SMETTI DI TENERE TRACCIA", "CONFERMA: TOGLI I COSTI", () =>
+            {
+                _shell.SetConnectorLlm(m, null);
+                CloseForms();
+                Rebuild();
+            });
+    }
+
+    private static string Number(double value) => value.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>Tessera della libreria: categoria, nome, descrizione; un clic apre il modulo.</summary>
     private Border TemplateTile(ConnectorTemplate template, int active)
@@ -571,10 +815,14 @@ public sealed class SettingsWindow : Window
         };
         _page.Children.Add(back);
 
+        var source = _source;
+        var editing = source is not null && !_duplicate;
         Section(template.Category.ToUpperInvariant());
-        CardTitle(template.Name, null, Theme.GreyBrush);
+        CardTitle(template.Name, editing ? "MODIFICA" : _duplicate ? "DUPLICA" : null, Theme.GreyBrush);
         Note(template.Description, Theme.GreyBrush);
-        var name = Field("Nome nella pagina Dispositivi", template.Name);
+        if (_duplicate)
+            Note("Una copia indipendente: cambia indirizzo, server o processo e ottieni un altro connettore, con il suo widget e i suoi costi.", Theme.GreyBrush);
+        var name = Field("Nome nella pagina Dispositivi", source is null ? template.Name : editing ? source.Name : source.Name + " 2");
         var inputs = new List<(ConnectorField Field, Func<string> Read)>();
         foreach (var field in template.Fields)
         {
@@ -584,12 +832,12 @@ public sealed class SettingsWindow : Window
             if (field.Kind == FieldKind.Secret)
             {
                 var box = new PasswordBox();
-                AddField(caption + "  ·  va nel Gestore credenziali", box);
+                AddField(caption + (editing && source!.Secret ? "  ·  vuoto = resta quello salvato" : "  ·  va nel Gestore credenziali"), box);
                 inputs.Add((field, () => box.Password));
             }
             else
             {
-                var box = Field(caption, field.Default ?? string.Empty);
+                var box = Field(caption, source?.TemplateValues.GetValueOrDefault(field.Key) ?? field.Default ?? string.Empty);
                 inputs.Add((field, () => box.Text));
             }
         }
@@ -603,27 +851,29 @@ public sealed class SettingsWindow : Window
                  "(riavvia, termina) chiedono un secondo clic.", Theme.GreyBrush);
         }
 
-        Section("ATTIVA");
-        Note("Il connettore compare nella pagina Dispositivi del notch; i valori arrivano al primo aggiornamento.", Theme.GreyBrush);
+        Section(editing ? "SALVA" : "ATTIVA");
+        Note(editing ? "Il connettore riparte con i nuovi valori; widget, costi LLM e token restano."
+            : "Il connettore compare nella pagina Dispositivi del notch; i valori arrivano al primo aggiornamento. " +
+              "Puoi attivare lo stesso connettore quante volte vuoi: un sito, un server o un processo per volta.", Theme.GreyBrush);
         var result = Note(string.Empty, Theme.RedBrush);
         result.Visibility = Visibility.Collapsed;
         ButtonRow(primary: true,
-            ("ATTIVA", () =>
+            (editing ? "SALVA" : "ATTIVA", () =>
             {
                 var values = inputs.ToDictionary(i => i.Field.Key, i => i.Read(), StringComparer.Ordinal);
-                if (_shell.AddConnector(template, name.Text, values, grant) is { } error)
+                if (_shell.AddConnector(template, name.Text, values, grant, editing ? source : null) is { } error)
                 {
                     result.Text = error;
                     result.Visibility = Visibility.Visible;
                     return;
                 }
-                _draft = null;
+                CloseForms();
                 Rebuild();
                 _scroll.ScrollToTop();
             }),
             ("ANNULLA", () =>
             {
-                _draft = null;
+                CloseForms();
                 Rebuild();
             }));
     }

@@ -21,6 +21,12 @@ public sealed record ConnectedPageActions(
     Action FindPhone,
     Action<ConnectorManifest, ConnectorAction> RunAction)
 {
+    /// <summary>Sceglie un file e lo manda al telefono collegato.</summary>
+    public Action SendFile { get; init; } = () => { };
+
+    /// <summary>Manda al telefono il testo copiato (solo con un clic).</summary>
+    public Action SendClipboard { get; init; } = () => { };
+
     /// <summary>Nessuna azione (anteprime di <c>--snapshot</c>).</summary>
     public static ConnectedPageActions None { get; } = new(_ => { }, _ => { }, () => { }, (_, _) => { });
 }
@@ -135,26 +141,7 @@ public sealed class PhonePage : NotchPageView
         _count.Text = device is { Connected: true } ? "collegato" : _data.Direct ? "non collegato" : string.Empty;
 
         if (device is not null)
-        {
-            var battery = device.Battery is { } b
-                ? $"{b.Charge}%{(b.Charging ? " in carica" : string.Empty)}"
-                : null;
-            var signal = device.Signal is { } s ? $"{s.NetworkType} {new string('|', s.Strength)}{new string('.', 4 - s.Strength)}" : null;
-            var right = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            if (device.Battery is { } level)
-                right.Children.Add(TallRows.Bar(level.Charge / 100.0, 10, level.Low && !level.Charging ? Theme.Red : Theme.White));
-            if (device.Connected)
-                right.Children.Add(DevRows.Button("TROVA", _actions.FindPhone));
-            _list.Children.Add(TallRows.Item(DevRows.Icon(DotIcons.Phone, device.Connected ? Theme.White : Theme.Grey), device.Name,
-                null, string.Join(" · ", new[] { battery, signal }.Where(x => x is not null)), right));
-            if (device.Shares.Count > 0)
-            {
-                var shares = NotchUi.Text(11, Theme.GreyBrush, "Condivide: " + string.Join(", ", device.Shares));
-                shares.TextWrapping = TextWrapping.Wrap;
-                shares.TextTrimming = TextTrimming.None;
-                _list.Children.Add(shares);
-            }
-        }
+            AddDevice(device);
         else
         {
             var hint = NotchUi.Text(12, Theme.GreyBrush, _data.Direct
@@ -184,6 +171,16 @@ public sealed class PhonePage : NotchPageView
                 DevRows.Buttons(DevRows.Button("APRI", () => _actions.OpenFile(path)), DevRows.Button("CARTELLA", () => _actions.ShowFile(path)))));
         }
 
+        if (device is { Connected: true } && _data.Incoming is null && _data.Files.Count == 0 && _data.Notifications.Count == 0)
+        {
+            _list.Children.Add(TallRows.Caption("FILE E NOTIFICHE"));
+            var empty = NotchUi.Text(12, Theme.GreyBrush,
+                "Ancora niente. Condividi un file o un link dal telefono verso questo PC: arriva in Download e compare qui.");
+            empty.TextWrapping = TextWrapping.Wrap;
+            empty.TextTrimming = TextTrimming.None;
+            _list.Children.Add(empty);
+        }
+
         if (_data.Notifications.Count > 0)
             _list.Children.Add(TallRows.Caption("NOTIFICHE"));
         foreach (var n in _data.Notifications)
@@ -194,6 +191,127 @@ public sealed class PhonePage : NotchPageView
                 string.Join(" · ", new[] { n.App, n.Text }.Where(x => x is { Length: > 0 })),
                 titleBrush: n.Kind == PhoneEventKind.MissedCall ? Theme.RedBrush : null));
         }
+    }
+
+    /// <summary>
+    /// Il telefono a colpo d'occhio: nome e stato con Trova, poi tre tessere affiancate (batteria, rete, invio di file e
+    /// appunti) e cosa condivide. Le tessere riempiono la larghezza invece di lasciare una riga sola e spazio vuoto.
+    /// </summary>
+    private void AddDevice(PhoneDevice device)
+    {
+        var on = device.Connected;
+        var status = on ? (_data.Direct ? "Collegato · KDE Connect" : "Collegato") : _data.Status is { Length: > 0 } st ? st : "Non raggiungibile";
+        _list.Children.Add(TallRows.Item(DevRows.Icon(DotIcons.Phone, on ? Theme.White : Theme.Grey), device.Name, null, status,
+            on ? DevRows.Button("TROVA", _actions.FindPhone) : null));
+
+        var tiles = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        for (var i = 0; i < 3; i++)
+            tiles.ColumnDefinitions.Add(new ColumnDefinition());
+
+        // batteria: percentuale a punti, barra, stato
+        var battery = new StackPanel();
+        if (device.Battery is { } b)
+        {
+            var low = b.Low && !b.Charging;
+            battery.Children.Add(DevRows.Dots($"{b.Charge}%", !on ? Theme.Grey : low ? Theme.Red : Theme.White, 3));
+            var bar = new DotMatrixView
+            {
+                Pitch = 3, Dots = DotBar.Render(b.Charge / 100.0, 28, 2), OffColor = Theme.DotOff,
+                DotColor = !on ? Theme.Grey : low ? Theme.Red : Theme.White, HorizontalAlignment = HorizontalAlignment.Left,
+            };
+            bar.Margin = new Thickness(0, 7, 0, 5);
+            battery.Children.Add(bar);
+            battery.Children.Add(NotchUi.Text(10, b.Charging ? Theme.RedBrush : Theme.GreyBrush, b.Charging ? "in carica" : low ? "scarica" : "a batteria"));
+        }
+        else
+        {
+            battery.Children.Add(DevRows.Dots("--", Theme.Grey, 3));
+            battery.Children.Add(Hint("non condivisa"));
+        }
+        AddTile(tiles, 0, "BATTERIA", battery);
+
+        // rete: tipo a punti e tacche
+        var network = new StackPanel();
+        if (device.Signal is { } s)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            row.Children.Add(DevRows.Dots(s.NetworkType, on ? Theme.White : Theme.Grey, 3));
+            row.Children.Add(new DotMatrixView
+            {
+                Pitch = 3, Dots = DotBar.Signal(s.Strength), DotColor = on ? Theme.White : Theme.Grey, Margin = new Thickness(10, 0, 0, 0),
+            });
+            network.Children.Add(row);
+            network.Children.Add(Hint(s.Strength switch { 0 => "nessun segnale", 1 => "segnale debole", 4 => "segnale pieno", _ => $"{s.Strength} tacche su 4" }));
+        }
+        else
+        {
+            network.Children.Add(DevRows.Dots("--", Theme.Grey, 3));
+            network.Children.Add(Hint("non condivisa"));
+        }
+        AddTile(tiles, 1, "RETE", network);
+
+        // invio al telefono: solo con un clic, mai da solo
+        var send = new StackPanel();
+        if (on)
+        {
+            var file = DevRows.Button("FILE", _actions.SendFile);
+            var clip = DevRows.Button("APPUNTI", _actions.SendClipboard);
+            foreach (var button in new[] { file, clip })
+            {
+                button.HorizontalAlignment = HorizontalAlignment.Left;
+                button.Margin = new Thickness(0, 0, 0, 5);
+                send.Children.Add(button);
+            }
+        }
+        else
+        {
+            send.Children.Add(Hint("quando è collegato"));
+        }
+        AddTile(tiles, 2, "INVIA", send);
+        _list.Children.Add(tiles);
+
+        if (device.Shares.Count > 0)
+        {
+            _list.Children.Add(TallRows.Caption("CONDIVIDE"));
+            var chips = new WrapPanel();
+            foreach (var share in device.Shares)
+                chips.Children.Add(new Border
+                {
+                    BorderBrush = Theme.OutlineBrush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(9),
+                    Padding = new Thickness(8, 1, 8, 2),
+                    Margin = new Thickness(0, 2, 6, 2),
+                    Child = NotchUi.Text(11, on ? Theme.WhiteBrush : Theme.GreyBrush, share),
+                });
+            _list.Children.Add(chips);
+        }
+    }
+
+    private static void AddTile(Grid tiles, int column, string title, UIElement content)
+    {
+        var stack = new StackPanel();
+        var caption = NotchUi.Text(10, Theme.GreyBrush, title);
+        caption.Margin = new Thickness(0, 0, 0, 7);
+        stack.Children.Add(caption);
+        stack.Children.Add(content);
+        var tile = new Border
+        {
+            Background = Theme.SurfaceBrush,
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(12, 10, 12, 10),
+            Margin = new Thickness(column == 0 ? 0 : 4, 0, column == 2 ? 0 : 4, 0),
+            Child = stack,
+        };
+        Grid.SetColumn(tile, column);
+        tiles.Children.Add(tile);
+    }
+
+    private static TextBlock Hint(string text)
+    {
+        var hint = NotchUi.Text(10, Theme.GreyBrush, text);
+        hint.Margin = new Thickness(0, 6, 0, 0);
+        return hint;
     }
 }
 

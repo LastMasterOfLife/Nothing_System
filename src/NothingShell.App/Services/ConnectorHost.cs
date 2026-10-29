@@ -30,11 +30,22 @@ public sealed class ConnectorHost : IDisposable
     private readonly Dictionary<string, ConnectorState> _states = new(StringComparer.Ordinal);
     private readonly Dictionary<string, MqttLink> _mqtt = new(StringComparer.Ordinal);
     private readonly ConnectorAlerts _alerts = new();
+    private readonly LlmLedger _ledger;
+    private readonly string? _ledgerPath;
     private CancellationTokenSource? _stop;
+    private int _rateFetching;
 
     public ConnectorHost()
+        : this(LlmLedger.DefaultPath)
+    {
+    }
+
+    /// <param name="ledgerPath">Dove salvare il registro dei costi LLM; null = solo in memoria (diagnostica).</param>
+    public ConnectorHost(string? ledgerPath)
     {
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("NothingShell/0.12");
+        _ledgerPath = ledgerPath;
+        _ledger = ledgerPath is null ? new LlmLedger() : LlmLedger.Load(ledgerPath);
     }
 
     public static string Folder { get; } = Path.Combine(AtomicFile.DataFolder, "connectors");
@@ -60,7 +71,7 @@ public sealed class ConnectorHost : IDisposable
 
     public void Start()
     {
-        Stop();
+        StopRunning(); // senza Changed: i widget dei connettori non spariscono per un attimo a ogni riavvio
         _stop = new CancellationTokenSource();
         Directory.CreateDirectory(Folder);
         var results = new List<ConnectorLoadResult>();
@@ -91,6 +102,12 @@ public sealed class ConnectorHost : IDisposable
 
     public void Stop()
     {
+        StopRunning();
+        Changed?.Invoke();
+    }
+
+    private void StopRunning()
+    {
         _stop?.Cancel();
         _stop?.Dispose();
         _stop = null;
@@ -101,7 +118,6 @@ public sealed class ConnectorHost : IDisposable
             _mqtt.Clear();
         }
         _states.Clear();
-        Changed?.Invoke();
     }
 
     public void Dispose()
@@ -167,7 +183,7 @@ public sealed class ConnectorHost : IDisposable
     /// </summary>
     public static async Task<IReadOnlyList<string>> CheckAsync(string folder, bool runCommands)
     {
-        using var host = new ConnectorHost();
+        using var host = new ConnectorHost(ledgerPath: null); // la diagnostica non tocca il registro dei costi
         var lines = new List<string> { $"Cartella: {folder}" };
         foreach (var file in Directory.EnumerateFiles(folder, "*.json").Order(StringComparer.OrdinalIgnoreCase))
         {
@@ -255,8 +271,8 @@ public sealed class ConnectorHost : IDisposable
         {
             case ConnectorKind.Http:
             {
-                using var doc = ConnectorReadings.Document(await GetAsync(m, new Uri(m.Url!), token));
-                return m.Readings.Select(r => ConnectorReadings.Evaluate(r, doc.RootElement, m.Name)).ToArray();
+                using var doc = ConnectorReadings.Document(await GetAsync(m, new Uri(ExpandUrl(m.Url!, DateTimeOffset.UtcNow)), token));
+                return WithLlm(m, doc.RootElement, m.Readings.Select(r => ConnectorReadings.Evaluate(r, doc.RootElement, m.Name)));
             }
             case ConnectorKind.HomeAssistant:
             {
@@ -295,13 +311,13 @@ public sealed class ConnectorHost : IDisposable
             case ConnectorKind.Command:
             {
                 using var doc = ConnectorReadings.Document(await RunProcessAsync(m.Command!, m.Arguments, token));
-                return Specs(m).Select(r => ConnectorReadings.Evaluate(r, doc.RootElement, "Uscita")).ToArray();
+                return WithLlm(m, doc.RootElement, Specs(m).Select(r => ConnectorReadings.Evaluate(r, doc.RootElement, "Uscita")));
             }
             case ConnectorKind.File:
             {
                 var text = await File.ReadAllTextAsync(Environment.ExpandEnvironmentVariables(m.Path!), token).WaitAsync(Timeout, token);
                 using var doc = ConnectorReadings.Document(text);
-                return Specs(m).Select(r => ConnectorReadings.Evaluate(r, doc.RootElement, "Contenuto")).ToArray();
+                return WithLlm(m, doc.RootElement, Specs(m).Select(r => ConnectorReadings.Evaluate(r, doc.RootElement, "Contenuto")));
             }
             case ConnectorKind.Ping:
             {
@@ -319,8 +335,124 @@ public sealed class ConnectorHost : IDisposable
         }
     }
 
-    /// <summary>Senza "readings" un comando o un file mostrano la prima riga dell'uscita.</summary>
-    private static IReadOnlyList<ReadingSpec> Specs(ConnectorManifest m) => m.Readings.Count > 0 ? m.Readings : [new ReadingSpec(null, "{lines[0]}")];
+    /// <summary>Senza "readings" un comando o un file mostrano la prima riga dell'uscita (se non tengono solo i costi LLM).</summary>
+    private static IReadOnlyList<ReadingSpec> Specs(ConnectorManifest m) =>
+        m.Readings.Count > 0 ? m.Readings : m.Llm is not null ? [] : [new ReadingSpec(null, "{lines[0]}")];
+
+    /// <summary>
+    /// <c>{today}</c> e <c>{monthStart}</c> negli indirizzi: mezzanotte UTC di oggi e del primo del mese, in ISO 8601
+    /// (es. <c>starting_at={today}</c> dell'Admin API di Anthropic).
+    /// </summary>
+    public static string ExpandUrl(string url, DateTimeOffset nowUtc)
+    {
+        ArgumentNullException.ThrowIfNull(url);
+        const string iso = "yyyy-MM-dd'T'HH:mm:ss'Z'";
+        var day = nowUtc.UtcDateTime.Date;
+        return url.Replace("{today}", day.ToString(iso, System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+            .Replace("{monthStart}", new DateTime(day.Year, day.Month, 1).ToString(iso, System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
+    }
+
+    // ── Costi LLM ──────────────────────────────────────────────────────────────
+
+    /// <summary>Cambio dollari → euro in uso (BCE del giorno), null finché non arriva.</summary>
+    public double? UsdToEur
+    {
+        get
+        {
+            lock (_ledger)
+                return _ledger.UsdToEur;
+        }
+    }
+
+    public LlmSummary LlmSummaryOf(ConnectorManifest manifest)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        lock (_ledger)
+            return _ledger.Summary(manifest.Id, DateOnly.FromDateTime(DateTime.Now), manifest.Llm?.UsdToEur ?? _ledger.UsdToEur);
+    }
+
+    public IReadOnlyList<LlmCall> LlmRecent(string connectorId)
+    {
+        lock (_ledger)
+            return _ledger.Books.TryGetValue(connectorId, out var book) ? [.. book.Recent] : [];
+    }
+
+    public string LlmCsv(Func<string, string> nameOf)
+    {
+        lock (_ledger)
+            return _ledger.Csv(nameOf, _ledger.UsdToEur);
+    }
+
+    /// <summary>Dimentica i costi di un connettore (rimosso, o azzerato dall'utente).</summary>
+    public void ForgetLlm(string connectorId)
+    {
+        lock (_ledger)
+        {
+            if (_ledger.Forget(connectorId))
+                SaveLedger();
+        }
+    }
+
+    /// <summary>Aggiunge al registro quello che il sito ha speso dall'ultimo giro e mette i costi fra i valori.</summary>
+    private List<ConnectorReading> WithLlm(ConnectorManifest m, JsonElement root, IEnumerable<ConnectorReading> readings)
+    {
+        var list = readings.ToList();
+        if (m.Llm is not { } spec)
+            return list;
+        LlmSummary summary;
+        lock (_ledger)
+        {
+            if (_ledger.Apply(m.Id, spec, root, DateTimeOffset.Now))
+                SaveLedger();
+            summary = _ledger.Summary(m.Id, DateOnly.FromDateTime(DateTime.Now), spec.UsdToEur ?? _ledger.UsdToEur);
+            if (spec.UsdToEur is null && _ledger.RateDate != DateOnly.FromDateTime(DateTime.Now))
+                _ = RefreshRateAsync();
+        }
+        list.AddRange(LlmLedger.Readings(spec, summary));
+        return list;
+    }
+
+    private void SaveLedger()
+    {
+        if (_ledgerPath is null)
+            return;
+        try
+        {
+            _ledger.Save(_ledgerPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // si riprova al prossimo giro: il registro resta in memoria
+        }
+    }
+
+    /// <summary>Cambio USD → EUR della BCE (Frankfurter), una volta al giorno; se non arriva resta quello di prima.</summary>
+    private async Task RefreshRateAsync()
+    {
+        if (Interlocked.Exchange(ref _rateFetching, 1) == 1)
+            return;
+        try
+        {
+            using var doc = JsonDocument.Parse(await _http.GetStringAsync(new Uri("https://api.frankfurter.app/latest?from=USD&to=EUR")));
+            if (doc.RootElement.TryGetProperty("rates", out var rates) && rates.TryGetProperty("EUR", out var eur) && eur.TryGetDouble(out var rate) && rate > 0)
+            {
+                lock (_ledger)
+                {
+                    _ledger.UsdToEur = rate;
+                    _ledger.RateDate = DateOnly.FromDateTime(DateTime.Now);
+                    SaveLedger();
+                }
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            // senza rete il cambio resta quello dell'ultima volta
+        }
+        finally
+        {
+            Volatile.Write(ref _rateFetching, 0);
+        }
+    }
 
     /// <summary>Gli stati di Home Assistant più comuni in italiano: "on" → "ACCESO".</summary>
     private static string Translate(string state) => state switch
