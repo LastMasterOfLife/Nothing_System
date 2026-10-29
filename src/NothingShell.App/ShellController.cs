@@ -171,17 +171,11 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         set
         {
             Update(_settings with { MailInNotch = value });
-            if (value)
-            {
-                _notifications.Start();
-                if (_settings.MailAccount is { } account)
-                    _imap.Start(account);
-            }
-            else
-            {
-                _notifications.Stop();
+            if (value && _settings.MailAccount is { } account)
+                _imap.Start(account);
+            else if (!value)
                 _imap.Stop();
-            }
+            ApplyNotifications();
             RefreshMailPage();
         }
     }
@@ -399,12 +393,8 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         _bars.Rebuild();
         ApplyTopLevelVisibility();
         _winKey.Start();
-        if (_settings.MailInNotch)
-        {
-            _notifications.Start();
-            if (_settings.MailAccount is { } account)
-                _imap.Start(account);
-        }
+        if (_settings.MailInNotch && _settings.MailAccount is { } account)
+            _imap.Start(account);
         RefreshMailPage();
         ApplyLiveActivities();
         ScheduleMorningBrief(TimeSpan.FromSeconds(8)); // il tempo di collegarsi a casella e calendario
@@ -528,6 +518,23 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
                 _notch.ShowNotice(DotIcons.Headphones, battery is < 20 ? Rendering.Theme.Red : Rendering.Theme.White,
                     battery is { } level ? $"{name}  {level}%" : $"{name} COLLEGATO");
         };
+        _notifications.PhoneArrived += phone =>
+        {
+            if (!CanShow(LiveActivity.Phone))
+                return;
+            switch (phone.Kind)
+            {
+                case PhoneEventKind.IncomingCall:
+                    _notch.ShowCard(NotchCards.Call(phone, OpenPhoneLink, _notch.DismissCard), CallDuration);
+                    break;
+                case PhoneEventKind.MissedCall:
+                    _notch.ShowNotice(DotIcons.Phone, Rendering.Theme.Red, $"PERSA: {phone.Title}");
+                    break;
+                default:
+                    _notch.ShowNotice(DotIcons.Phone, Rendering.Theme.White, PhoneLink.Summary(phone));
+                    break;
+            }
+        };
         _bluetooth.Disconnected += name =>
         {
             if (CanShow(LiveActivity.Bluetooth))
@@ -536,6 +543,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
     }
 
     private static readonly TimeSpan CardDuration = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan CallDuration = TimeSpan.FromSeconds(20); // il telefono squilla più a lungo
     private static readonly TimeSpan AppointmentDuration = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan MorningDuration = TimeSpan.FromSeconds(15);
 
@@ -648,6 +656,10 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         }
     }
 
+    /// <summary>Collegamento al telefono: da lì si risponde alle chiamate e ai messaggi.</summary>
+    private static void OpenPhoneLink() =>
+        Process.Start(new ProcessStartInfo("explorer.exe", $"shell:AppsFolder\\{PhoneLink.AppId}") { UseShellExecute = true })?.Dispose();
+
     private bool ActivityOn(LiveActivity activity) => _settings.Notch && _settings.IsActivityEnabled(activity);
 
     /// <summary>Si mostra solo se il notch è visibile (non con un'app a schermo intero sul monitor principale).</summary>
@@ -662,6 +674,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         Toggle(LiveActivity.Downloads, _downloads.Start, _downloads.Stop);
         Toggle(LiveActivity.Screenshots, _screenshots.Start, _screenshots.Stop);
         Toggle(LiveActivity.Bluetooth, _bluetooth.Start, _bluetooth.Stop);
+        ApplyNotifications();
         if (CalendarOn)
             _calendar.Start(_settings.CalendarFeeds ?? []);
         else
@@ -669,6 +682,15 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         RefreshAgenda();
         ApplyDevActivities();
         ApplyVolumeKeys();
+    }
+
+    /// <summary>Le notifiche di Windows servono alla posta e al telefono: si leggono se ne serve almeno una.</summary>
+    private void ApplyNotifications()
+    {
+        if (_settings.MailInNotch || ActivityOn(LiveActivity.Phone))
+            _notifications.Start();
+        else
+            _notifications.Stop();
     }
 
     private void Toggle(LiveActivity activity, Action start, Action stop)

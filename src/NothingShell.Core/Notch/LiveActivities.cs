@@ -35,6 +35,9 @@ public enum LiveActivity
 
     /// <summary>Porte e server locali: avviso e pagina Server.</summary>
     Servers,
+
+    /// <summary>Chiamate e notifiche del telefono da Collegamento al telefono (docs/13-telefono.md).</summary>
+    Phone,
 }
 
 /// <summary>

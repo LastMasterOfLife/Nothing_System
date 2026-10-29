@@ -63,6 +63,10 @@ public partial class App : Application
                 await LiveCheck(report);
                 Shutdown();
                 return;
+            case ["--phone-check", var report]:
+                await PhoneCheck(report);
+                Shutdown();
+                return;
             case ["--preview-demo", var image]:
                 await PreviewDemo(image);
                 Shutdown();
@@ -317,6 +321,8 @@ public partial class App : Application
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-screenshot.png"));
         notch.ShowCard(NotchCards.Download(Path.Combine(folder, "notch-volume.png"), () => { }), TimeSpan.FromSeconds(8));
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-download.png"));
+        notch.ShowCard(NotchCards.Call(new PhoneEvent(PhoneEventKind.IncomingCall, "Giulia Bianchi", "Chiamata in arrivo", DateTimeOffset.Now), () => { }, () => { }), TimeSpan.FromSeconds(20));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-call.png"));
 
         // Agenda (docs/11-agenda-pannello-rapido.md)
         notch.ShowCard(NotchCards.Appointment(agenda[1], ReminderKind.Soon, DateTimeOffset.Now, _ => { }, () => { }, () => { }), TimeSpan.FromSeconds(8));
@@ -474,6 +480,52 @@ public partial class App : Application
             lines.Add($"microfono: {microphone.Read()?.ToString() ?? "nessuno"}");
         }
         lines.Add($"bluetooth: {string.Join(Environment.NewLine + "  ", await BluetoothAudioWatcher.DescribeAsync())}");
+        await File.WriteAllLinesAsync(file, lines);
+    }
+
+    /// <summary>
+    /// Forma delle notifiche presenti, per capire come le scrive Collegamento al telefono: il testo è oscurato
+    /// (lettere → a/A, cifre → 9) tranne poche parole chiave, così il rapporto si può condividere.
+    /// </summary>
+    private static async Task PhoneCheck(string file)
+    {
+        string[] keep = ["chiamata", "call", "in", "arrivo", "incoming", "persa", "missed", "messaggio", "messaggi",
+            "message", "messages", "sms", "whatsapp", "telegram", "instagram", "gmail", "telefono", "phone", "risposta",
+            "rispondi", "rifiuta", "answer", "decline", "batteria", "battery", "da", "from", "e", "nuovo", "nuovi", "new"];
+        string Mask(string text) => string.Join(' ', text.Split(' ').Select(word =>
+            keep.Contains(word.Trim(':', ',', '.', '·', '•').ToLowerInvariant()) ? word
+                : new string(word.Select(c => char.IsUpper(c) ? 'A' : char.IsLetter(c) ? 'a' : char.IsDigit(c) ? '9' : c).ToArray())));
+
+        var lines = new List<string>();
+        var listener = global::Windows.UI.Notifications.Management.UserNotificationListener.Current;
+        lines.Add($"accesso: {listener.GetAccessStatus()}");
+        var toasts = await listener.GetNotificationsAsync(global::Windows.UI.Notifications.NotificationKinds.Toast);
+        foreach (var n in toasts.OrderBy(n => n.CreationTime))
+        {
+            string id, name;
+            try
+            {
+                id = n.AppInfo.AppUserModelId;
+                name = n.AppInfo.DisplayInfo.DisplayName;
+            }
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or ArgumentException)
+            {
+                id = name = "?";
+            }
+            lines.Add($"{n.CreationTime:HH:mm:ss} {name} [{id}]");
+            if (!PhoneLink.IsPhoneLink(id))
+                continue;
+            foreach (var binding in n.Notification.Visual?.Bindings ?? [])
+            {
+                lines.Add($"  binding {binding.Template} lingua={binding.Language}");
+                var texts = binding.GetTextElements();
+                for (var i = 0; i < texts.Count; i++)
+                    lines.Add($"    testo {i}: {Mask(texts[i].Text ?? string.Empty).Replace('\n', '|')}");
+                lines.Add($"    → {PhoneLink.Parse(texts.Select(t => t.Text ?? string.Empty).ToArray(), n.CreationTime)?.Kind.ToString() ?? "ignorata"}");
+                foreach (var hint in binding.Hints)
+                    lines.Add($"    hint {hint.Key}={hint.Value}");
+            }
+        }
         await File.WriteAllLinesAsync(file, lines);
     }
 

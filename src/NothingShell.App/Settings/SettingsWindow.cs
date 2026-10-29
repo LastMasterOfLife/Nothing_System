@@ -165,6 +165,7 @@ public sealed class SettingsWindow : Window
         ActivityRow(LiveActivity.Downloads, "Download", "In corso dalla cartella Download, poi Apri e Cartella");
         ActivityRow(LiveActivity.Screenshots, "Screenshot rapido", "Strumento di cattura (Win+Maiusc+S, Stamp) e Greenshot: anteprima da trascinare");
         ActivityRow(LiveActivity.Bluetooth, "Cuffie Bluetooth", "Collegamento e batteria");
+        ActivityRow(LiveActivity.Phone, "Telefono", "Chiamate e notifiche da Collegamento al telefono (serve l'accesso alle notifiche)");
 
         DevSection();
         AgendaSection();

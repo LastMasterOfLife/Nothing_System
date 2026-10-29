@@ -7,7 +7,8 @@ using Windows.UI.Notifications.Management;
 namespace NothingShell.App.Services;
 
 /// <summary>
-/// Legge le notifiche di Windows e ne estrae le mail (docs/08-notch-mail-pages.md).
+/// Legge le notifiche di Windows e ne estrae le mail (docs/08-notch-mail-pages.md) e, da Collegamento al
+/// telefono, chiamate e notifiche del telefono (docs/13-telefono.md).
 /// Il contenuto resta solo in memoria. Evento <c>NotificationChanged</c> se disponibile,
 /// e comunque un controllo ogni 3 s.
 /// </summary>
@@ -45,6 +46,9 @@ public sealed class NotificationService : IDisposable
     public event Action<MailItem>? MailArrived;
 
     public event Action? RecentChanged;
+
+    /// <summary>Chiamata o notifica del telefono arrivata dopo l'avvio.</summary>
+    public event Action<PhoneEvent>? PhoneArrived;
 
     public void Start()
     {
@@ -113,6 +117,12 @@ public sealed class NotificationService : IDisposable
                     continue;
                 var (app, appId, texts) = Read(n);
                 RememberApp(app);
+                if (PhoneLink.IsPhoneLink(appId))
+                {
+                    if (_primed && PhoneLink.Parse(texts, n.CreationTime) is { } phone)
+                        PhoneArrived?.Invoke(phone);
+                    continue;
+                }
                 if (!MailDetector.IsMail(app, texts, ExtraMailApps()))
                     continue;
                 if (MailDetector.Extract(app, texts, n.CreationTime) is not { } mail)

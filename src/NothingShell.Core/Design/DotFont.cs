@@ -204,6 +204,10 @@ public static class DotIcons
     public static readonly DotGlyph Plug = new(
         ".#.#.", ".#.#.", "#####", "#####", ".###.", "..#..", "..#..");
 
+    /// <summary>Telefono: chiamate e notifiche da Collegamento al telefono.</summary>
+    public static readonly DotGlyph Phone = new(
+        "#####", "#...#", "#...#", "#...#", "#...#", "#####", "##.##");
+
     /// <summary>Appunti.</summary>
     public static readonly DotGlyph Clip = new(
         ".###.", "#####", "#...#", "#.#.#", "#...#", "#.#.#", "#####");

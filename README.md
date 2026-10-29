@@ -51,6 +51,10 @@ Appunti con Formatta, Apri, Copia HEX…) e tolgono dagli appunti dopo 30 s chia
 La pagina **Server** elenca le porte in ascolto (node, dotnet, Postgres…) con Apri e Termina.
 Tutto si spegne in Impostazioni › Sviluppo. Dettagli in [docs/12-sviluppo.md](docs/12-sviluppo.md).
 
+**Telefono Android** tramite Collegamento al telefono di Windows: chiamata in arrivo come scheda nel notch
+(*Rispondi* apre Collegamento al telefono), chiamate perse e notifiche del telefono come avvisi.
+Dettagli in [docs/13-telefono.md](docs/13-telefono.md).
+
 **Agenda**: il prossimo appuntamento sotto l'ora nella Home, la pagina Agenda con quelli di oggi e un
 promemoria 10 minuti prima con *Partecipa* per Teams, Meet e Zoom. Al primo accesso del mattino il
 **riepilogo** con gli appuntamenti della giornata e le mail da leggere. Gli appuntamenti arrivano dal

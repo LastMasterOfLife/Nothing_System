@@ -116,6 +116,29 @@ internal static class NotchCards
         return Layout(icon, "SCARICATO", detail, actions);
     }
 
+    /// <summary>Chiamata in arrivo sul telefono (docs/13-telefono.md): si risponde da Collegamento al telefono.</summary>
+    public static UIElement Call(PhoneEvent call, Action openPhoneLink, Action dismiss)
+    {
+        ArgumentNullException.ThrowIfNull(call);
+        ArgumentNullException.ThrowIfNull(openPhoneLink);
+        ArgumentNullException.ThrowIfNull(dismiss);
+        var tile = Tile(new DotMatrixView
+        {
+            Pitch = 4,
+            Dots = DotGrid.From(DotIcons.Phone),
+            DotColor = Theme.Red,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        });
+        var actions = Actions(
+            ("RISPONDI", () =>
+            {
+                openPhoneLink();
+                dismiss();
+            }),
+            ("CHIUDI", dismiss));
+        return Layout(tile, "CHIAMATA", [call.Title.Length > 0 ? call.Title : "Numero sconosciuto"], actions, Theme.Red);
+    }
+
     /// <summary>
     /// Prossimo appuntamento (docs/11-agenda-pannello-rapido.md): dieci minuti prima "TRA 10 MIN", all'inizio
     /// "INIZIA ORA"; Partecipa apre la riunione online (Teams, Meet, Zoom…), Calendario l'app del calendario.
