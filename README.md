@@ -13,6 +13,9 @@ oppure da terminale:
 ```
 NothingShell.exe --exit
 ```
+**Ctrl+Win** spegne la shell (torna la taskbar di Windows, Win apre di nuovo lo Start) e la
+riaccende: da spenta resta solo un processo dormiente che ascolta Ctrl+Win; `--exit` chiude anche quello.
+
 Se il processo viene terminato di forza e la taskbar resta nascosta:
 ```
 NothingShell.exe --restore-taskbar

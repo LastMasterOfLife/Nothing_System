@@ -72,6 +72,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         _launcher = new LauncherWindow(_catalog, shellIcons, new LauncherSettingsStore(LauncherSettingsStore.DefaultPath));
         _winKey = new WinKeyHook { Enabled = _launcher.UseWinKey };
         _winKey.Pressed += () => Application.Current.Dispatcher.BeginInvoke(() => _launcher.Toggle());
+        _winKey.TogglePressed += () => Application.Current.Dispatcher.BeginInvoke(() => ToggleRequested?.Invoke());
         _launcher.UseWinKeyChanged += enabled => _winKey.Enabled = enabled;
         _launcher.CommandRequested += id =>
         {
@@ -136,6 +137,9 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
             ApplyVolumeKeys();
         };
     }
+
+    /// <summary>Ctrl+Win: l'app spegne la shell e resta in attesa (docs/06-launcher.md).</summary>
+    public event Action? ToggleRequested;
 
     public bool NotchEnabled
     {

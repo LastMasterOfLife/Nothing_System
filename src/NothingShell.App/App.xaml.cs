@@ -27,6 +27,7 @@ public partial class App : Application
 {
     private const string ExitEventName = @"Local\NothingShell.Exit";
     private const string LockEventName = @"Local\NothingShell.Lock";
+    private const string DormantMutexName = @"Local\NothingShell.Dormant";
 
     private Mutex? _singleInstance;
     private EventWaitHandle? _exitSignal;
@@ -34,6 +35,7 @@ public partial class App : Application
     private EventWaitHandle? _lockSignal;
     private RegisteredWaitHandle? _lockWait;
     private ShellController? _shell;
+    private WinKeyHook? _dormantHook;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -88,6 +90,9 @@ public partial class App : Application
             case ["--access-demo", var report]:
                 await PlayAccessDemo(report);
                 return;
+            case ["--dormant"]:
+                StartDormant();
+                return;
             case ["--exit"]:
                 if (EventWaitHandle.TryOpenExisting(ExitEventName, out var running))
                     using (running)
@@ -97,7 +102,8 @@ public partial class App : Application
         }
 
         _singleInstance = new Mutex(initiallyOwned: true, @"Local\NothingShell", out var createdNew);
-        if (!createdNew)
+        // Dopo Ctrl+Win dallo stato dormiente l'istanza precedente può star ancora chiudendo.
+        if (!createdNew && !(e.Args is ["--wake"] && WaitForPreviousShell()))
         {
             Shutdown();
             return;
@@ -107,6 +113,7 @@ public partial class App : Application
         RestoreTaskbarOnCrash();
 
         _shell = new ShellController();
+        _shell.ToggleRequested += () => Relaunch("--dormant");
         if (e.Args is ["--settings"])
             _shell.OpenSettings();
         await _shell.StartAsync();
@@ -121,12 +128,51 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         _shell?.Dispose();
+        _dormantHook?.Dispose();
         _exitWait?.Unregister(null);
         _lockWait?.Unregister(null);
         _lockSignal?.Dispose();
         _exitSignal?.Dispose();
         _singleInstance?.Dispose();
         base.OnExit(e);
+    }
+
+    private bool WaitForPreviousShell()
+    {
+        try
+        {
+            return _singleInstance!.WaitOne(TimeSpan.FromSeconds(10));
+        }
+        catch (AbandonedMutexException)
+        {
+            return true; // terminata di forza: il mutex ora è nostro
+        }
+    }
+
+    /// <summary>
+    /// Shell spenta con Ctrl+Win: nessuna finestra né servizio, solo l'hook che aspetta Ctrl+Win
+    /// per riaccenderla. Win da solo e i tasti del volume restano a Windows.
+    /// </summary>
+    private void StartDormant()
+    {
+        _singleInstance = new Mutex(initiallyOwned: true, DormantMutexName, out var createdNew);
+        if (!createdNew)
+        {
+            Shutdown();
+            return;
+        }
+        ListenForExitSignal(); // --exit chiude anche lo stato dormiente
+        _dormantHook = new WinKeyHook { Enabled = false };
+        _dormantHook.TogglePressed += () => Dispatcher.BeginInvoke(() => Relaunch("--wake"));
+        _dormantHook.Start();
+    }
+
+    /// <summary>Avvia la stessa app nell'altro stato e chiude questa (pulizia completa, taskbar ripristinata).</summary>
+    private void Relaunch(string argument)
+    {
+        if (Environment.ProcessPath is { } exe)
+            System.Diagnostics.Process.Start(exe, argument)?.Dispose();
+        Shutdown();
     }
 
     /// <summary><c>NothingShell.exe --exit</c> segnala questo evento: chiusura pulita (taskbar ripristinata).</summary>

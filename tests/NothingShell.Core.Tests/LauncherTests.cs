@@ -118,6 +118,7 @@ public class WinKeyGestureTests
 {
     private const int Win = WinKeyGesture.LeftWin;
     private const int E = 0x45;
+    private const int Ctrl = WinKeyGesture.LeftCtrl;
 
     [Fact]
     public void WinAloneOpensLauncherOnRelease()
@@ -166,6 +167,37 @@ public class WinKeyGestureTests
         g.Enabled = false;
         g.OnKey(Win, true, false);
         Assert.Equal(KeyDecision.Pass, g.OnKey(Win, false, false));
+    }
+
+    [Fact]
+    public void CtrlWinTogglesShellInEitherOrder()
+    {
+        var g = new WinKeyGesture();
+        g.OnKey(Ctrl, true, false);
+        g.OnKey(Win, true, false);
+        g.OnKey(Ctrl, false, false);
+        Assert.Equal(KeyDecision.ToggleShell, g.OnKey(Win, false, false));
+
+        g.OnKey(Win, true, false);
+        g.OnKey(Ctrl, true, false);
+        Assert.Equal(KeyDecision.ToggleShell, g.OnKey(Win, false, false));
+        g.OnKey(Ctrl, false, false);
+
+        Assert.Equal(KeyDecision.Pass, g.OnKey(Win, true, false));
+        Assert.Equal(KeyDecision.OpenLauncher, g.OnKey(Win, false, false)); // Ctrl già rilasciato
+    }
+
+    [Fact]
+    public void CtrlWinChordPassesThroughAndWorksWithLauncherDisabled()
+    {
+        var g = new WinKeyGesture { Enabled = false };
+        g.OnKey(Ctrl, true, false);
+        g.OnKey(Win, true, false);
+        g.OnKey(0x25, true, false); // Ctrl+Win+← cambia desktop virtuale
+        Assert.Equal(KeyDecision.Pass, g.OnKey(Win, false, false));
+
+        g.OnKey(Win, true, false);
+        Assert.Equal(KeyDecision.ToggleShell, g.OnKey(Win, false, false));
     }
 
     [Fact]

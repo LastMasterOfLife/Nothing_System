@@ -63,12 +63,21 @@ UI non deve mai bloccarlo). Regola (Core, testata):
 - Gli eventi iniettati (anche i nostri) sono ignorati.
 Si disattiva dal menu della barra: *Usa il tasto Win per il launcher*.
 
+## Ctrl+Win: accendi/spegni la shell
+Stessa regola, con Ctrl premuto (prima o dopo Win) e nessun altro tasto: Ctrl+Win+← e simili passano
+a Windows. Funziona anche col tasto Win disattivato per il launcher.
+- Shell accesa → avvia `NothingShell.exe --dormant` ed esce (pulizia completa, taskbar ripristinata).
+- Dormiente: nessuna finestra né servizio, solo l'hook; Win da solo e i tasti del volume restano a
+  Windows. Ctrl+Win avvia `NothingShell.exe --wake` (che aspetta fino a 10 s il mutex dell'istanza
+  precedente) ed esce. `--exit` chiude anche lo stato dormiente.
+
 ## Alimentazione
 Blocca (`LockWorkStation`) subito; Sospendi, Riavvia, Spegni chiedono **conferma col secondo clic**
 entro 3 s (il pulsante diventa rosso). Riavvia/Spegni: `shutdown /r|/s /t 0`.
 
 ## Criteri di accettazione
 - Win da solo apre/chiude il launcher; Win+E apre ancora Esplora file.
+- Ctrl+Win spegne la shell e la riaccende; Ctrl+Win+→ cambia ancora desktop virtuale.
 - `vsc` trova Visual Studio Code; Invio lo avvia.
 - Le app avviate di recente compaiono in "Recenti".
 - Apertura < 150 ms dopo la prima; nessun consumo di CPU a launcher chiuso.

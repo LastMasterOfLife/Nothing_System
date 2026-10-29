@@ -6,7 +6,8 @@ namespace NothingShell.App.Launcher;
 /// <summary>
 /// Hook di tastiera di basso livello su un thread dedicato con il proprio ciclo di messaggi:
 /// Windows rimuove gli hook che rispondono lentamente, quindi non deve mai dipendere dal thread UI.
-/// Solleva <see cref="Pressed"/> (sul thread dell'hook) quando Win viene premuto da solo; se richiesto,
+/// Solleva <see cref="Pressed"/> (sul thread dell'hook) quando Win viene premuto da solo e
+/// <see cref="TogglePressed"/> con Ctrl+Win; se richiesto,
 /// prende i tasti del volume (<see cref="VolumeKey"/>) così l'indicatore di Windows non compare.
 /// </summary>
 public sealed class WinKeyHook : IDisposable
@@ -40,6 +41,9 @@ public sealed class WinKeyHook : IDisposable
     private delegate nint HookProc(int code, nint wParam, nint lParam);
 
     public event Action? Pressed;
+
+    /// <summary>Ctrl+Win: accende o spegne la shell (sul thread dell'hook).</summary>
+    public event Action? TogglePressed;
 
     /// <summary>Tasto del volume premuto (0xAD muto, 0xAE giù, 0xAF su), sul thread dell'hook: va solo inoltrato.</summary>
     public event Action<int>? VolumeKey;
@@ -100,14 +104,18 @@ public sealed class WinKeyHook : IDisposable
             var data = Marshal.PtrToStructure<KeyboardData>(lParam);
             var down = wParam is WmKeyDown or WmSysKeyDown;
             var injected = (data.Flags & LlkhfInjected) != 0;
-            if (_gesture.OnKey((int)data.VirtualKey, down, injected) == KeyDecision.OpenLauncher)
+            var decision = _gesture.OnKey((int)data.VirtualKey, down, injected);
+            if (decision != KeyDecision.Pass)
             {
                 // Il rilascio originale viene bloccato; Windows vede Win + maschera + rilascio:
                 // è una combinazione, quindi il suo Start non si apre.
                 keybd_event(WinKeyGesture.MaskKey, 0, 0, 0);
                 keybd_event(WinKeyGesture.MaskKey, 0, KeyEventKeyUp, 0);
                 keybd_event((byte)data.VirtualKey, 0, KeyEventExtendedKey | KeyEventKeyUp, 0);
-                Pressed?.Invoke();
+                if (decision == KeyDecision.ToggleShell)
+                    TogglePressed?.Invoke();
+                else
+                    Pressed?.Invoke();
                 return 1;
             }
             if (_interceptVolumeKeys && !injected && data.VirtualKey is >= VkVolumeMute and <= VkVolumeUp)
