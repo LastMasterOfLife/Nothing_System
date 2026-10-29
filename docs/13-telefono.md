@@ -52,7 +52,8 @@ l'app Android:
 | `kdeconnect.telephony` | scheda *CHIAMATA* con *Silenzia* (toglie la suoneria); si chiude quando si risponde |
 | `kdeconnect.notification` | avviso come sopra; quelle già presenti al collegamento no |
 | `kdeconnect.clipboard` | negli appunti del PC, avviso "APPUNTI DAL TELEFONO" |
-| `kdeconnect.share.request` | file in Download (scheda *Scaricato*), link aperti nel browser, testo negli appunti |
+| `kdeconnect.share.request` | file in Download (scheda *Scaricato*, riga con l'avanzamento nella pagina Telefono), link aperti nel browser, testo negli appunti |
+| `kdeconnect.connectivity_report` | rete (5G, 4G…) e tacche del segnale; con due SIM la migliore (Core `PhoneInfo`) |
 
 Dal PC (riquadri del pannello rapido): **Telefono** lo fa squillare (`findmyphone`), **Invia file** (il file
 viaggia su una porta 1739–1764 in TLS), **Appunti** manda il testo copiato. Gli appunti non partono mai da
@@ -66,3 +67,17 @@ volte). Se l'app KDE Connect per Windows è già aperta la porta UDP è occupata
 cambiata in "Privata" nelle impostazioni di Windows.
 
 `--phone-check` riporta anche identità, telefoni associati e chi ascolta sulla porta 1716.
+
+## Pagina Telefono
+Pagina alta del notch (scorre con la rotellina, docs/08-notch-mail-pages.md), presente se il telefono è acceso in
+Impostazioni › NOTCH o col collegamento diretto:
+- **Telefono**: nome, batteria (barra a punti, rossa quando è scarica), rete e segnale, *Trova* per farlo squillare.
+- **Condivide**: cosa il telefono dice di mandare (`outgoingCapabilities` della sua identità: batteria, segnale,
+  notifiche, chiamate, appunti, file e link). I permessi si danno e si tolgono **nell'app KDE Connect**, plugin per
+  plugin: la shell mostra solo ciò che il telefono ha scelto di condividere.
+- **File ricevuti**: il file in arrivo con percentuale e barra, poi gli ultimi 20 ricevuti (nome, dimensione, da chi,
+  quando) con *Apri* e *Cartella*. L'elenco (solo percorso, dimensione e ora, mai il contenuto) è in
+  `%USERPROFILE%\.nothing-shell\phone-files.json`; i file cancellati o spostati spariscono dall'elenco al riavvio.
+- **Notifiche**: le ultime 10 arrivate dal telefono (anche da Collegamento al telefono), con l'app; le chiamate perse in
+  rosso. Solo in memoria.
+Senza collegamento diretto la pagina spiega come accenderlo e mostra le notifiche di Collegamento al telefono.

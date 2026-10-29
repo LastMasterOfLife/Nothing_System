@@ -34,7 +34,9 @@ Un clic su una mail della pagina Posta la apre nel **lettore** di Nothing (senza
 con *Rispondi*, *Apri nella webmail* (o nella sua app di Edge), *Segna come letta* e *Copia codice* per i
 codici di verifica; le mail arrivate da una notifica aprono l'app che l'ha mandata.
 Sul notch aperto, uno swipe (touchpad a due dita, rotellina o trascinamento) scorre le pagine
-Home · Agenda · Posta · Lavoro · Server · Appunti · Timer · Sistema. Dettagli in [docs/08-notch-mail-pages.md](docs/08-notch-mail-pages.md).
+Home · Agenda · Posta · Telefono · Lavoro · Agenti · Server · Dispositivi · Appunti · Timer · Sistema. Le pagine con un
+elenco (Posta con le ultime 10 mail, Telefono, Agenti, Dispositivi) allungano il notch in verticale e l'elenco scorre con
+la rotellina. Dettagli in [docs/08-notch-mail-pages.md](docs/08-notch-mail-pages.md).
 
 **Attività dal vivo** nel notch: volume (i tasti del volume mostrano il livello a punti al posto
 dell'indicatore di Windows), luminosità dei portatili, icone rosse quando un'app usa microfono o webcam,
@@ -54,8 +56,19 @@ Tutto si spegne in Impostazioni › Sviluppo. Dettagli in [docs/12-sviluppo.md](
 **Telefono Android** tramite Collegamento al telefono di Windows: chiamata in arrivo come scheda nel notch
 (*Rispondi* apre Collegamento al telefono), chiamate perse e notifiche del telefono come avvisi.
 Con il **collegamento diretto** (protocollo KDE Connect, app KDE Connect sul telefono, Impostazioni ›
-TELEFONO) anche batteria, appunti, file avanti e indietro e *Trova il telefono* dal pannello rapido.
+TELEFONO) anche batteria, appunti, file avanti e indietro e *Trova il telefono* dal pannello rapido. La pagina
+**Telefono** del notch mostra batteria, rete e segnale, cosa il telefono condivide (i permessi dati nell'app), il file in
+arrivo con l'avanzamento, gli ultimi file ricevuti (Apri, Cartella) e le ultime notifiche.
 Dettagli in [docs/13-telefono.md](docs/13-telefono.md).
+
+**Agenti**: mentre Claude Code lavora, la pillola mostra il costo del turno e la pagina **Agenti** i token in entrata e in
+uscita e il costo di ogni sessione (e di oggi), aggiornati a ogni risposta; quando l'agente ha finito arriva la scheda
+*HA FINITO*. Claude Code si legge da solo dai transcript (solo token, modello e stato); altri agenti mandano i loro totali
+con `NothingShell.exe --task '{"event":"agent",…}'`.
+**Connettori**: un file JSON per connettore in `%USERPROFILE%\.nothing-shell\connectors\` legge valori da Home Assistant,
+Prometheus, MQTT, ping, API http, file e comandi qualsiasi (PowerShell, ssh…), con soglie e avvisi nella pagina
+**Dispositivi**. Comandi e azioni (accendi, riavvia, pubblica) partono solo col permesso dato nelle impostazioni, legato
+al contenuto del file. Esempi in [connectors/](connectors/), dettagli in [docs/14-agenti-connettori.md](docs/14-agenti-connettori.md).
 
 **Agenda**: il prossimo appuntamento sotto l'ora nella Home, la pagina Agenda con quelli di oggi e un
 promemoria 10 minuti prima con *Partecipa* per Teams, Meet e Zoom. Al primo accesso del mattino il

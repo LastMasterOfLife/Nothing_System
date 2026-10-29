@@ -82,7 +82,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         _launcher.LockRequested += Lock;
         _access.Enabled = _settings.Access;
 
-        _notch = new NotchWindow(_media, DevActions);
+        _notch = new NotchWindow(_media, DevActions, ConnectedActions);
         var appIcons = new AppIcons();
         _bars = new BarHost((monitor, mode) =>
             new BarWindow(_tracker, appIcons, shellIcons, _catalog, _taskbar, _launcher, monitor, mode));
@@ -128,6 +128,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         WirePhone();
         WireAgenda();
         WireDev();
+        WireConnected();
         _network.Changed += _bars.SetNetwork;
         _bars.SetNetwork(_network.Current);
         _tracker.FullscreenChanged += monitor =>
@@ -466,6 +467,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         _bluetooth.Dispose();
         _kde.Dispose();
         DisposeDev();
+        DisposeConnected();
         _winKey.Dispose();
         _pins.Dispose();
         _bars.Dispose();

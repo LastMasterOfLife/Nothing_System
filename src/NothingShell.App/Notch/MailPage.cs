@@ -9,18 +9,27 @@ using NothingShell.Core.Notch;
 namespace NothingShell.App.Notch;
 
 /// <summary>
-/// Pagina Posta: le ultime 3 mail (mittente grigio, oggetto bianco, punto rosso se non letta) o il motivo per
-/// cui mancano. Un clic su una mail la apre.
+/// Pagina Posta (pagina alta): le ultime 10 mail (mittente grigio, oggetto bianco, punto rosso se non letta) in un
+/// elenco che scorre con la rotellina, o il motivo per cui mancano. Un clic su una mail la apre.
 /// </summary>
 public sealed class MailPage : NotchPageView
 {
-    private const int Shown = 3;
+    public const int Shown = 10;
 
     private readonly StackPanel _list = new();
+    private readonly TextBlock _count;
+    private readonly NotchScrollList _scroll;
 
     public MailPage()
     {
-        Children.Add(_list);
+        var (header, _, count) = DevRows.Header("POSTA");
+        _count = count;
+        _scroll = new NotchScrollList(_list) { Margin = new Thickness(0, 8, 0, 0) };
+        var dock = new DockPanel();
+        DockPanel.SetDock(header, Dock.Top);
+        dock.Children.Add(header);
+        dock.Children.Add(_scroll);
+        Children.Add(dock);
         Update([], "Nessuna mail recente");
     }
 
@@ -28,12 +37,16 @@ public sealed class MailPage : NotchPageView
 
     public event Action<MailItem>? Opened;
 
+    public override void OnShown() => _scroll.ScrollToTop();
+
     /// <param name="mails">Dalla più recente.</param>
     /// <param name="emptyMessage">Testo da mostrare se non ci sono mail (es. accesso alle notifiche mancante).</param>
     public void Update(IReadOnlyList<MailItem> mails, string emptyMessage)
     {
         ArgumentNullException.ThrowIfNull(mails);
         _list.Children.Clear();
+        var unread = mails.Take(Shown).Count(m => m.IsUnread);
+        _count.Text = mails.Count == 0 ? string.Empty : unread > 0 ? $"{unread} da leggere" : $"{Math.Min(Shown, mails.Count)} recenti";
         if (mails.Count == 0)
         {
             var empty = NotchUi.Text(13, Theme.GreyBrush, emptyMessage);
@@ -57,7 +70,9 @@ public sealed class MailPage : NotchPageView
             DockPanel.SetDock(dot, Dock.Left);
             header.Children.Add(dot);
         }
-        var time = NotchUi.Text(11, Theme.GreyBrush, mail.Received.ToLocalTime().ToString("HH:mm", NotchUi.Italian));
+        var received = mail.Received.ToLocalTime();
+        var time = NotchUi.Text(11, Theme.GreyBrush,
+            received.ToString(received.Date == DateTime.Today ? "HH:mm" : "d MMM", NotchUi.Italian));
         time.Margin = new Thickness(8, 0, 0, 0);
         DockPanel.SetDock(time, Dock.Right);
         header.Children.Add(time);
@@ -71,8 +86,8 @@ public sealed class MailPage : NotchPageView
             Child = content,
             Background = Brushes.Transparent,
             CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(8, 2, 8, 2),
-            Margin = new Thickness(-8, 0, -8, 4),
+            Padding = new Thickness(8, 3, 8, 3),
+            Margin = new Thickness(-8, 0, -8, 2),
             Cursor = Cursors.Hand,
             ToolTip = mail.Imap is not null ? "Apri la mail" : mail.AppId is not null ? $"Apri {mail.App}" : null,
         };

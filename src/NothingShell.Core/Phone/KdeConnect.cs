@@ -79,7 +79,18 @@ public sealed record KdePacket(string Type, JsonObject Body)
 }
 
 /// <summary>Identità annunciata da un dispositivo (pacchetto <c>kdeconnect.identity</c>).</summary>
-public sealed record KdeIdentity(string DeviceId, string Name, string DeviceType, int ProtocolVersion, int TcpPort);
+public sealed record KdeIdentity(string DeviceId, string Name, string DeviceType, int ProtocolVersion, int TcpPort)
+{
+    /// <summary>Cosa il telefono manda: i plugin accesi nell'app (vuoto se non lo dichiara).</summary>
+    public IReadOnlyList<string> Outgoing { get; init; } = [];
+
+    /// <summary>Due identità sono uguali se lo sono anche le capacità, non solo l'elenco come oggetto.</summary>
+    public bool Equals(KdeIdentity? other) =>
+        other is not null && DeviceId == other.DeviceId && Name == other.Name && DeviceType == other.DeviceType
+        && ProtocolVersion == other.ProtocolVersion && TcpPort == other.TcpPort && Outgoing.SequenceEqual(other.Outgoing);
+
+    public override int GetHashCode() => HashCode.Combine(DeviceId, Name, DeviceType, ProtocolVersion, TcpPort, Outgoing.Count);
+}
 
 public readonly record struct PhoneBattery(int Charge, bool Charging, bool Low);
 
@@ -87,6 +98,11 @@ public readonly record struct PhoneBattery(int Charge, bool Charging, bool Low);
 public sealed record PhoneDevice(string DeviceId, string Name, bool Connected, bool Paired)
 {
     public PhoneBattery? Battery { get; init; }
+
+    public PhoneSignal? Signal { get; init; }
+
+    /// <summary>Cosa il telefono condivide con la shell, in italiano (batteria, notifiche…).</summary>
+    public IReadOnlyList<string> Shares { get; init; } = [];
 
     /// <summary>Richiesta di associazione in corso: da noi (<see cref="PairRequestedByPhone"/> false) o dal telefono.</summary>
     public bool PairPending { get; init; }
@@ -124,9 +140,11 @@ public static class KdeConnect
     public const string Ping = "kdeconnect.ping";
 
     /// <summary>Cosa la shell sa ricevere: l'app sul telefono attiva solo i plugin che hanno un corrispondente.</summary>
-    public static readonly string[] IncomingCapabilities = [Battery, Clipboard, ClipboardConnect, Share, Notification, Telephony, Ping];
+    public static readonly string[] IncomingCapabilities =
+        [Battery, Clipboard, ClipboardConnect, Share, Notification, Telephony, Ping, PhoneInfo.ConnectivityReport];
 
-    public static readonly string[] OutgoingCapabilities = [BatteryRequest, Clipboard, ClipboardConnect, Share, FindMyPhone, TelephonyMute, Ping];
+    public static readonly string[] OutgoingCapabilities =
+        [BatteryRequest, Clipboard, ClipboardConnect, Share, FindMyPhone, TelephonyMute, Ping, PhoneInfo.ConnectivityReportRequest];
 
     /// <summary>32–38 caratteri fra lettere, cifre e <c>_</c> (vincolo della versione 8; è anche il CN del certificato).</summary>
     public static bool IsValidDeviceId(string? id) =>
@@ -153,7 +171,10 @@ public static class KdeConnect
             return null;
         var name = packet.Text("deviceName") is { Length: > 0 } n ? n.Trim() : "Telefono";
         return new KdeIdentity(id, name, packet.Text("deviceType") ?? "phone",
-            (int)(packet.Whole("protocolVersion") ?? 7), (int)(packet.Whole("tcpPort") ?? Port));
+            (int)(packet.Whole("protocolVersion") ?? 7), (int)(packet.Whole("tcpPort") ?? Port))
+        {
+            Outgoing = PhoneInfo.Capabilities(packet, "outgoingCapabilities"),
+        };
     }
 
     public static KdePacket PairPacket(bool pair, DateTimeOffset? timestamp = null)

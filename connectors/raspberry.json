@@ -1,0 +1,17 @@
+{
+  // Comandi: qualsiasi programma che stampa JSON o testo (qui ssh con la chiave già configurata).
+  // Il testo si legge a righe: {lines[0]} è la prima. Esegue codice: parte solo dopo
+  // "consenti comandi e azioni" nelle impostazioni, e il permesso cade se il file cambia.
+  "name": "Raspberry",
+  "type": "command",
+  "command": "ssh",
+  "args": ["pi@raspberrypi.local", "cat /sys/class/thermal/thermal_zone0/temp; uptime -p"],
+  "refreshSeconds": 60,
+  "readings": [
+    { "label": "CPU", "value": "{lines[0]}", "scale": 0.001, "decimals": 1, "unit": "°C", "above": 75 },
+    { "label": "Acceso da", "value": "{lines[1]}" }
+  ],
+  "actions": [
+    { "label": "Riavvia", "command": "ssh", "args": ["pi@raspberrypi.local", "sudo reboot"], "confirm": true }
+  ]
+}

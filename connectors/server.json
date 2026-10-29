@@ -1,0 +1,12 @@
+{
+  // Prometheus con node_exporter: CPU, RAM e disco di un server
+  "name": "Server",
+  "type": "prometheus",
+  "url": "http://prometheus.local:9090",
+  "refreshSeconds": 30,
+  "readings": [
+    { "label": "CPU", "query": "100 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100", "unit": "%", "decimals": 0, "above": 90 },
+    { "label": "RAM", "query": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)", "unit": "%", "decimals": 0 },
+    { "label": "Disco /", "query": "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"})", "unit": "%", "decimals": 0, "above": 90 }
+  ]
+}

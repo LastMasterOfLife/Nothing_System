@@ -86,6 +86,7 @@ public static class DotFont
         ['&'] = new(".#...", "#.#..", "#.#..", ".#...", "#.#.#", "#..#.", ".##.#"),
         ['?'] = new(".###.", "#...#", "....#", "...#.", "..#..", ".....", "..#.."),
         ['°'] = new(".#.", "#.#", ".#.", "...", "...", "...", "..."),
+        ['$'] = new("..#..", ".####", "#.#..", ".###.", "..#.#", "####.", "..#.."),
         ['%'] = new("##..#", "##.#.", "...#.", "..#..", ".#...", ".#.##", "#..##"),
     };
 
@@ -207,6 +208,14 @@ public static class DotIcons
     /// <summary>Telefono: chiamate e notifiche da Collegamento al telefono.</summary>
     public static readonly DotGlyph Phone = new(
         "#####", "#...#", "#...#", "#...#", "#...#", "#####", "##.##");
+
+    /// <summary>Scintilla: agenti al lavoro (Claude Code e altri).</summary>
+    public static readonly DotGlyph Agent = new(
+        "...#...", "...#...", "..###..", "#######", "..###..", "...#...", "...#...");
+
+    /// <summary>Dispositivo collegato da un connettore.</summary>
+    public static readonly DotGlyph Device = new(
+        "#######", "#.....#", "#.###.#", "#.#.#.#", "#.###.#", "#.....#", "#######");
 
     /// <summary>Appunti.</summary>
     public static readonly DotGlyph Clip = new(

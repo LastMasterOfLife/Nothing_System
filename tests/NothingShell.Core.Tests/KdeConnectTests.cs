@@ -17,7 +17,10 @@ public class KdeConnectTests
         var line = KdeConnect.IdentityPacket(PhoneId, "PC di Andrea", 1716).Serialize();
         Assert.EndsWith("\n", line);
         var identity = KdeConnect.ReadIdentity(KdePacket.Parse(line)!)!;
-        Assert.Equal(new KdeIdentity(PhoneId, "PC di Andrea", "desktop", KdeConnect.ProtocolVersion, 1716), identity);
+        Assert.Equal(new KdeIdentity(PhoneId, "PC di Andrea", "desktop", KdeConnect.ProtocolVersion, 1716)
+        {
+            Outgoing = KdeConnect.OutgoingCapabilities,
+        }, identity);
     }
 
     [Fact]

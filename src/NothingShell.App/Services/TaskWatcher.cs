@@ -2,6 +2,7 @@ using System.IO;
 using System.IO.Pipes;
 using System.Text;
 using System.Windows.Threading;
+using NothingShell.Core.Agents;
 using NothingShell.Core.Dev;
 
 namespace NothingShell.App.Services;
@@ -40,6 +41,9 @@ public sealed class TaskWatcher : IDisposable
 
     /// <summary><c>git push</c> riuscito: cartella del repository.</summary>
     public event Action<string>? Pushed;
+
+    /// <summary>Totali di un agente qualsiasi (<c>{"event":"agent",…}</c>, docs/14-agenti-connettori.md).</summary>
+    public event Action<AgentReport>? AgentReported;
 
     public void Start()
     {
@@ -90,7 +94,11 @@ public sealed class TaskWatcher : IDisposable
                     NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte,
                     PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                 await server.WaitForConnectionAsync(token);
-                if (await ReadLineAsync(server, token) is { } line && TaskProtocol.Parse(line) is { } message)
+                if (await ReadLineAsync(server, token) is not { } line)
+                    continue;
+                if (AgentProtocol.Parse(line) is { } report)
+                    await _dispatcher.InvokeAsync(() => AgentReported?.Invoke(report));
+                else if (TaskProtocol.Parse(line) is { } message)
                     await _dispatcher.InvokeAsync(() => OnMessage(message));
             }
             catch (OperationCanceledException)

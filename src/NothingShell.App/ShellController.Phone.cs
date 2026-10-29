@@ -29,6 +29,8 @@ public sealed partial class ShellController
                 _kde.Start();
             else
                 _kde.Stop();
+            ApplyDevActivities(); // la pagina Telefono c'è anche solo col collegamento diretto
+            RefreshPhonePage();
         }
     }
 
@@ -87,6 +89,7 @@ public sealed partial class ShellController
             _callShownAt = DateTime.MinValue;
             return;
         }
+        RememberPhoneEvent(phone);
         if (!CanShow(LiveActivity.Phone))
             return;
         switch (phone.Kind)

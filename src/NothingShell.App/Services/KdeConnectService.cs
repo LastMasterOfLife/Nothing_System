@@ -70,6 +70,7 @@ public sealed class KdeConnectService : IPhoneActions, IDisposable
     private readonly PhoneTrustStore _store = new(PhoneTrustStore.DefaultPath);
     private readonly Dictionary<string, Link> _links = [];
     private readonly Dictionary<string, PhoneBattery> _batteries = [];
+    private readonly Dictionary<string, PhoneSignal> _signals = [];
     private readonly Dictionary<string, Pending> _pending = [];
     private readonly HashSet<string> _connecting = [];
     private readonly DispatcherTimer _pairTimeout = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -98,6 +99,9 @@ public sealed class KdeConnectService : IPhoneActions, IDisposable
     }
 
     public PhoneDevice? Current => Devices.FirstOrDefault(d => d.Connected && d.Paired);
+
+    /// <summary>File che sta arrivando dal telefono, per la riga con l'avanzamento nella pagina Telefono.</summary>
+    public IncomingFile? Incoming { get; private set; }
 
     public event Action? Changed;
 
@@ -226,7 +230,7 @@ public sealed class KdeConnectService : IPhoneActions, IDisposable
         RaiseChanged();
         if (Describe(deviceId) is { } device)
             PhoneConnected?.Invoke(device);
-        _ = link.SendAsync(new KdePacket(KdeConnect.BatteryRequest, new() { ["request"] = true }));
+        RequestStatus(link);
     }
 
     public void RejectPair(string deviceId)
@@ -492,7 +496,7 @@ public sealed class KdeConnectService : IPhoneActions, IDisposable
         {
             if (Describe(id) is { } device)
                 PhoneConnected?.Invoke(device);
-            _ = link.SendAsync(new KdePacket(KdeConnect.BatteryRequest, new() { ["request"] = true }));
+            RequestStatus(link);
         }
     }
 
@@ -543,6 +547,10 @@ public sealed class KdeConnectService : IPhoneActions, IDisposable
                 if (battery.Low && !battery.Charging && !wasLow && Describe(link.Identity.DeviceId) is { } device)
                     BatteryLow?.Invoke(device);
                 break;
+            case PhoneInfo.ConnectivityReport when PhoneInfo.ReadSignal(packet) is { } signal:
+                _signals[link.Identity.DeviceId] = signal;
+                RaiseChanged();
+                break;
             case KdeConnect.Telephony or KdeConnect.Notification:
                 if (KdeConnect.ReadEvent(packet, DateTimeOffset.Now) is { } phoneEvent)
                     EventArrived?.Invoke(phoneEvent);
@@ -578,7 +586,7 @@ public sealed class KdeConnectService : IPhoneActions, IDisposable
             RaiseChanged();
             if (Describe(id) is { } device)
                 PhoneConnected?.Invoke(device);
-            _ = link.SendAsync(new KdePacket(KdeConnect.BatteryRequest, new() { ["request"] = true }));
+            RequestStatus(link);
             return;
         }
         if (_trust.Find(id) is not null)
@@ -630,6 +638,7 @@ public sealed class KdeConnectService : IPhoneActions, IDisposable
             {
                 var buffer = new byte[81920];
                 var left = size;
+                var reported = DateTimeOffset.MinValue;
                 while (left > 0)
                 {
                     var read = await ssl.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, left)), CancellationToken.None);
@@ -637,10 +646,20 @@ public sealed class KdeConnectService : IPhoneActions, IDisposable
                         throw new IOException("trasferimento interrotto");
                     await file.WriteAsync(buffer.AsMemory(0, read), CancellationToken.None);
                     left -= read;
+                    if (DateTimeOffset.Now - reported > TimeSpan.FromMilliseconds(250))
+                    {
+                        reported = DateTimeOffset.Now;
+                        var progress = new IncomingFile(name, size - left, size);
+                        _ = _dispatcher.BeginInvoke(() => SetIncoming(progress));
+                    }
                 }
             }
             File.Move(temp, target);
-            _ = _dispatcher.BeginInvoke(() => FileReceived?.Invoke(target));
+            _ = _dispatcher.BeginInvoke(() =>
+            {
+                SetIncoming(null);
+                FileReceived?.Invoke(target);
+            });
         }
         catch (Exception ex) when (ex is IOException or SocketException or AuthenticationException or OperationCanceledException or UnauthorizedAccessException)
         {
@@ -652,7 +671,14 @@ public sealed class KdeConnectService : IPhoneActions, IDisposable
             {
                 // resta il file parziale
             }
+            _ = _dispatcher.BeginInvoke(() => SetIncoming(null));
         }
+    }
+
+    private void SetIncoming(IncomingFile? incoming)
+    {
+        Incoming = incoming;
+        RaiseChanged();
     }
 
     private static string UniquePath(string folder, string name)
@@ -661,6 +687,13 @@ public sealed class KdeConnectService : IPhoneActions, IDisposable
         for (var i = 2; File.Exists(path); i++)
             path = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(name)} ({i}){Path.GetExtension(name)}");
         return path;
+    }
+
+    /// <summary>Batteria e segnale subito, senza aspettare che cambino sul telefono.</summary>
+    private static void RequestStatus(Link link)
+    {
+        _ = link.SendAsync(new KdePacket(KdeConnect.BatteryRequest, new() { ["request"] = true }));
+        _ = link.SendAsync(new KdePacket(PhoneInfo.ConnectivityReportRequest, new()));
     }
 
     private void ExpirePairing()
@@ -684,6 +717,7 @@ public sealed class KdeConnectService : IPhoneActions, IDisposable
             return;
         _trust = _trust.Without(deviceId);
         _batteries.Remove(deviceId);
+        _signals.Remove(deviceId);
         _store.Save(_trust);
     }
 
@@ -701,6 +735,8 @@ public sealed class KdeConnectService : IPhoneActions, IDisposable
         return new PhoneDevice(id, link?.Identity.Name ?? trusted!.Name, link is not null, trusted is not null)
         {
             Battery = _batteries.TryGetValue(id, out var battery) ? battery : null,
+            Signal = _signals.TryGetValue(id, out var signal) ? signal : null,
+            Shares = link is not null ? PhoneInfo.SharedLabels(link.Identity.Outgoing) : [],
             PairPending = pending is not null,
             PairRequestedByPhone = pending?.ByPhone == true,
             VerificationKey = key,

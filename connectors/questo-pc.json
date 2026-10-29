@@ -1,0 +1,11 @@
+{
+  // Comando locale in PowerShell: spazio libero sul disco C:
+  "name": "Questo PC",
+  "type": "command",
+  "command": "powershell.exe",
+  "args": ["-NoProfile", "-Command", "$d = Get-PSDrive C; @{ libero = [math]::Round($d.Free / 1GB, 1) } | ConvertTo-Json"],
+  "refreshSeconds": 300,
+  "readings": [
+    { "label": "Libero su C:", "value": "{libero}", "unit": "GB", "below": 20 }
+  ]
+}

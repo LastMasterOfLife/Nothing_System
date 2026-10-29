@@ -285,6 +285,44 @@ internal static class NotchCards
         return Layout(tile, title, [task.Title, detail], Actions([.. buttons]), color);
     }
 
+    /// <summary>
+    /// Un agente ha finito il lavoro richiesto (docs/14-agenti-connettori.md): HA FINITO, progetto e modello, token del
+    /// turno e costo; Agenti apre la pagina con tutte le sessioni, Cartella il progetto.
+    /// </summary>
+    public static UIElement AgentFinished(Core.Agents.AgentTurn turn, Action showAgents, Action? openFolder, Action dismiss)
+    {
+        ArgumentNullException.ThrowIfNull(turn);
+        ArgumentNullException.ThrowIfNull(showAgents);
+        ArgumentNullException.ThrowIfNull(dismiss);
+        var tile = Tile(
+            new DotMatrixView { Pitch = 3, Dots = DotGrid.From(DotIcons.Agent), DotColor = Theme.White, HorizontalAlignment = HorizontalAlignment.Center },
+            new DotMatrixView
+            {
+                Pitch = 1.5,
+                Dots = DotText.Render(Core.Agents.AgentFormat.Cost(turn.Cost)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 8, 0, 0),
+            });
+        var buttons = new List<(string, Action)>
+        {
+            ("AGENTI", () =>
+            {
+                dismiss();
+                showAgents();
+            }),
+        };
+        if (openFolder is not null)
+            buttons.Add(("CARTELLA", () =>
+            {
+                openFolder();
+                dismiss();
+            }));
+        var model = Core.Agents.AgentPricing.ShortName(turn.Model);
+        var tokens = $"IN {Core.Agents.AgentFormat.Tokens(turn.Usage.AllInput)} · OUT {Core.Agents.AgentFormat.Tokens(turn.Usage.Output)} · " +
+                     Core.Dev.TaskTracker.FormatDuration(turn.Duration);
+        return Layout(tile, "HA FINITO", [model.Length > 0 ? $"{turn.Title} · {model}" : turn.Title, tokens], Actions([.. buttons]), Theme.White);
+    }
+
     /// <summary>CI conclusa: CI OK o CI FALLITA con i workflow falliti; Apri la pagina dell'esecuzione, Rilancia i job falliti.</summary>
     public static UIElement CiFinished(Core.Dev.CiStatus status, Action open, Action? rerun, Action dismiss)
     {

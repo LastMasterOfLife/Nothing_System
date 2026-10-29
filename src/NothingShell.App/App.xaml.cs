@@ -13,6 +13,7 @@ using NothingShell.App.Services;
 using NothingShell.App.Settings;
 using NothingShell.App.Widgets;
 using NothingShell.Core.Access;
+using NothingShell.Core.Connectors;
 using NothingShell.Core.Notch;
 using NothingShell.Core.Plugins;
 using NothingShell.Core.Sensors;
@@ -73,6 +74,15 @@ public partial class App : Application
                 return;
             case ["--task", var json]:
                 TaskWatcher.Send(json, TimeSpan.FromMilliseconds(500));
+                Shutdown();
+                return;
+            case ["--connectors-check", var report, .. var rest]:
+                var connectors = rest.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal)) ?? ConnectorHost.Folder;
+                File.WriteAllLines(report, await ConnectorHost.CheckAsync(connectors, rest.Contains("--esegui")));
+                Shutdown();
+                return;
+            case ["--agents-check", var report]:
+                AgentsCheck(report);
                 Shutdown();
                 return;
             case ["--dev-check", var report]:
@@ -249,10 +259,46 @@ public partial class App : Application
     }
 
     /// <summary>Notch: avviso mail, ogni pagina espansa e timer in corso. Mail di esempio, solo per l'anteprima.</summary>
+    /// <summary>
+    /// Per <c>--agents-check</c>: le sessioni di Claude Code di oggi come le vede il notch (progetto, modello, stato, token,
+    /// costo), senza il testo dei messaggi (docs/14-agenti-connettori.md).
+    /// </summary>
+    private static void AgentsCheck(string report)
+    {
+        var lines = new List<string> { $"Cartella: {AgentWatcher.ProjectsFolder}" };
+        var today = new DateTimeOffset(DateTime.Today);
+        double total = 0;
+        var files = Directory.Exists(AgentWatcher.ProjectsFolder)
+            ? Directory.EnumerateFiles(AgentWatcher.ProjectsFolder, "*.jsonl", SearchOption.AllDirectories).Where(f => File.GetLastWriteTime(f) >= DateTime.Today)
+            : [];
+        foreach (var file in files)
+        {
+            var sub = string.Equals(Path.GetFileName(Path.GetDirectoryName(file)), "subagents", StringComparison.OrdinalIgnoreCase);
+            var session = new NothingShell.Core.Agents.AgentSession(Path.GetFileNameWithoutExtension(file));
+            var turns = 0;
+            using (var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(stream))
+            {
+                while (reader.ReadLine() is { } line)
+                    if (NothingShell.Core.Agents.ClaudeTranscript.Parse(line) is { } entry && session.Apply(sub ? entry with { Sidechain = true } : entry) is not null)
+                        turns++;
+            }
+            var s = session.Snapshot();
+            var cost = session.CostSince(today);
+            total += cost ?? 0;
+            lines.Add($"{(sub ? "  sotto-agente " : string.Empty)}{s.Title} · {NothingShell.Core.Agents.AgentPricing.ShortName(s.Model)} · {s.State} · " +
+                      $"IN {NothingShell.Core.Agents.AgentFormat.Tokens(s.Total.AllInput)} (cache letta {NothingShell.Core.Agents.AgentFormat.Tokens(s.Total.CacheRead)}) · " +
+                      $"OUT {NothingShell.Core.Agents.AgentFormat.Tokens(s.Total.Output)} · sessione {NothingShell.Core.Agents.AgentFormat.Cost(s.Cost)} · oggi {NothingShell.Core.Agents.AgentFormat.Cost(cost)} · " +
+                      $"turni finiti {turns} · turno attuale OUT {NothingShell.Core.Agents.AgentFormat.Tokens(s.TurnUsage.Output)} {NothingShell.Core.Agents.AgentFormat.Cost(s.TurnCost)}");
+        }
+        lines.Add($"Oggi in tutto: {NothingShell.Core.Agents.AgentFormat.Cost(total)}");
+        File.WriteAllLines(report, lines);
+    }
+
     private static void RenderNotchSnapshots(string folder)
     {
         using var media = new MediaService(); // non avviato: nessuna sessione, Home mostra l'ora
-        var notch = new NotchWindow(media, DevPageActions.None);
+        var notch = new NotchWindow(media, DevPageActions.None, ConnectedPageActions.None);
         var now = DateTimeOffset.Now;
         MailItem[] demo =
         [
@@ -262,7 +308,43 @@ public partial class App : Application
             },
             new("Studio Bianchi", "Preventivo convalida", "Casella collegata", now.AddMinutes(-12)) { Imap = new ImapMessageRef(1, 2) },
             new("GitHub", "[nothing-shell] Nuova issue aperta", "Brave", now.AddHours(-1)),
+            new("Amazon", "Il tuo ordine è stato spedito", "Casella collegata", now.AddHours(-2)) { IsUnread = true },
+            new("Banca", "Codice di verifica 482913", "Casella collegata", now.AddHours(-3)),
+            new("Laura Verdi", "Foto della gita", "Casella collegata", now.AddHours(-5)),
+            new("Trenitalia", "Biglietto Roma - Milano", "Casella collegata", now.AddDays(-1)),
+            new("Comune", "Avviso di pagamento TARI", "Casella collegata", now.AddDays(-1)),
+            new("Newsletter", "Le novità di ottobre", "Casella collegata", now.AddDays(-2)),
+            new("Marco Neri", "Re: preventivo", "Casella collegata", now.AddDays(-3)),
         ];
+        notch.SetPhone(new PhonePageData(true,
+            new NothingShell.Core.Phone.PhoneDevice("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", "Nothing Phone (2)", true, true)
+            {
+                Battery = new NothingShell.Core.Phone.PhoneBattery(64, false, false),
+                Signal = new NothingShell.Core.Phone.PhoneSignal("5G", 3),
+                Shares = ["batteria", "segnale", "notifiche", "chiamate", "appunti", "file e link"],
+            },
+            "Collegato", new NothingShell.Core.Phone.IncomingFile("VID_20261029.mp4", 31_000_000, 52_000_000),
+            [new NothingShell.Core.Phone.ReceivedFile(@"C:\Users\Download\scontrino.pdf", "Nothing Phone (2)", 182_000, now.AddMinutes(-4)),
+             new NothingShell.Core.Phone.ReceivedFile(@"C:\Users\Download\IMG_2041.jpg", "Nothing Phone (2)", 3_400_000, now.AddHours(-2))],
+            [new PhoneEvent(PhoneEventKind.Message, "Laura", "Arrivo tra 10 minuti", now.AddMinutes(-2)) { App = "WhatsApp" },
+             new PhoneEvent(PhoneEventKind.MissedCall, "Mamma", string.Empty, now.AddMinutes(-30))]));
+        var opus = new NothingShell.Core.Agents.TokenUsage(12_400, 3_100, 2_000, 8_000, 240_000);
+        notch.SetAgents(
+        [
+            new("s1", "Claude Code", "nothing-shell", @"C:\dev\nothing-shell", "claude-opus-5-5", NothingShell.Core.Agents.AgentState.Working,
+                opus, NothingShell.Core.Agents.AgentPricing.For("claude-opus-5-5")!.Cost(opus), new(400, 900, 0, 2_000, 180_000), 0.12, now.AddMinutes(-3), now),
+            new("s2", "Claude Code", "microcosmo", @"C:\dev\microcosmo", "claude-sonnet-5-5", NothingShell.Core.Agents.AgentState.Done,
+                new(3_000, 1_200, 0, 4_000, 60_000), 0.07, new(300, 400, 0, 1_000, 30_000), 0.02, now.AddMinutes(-20), now.AddMinutes(-18)),
+        ], 1.84);
+        var casa = ConnectorParser.Parse("casa", """{"name":"Casa","type":"homeassistant","url":"http://h:8123","readings":[{"entity":"sensor.t"}],"actions":[{"label":"Luci off","service":"light.turn_off"},{"label":"Cancello","service":"cover.open_cover","confirm":true}]}""").Manifest!;
+        var router = ConnectorParser.Parse("router", """{"name":"Router","type":"ping","host":"192.168.1.1"}""").Manifest!;
+        notch.SetConnectors(
+        [
+            new ConnectorState(casa, ConnectorStatus.Ok,
+                [new("Soggiorno", "21.5", "°C", ReadingLevel.Normal), new("Umidità", "48", "%", ReadingLevel.Normal), new("Porta", "APERTO", null, ReadingLevel.Warning)],
+                null, now.AddSeconds(-20)) { Granted = true },
+            new ConnectorState(router, ConnectorStatus.Ok, [new("Stato", "ONLINE", null, ReadingLevel.Normal), new("Latenza", "3", "ms", ReadingLevel.Normal)], null, now),
+        ]);
         notch.SetTime(DateTime.Now);
         notch.SetMail(demo, string.Empty);
         notch.SetSystem(new SystemStats(0.23, SystemMonitor.ReadMemoryLoad()));
@@ -441,7 +523,7 @@ public partial class App : Application
         root.Width = settings.Width;
         root.Height = settings.Height;
         SaveSnapshot(root, Path.Combine(folder, "settings.png"));
-        root.Height = 1400; // tutte le sezioni, senza scorrimento
+        root.Height = 2600; // tutte le sezioni, senza scorrimento
         SaveSnapshot(root, Path.Combine(folder, "settings-full.png"));
     }
 
@@ -721,6 +803,36 @@ public partial class App : Application
                 .Concat(results.Where(r => r.Manifest is not null).Select(r => (r.Manifest!.WidgetId, $"{r.Manifest.Name} (plugin)")));
 
         public IReadOnlyList<PluginLoadResult> PluginResults => results;
+
+        public IReadOnlyList<ConnectorLoadResult> ConnectorResults { get; } =
+        [
+            ConnectorParser.Parse("casa", """{"name":"Casa","type":"homeassistant","url":"http://homeassistant.local:8123","secret":true,"readings":[{"entity":"sensor.soggiorno"}],"actions":[{"label":"Luci off","service":"light.turn_off","data":{"entity_id":"all"}}]}"""),
+            ConnectorParser.Parse("raspberry", """{"name":"Raspberry","type":"command","command":"ssh","args":["pi@raspberry","vcgencmd measure_temp"]}"""),
+            ConnectorParser.Parse("router", """{"name":"Router","type":"ping","host":"192.168.1.1"}"""),
+            new ConnectorLoadResult("vecchio", null, "manca \"name\""),
+        ];
+
+        public string ConnectorFolder => ConnectorHost.Folder;
+
+        public bool IsConnectorGranted(ConnectorManifest manifest) => manifest.Id == "casa";
+
+        public void SetConnectorGranted(ConnectorManifest manifest, bool granted)
+        {
+        }
+
+        public bool HasConnectorSecret(ConnectorManifest manifest) => true;
+
+        public void SetConnectorSecret(ConnectorManifest manifest, string secret)
+        {
+        }
+
+        public void ReloadConnectors()
+        {
+        }
+
+        public void CopyConnectorExamples()
+        {
+        }
 
         public string DataFolder => AtomicFile.DataFolder;
 

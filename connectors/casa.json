@@ -1,0 +1,19 @@
+{
+  // Home Assistant: crea un token in Profilo › Sicurezza › Token di accesso a lunga durata
+  // e salvalo in Impostazioni › CONNETTORI (finisce nel Gestore credenziali, non qui).
+  "name": "Casa",
+  "type": "homeassistant",
+  "url": "http://homeassistant.local:8123",
+  "secret": true,
+  "refreshSeconds": 30,
+  "readings": [
+    { "entity": "sensor.temperatura_soggiorno", "label": "Soggiorno", "above": 26 },
+    { "entity": "sensor.umidita_soggiorno", "label": "Umidità" },
+    { "entity": "binary_sensor.porta_ingresso", "label": "Porta", "alertOn": "APERTO" }
+  ],
+  // le azioni partono solo dopo "consenti comandi e azioni" nelle impostazioni
+  "actions": [
+    { "label": "Luci off", "service": "light.turn_off", "data": { "entity_id": "all" } },
+    { "label": "Cancello", "service": "cover.open_cover", "data": { "entity_id": "cover.cancello" }, "confirm": true }
+  ]
+}

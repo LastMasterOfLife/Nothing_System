@@ -61,8 +61,8 @@ public sealed partial class ShellController
     {
         var tasks = ActivityOn(LiveActivity.Tasks);
         var ci = ActivityOn(LiveActivity.Ci);
-        if (tasks || ci)
-            _tasks.Start(); // anche il push arriva dalla pipe
+        if (tasks || ci || ActivityOn(LiveActivity.Agents))
+            _tasks.Start(); // anche il push e gli agenti arrivano dalla pipe
         else
             _tasks.Stop();
         if (!ci)
@@ -87,6 +87,7 @@ public sealed partial class ShellController
             hidden.Add(NotchPage.Servers);
         if (!history)
             hidden.Add(NotchPage.Clipboard);
+        ApplyConnected(hidden);
         _notch.SetAvailablePages(NotchPager.Pages.Except(hidden));
     }
 

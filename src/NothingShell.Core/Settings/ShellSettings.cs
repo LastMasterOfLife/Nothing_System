@@ -17,9 +17,27 @@ public sealed record ShellSettings(
     IReadOnlyList<string>? CalendarFeeds = null,
     DateOnly? MorningBriefShown = null,
     string? Editor = null,
-    bool PhoneDirect = false)
+    bool PhoneDirect = false,
+    IReadOnlyDictionary<string, string>? ConnectorGrants = null)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
+
+    /// <summary>
+    /// Permesso di eseguire comandi e azioni dato a un connettore (docs/14-agenti-connettori.md): vale solo per il
+    /// contenuto del file approvato (<paramref name="hash"/>), così un file cambiato va riapprovato.
+    /// </summary>
+    public bool IsConnectorGranted(string id, string hash) =>
+        ConnectorGrants is not null && ConnectorGrants.TryGetValue(id, out var granted) && granted == hash;
+
+    public ShellSettings WithConnectorGrant(string id, string hash, bool granted)
+    {
+        var grants = new Dictionary<string, string>(ConnectorGrants ?? new Dictionary<string, string>(), StringComparer.Ordinal);
+        if (granted)
+            grants[id] = hash;
+        else
+            grants.Remove(id);
+        return this with { ConnectorGrants = grants };
+    }
 
     public bool IsActivityEnabled(LiveActivity activity) => DisabledActivities?.Contains(activity) != true;
 

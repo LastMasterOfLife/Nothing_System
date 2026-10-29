@@ -1,0 +1,18 @@
+{
+  // MQTT (Zigbee2MQTT, Tasmota, ESPHome…): solo lettura, si iscrive ai topic e mostra l'ultimo valore.
+  // Con "secret": true la password del broker va in Impostazioni › CONNETTORI.
+  "name": "Sensori",
+  "type": "mqtt",
+  "host": "broker.local",
+  "port": 1883,
+  "username": "nothing",
+  "secret": true,
+  "readings": [
+    { "topic": "zigbee2mqtt/sensore_camera", "value": "{temperature}", "label": "Camera", "unit": "°C" },
+    { "topic": "zigbee2mqtt/sensore_camera", "value": "{battery}", "label": "Batteria sensore", "unit": "%", "below": 15 },
+    { "topic": "casa/caldaia/stato", "label": "Caldaia" }
+  ],
+  "actions": [
+    { "label": "Caldaia on", "topic": "casa/caldaia/set", "payload": "ON" }
+  ]
+}

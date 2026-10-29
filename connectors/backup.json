@@ -1,0 +1,11 @@
+{
+  // File JSON o di testo, anche su una cartella di rete: qui l'esito scritto da uno script di backup
+  "name": "Backup",
+  "type": "file",
+  "path": "\\\\nas\\backup\\ultimo.json",
+  "refreshSeconds": 600,
+  "readings": [
+    { "label": "Ultimo", "value": "{data}" },
+    { "label": "Esito", "value": "{esito}", "alertOn": "errore" }
+  ]
+}

@@ -25,13 +25,22 @@ in memoria** (ultime 10), mai su disco.
 Aggiornamento: evento `NotificationChanged` se disponibile, altrimenti controllo ogni 3 s
 (una chiamata WinRT, costo trascurabile).
 
-## Pagine del notch espanso (420 × 172)
-| # | Pagina | Contenuto |
-|---|---|---|
-| 1 | Home | musica (come prima) oppure ora grande e data |
-| 2 | Posta | ultime 3 mail: mittente grigio, oggetto bianco; se l'accesso alle notifiche manca, lo dice |
-| 3 | Timer | conto alla rovescia a punti; preset 5 · 15 · 25 min, stop; a fine timer avviso "TEMPO" rosso |
-| 4 | Sistema | CPU, RAM, batteria con barre a punti |
+## Pagine del notch espanso (420 × 172, le pagine con un elenco 420 × 340)
+| Pagina | Contenuto |
+|---|---|
+| Home | musica (come prima) oppure ora grande e data |
+| Agenda | appuntamenti di oggi (docs/11-agenda-pannello-rapido.md) |
+| Posta (alta) | **ultime 10 mail**: mittente grigio, ora (o giorno), oggetto bianco, punto rosso se non letta; in alto quante da leggere; se l'accesso alle notifiche manca, lo dice |
+| Telefono (alta) | docs/13-telefono.md |
+| Lavoro, Server, Appunti | docs/12-sviluppo.md |
+| Agenti (alta), Dispositivi (alta) | docs/14-agenti-connettori.md |
+| Timer | conto alla rovescia a punti; preset 5 · 15 · 25 min, stop; a fine timer avviso "TEMPO" rosso |
+| Sistema | CPU, RAM, batteria con barre a punti |
+
+Le pagine con un elenco (Posta, Telefono, Agenti, Dispositivi) **allungano il notch in verticale** fino a 340: l'altezza
+anima con la stessa molla della pillola quando si arriva sulla pagina e quando se ne esce (Core `NotchLayout.Expanded`).
+L'elenco **scorre con la rotellina** (o due dita in verticale sul touchpad), a pixel; una sottile barra grigia a destra
+dice dove si è. Riaprendo la Posta l'elenco torna in cima.
 
 In basso, indicatori di pagina: pallino bianco = pagina corrente, grigi le altre.
 Il cambio pagina scorre di lato (150 ms). Con un timer in corso la pillola compatta mostra il
@@ -41,8 +50,10 @@ tempo rimanente al posto dell'ora, con il punto rosso.
 | Gesto | Avanti | Indietro |
 |---|---|---|
 | Touchpad, due dita in orizzontale (`WM_MOUSEHWHEEL`) | verso sinistra | verso destra |
-| Rotellina del mouse sul notch | giù | su |
+| Rotellina del mouse sul notch (non sopra un elenco che scorre) | giù | su |
 | Trascinamento (mouse o dito) di almeno 40 DIP | verso sinistra | verso destra |
+Sopra l'elenco di una pagina alta la rotellina fa scorrere l'elenco; se l'elenco ci sta tutto torna a cambiare pagina.
+Fra le pagine ci si muove sempre con le due dita in orizzontale o trascinando, e con la rotellina sopra l'intestazione.
 Regola (Core, testata): gli spostamenti si sommano fino a una soglia (120 unità di rotellina);
 dopo un cambio pagina c'è una pausa di 400 ms, così uno swipe sposta **una** sola pagina.
 Le pagine non ricominciano dall'inizio: alla prima e all'ultima lo swipe si ferma.

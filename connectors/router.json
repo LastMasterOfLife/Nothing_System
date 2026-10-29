@@ -1,0 +1,7 @@
+{
+  // ping: stato e latenza di qualsiasi cosa in rete (router, NAS, stampante, telecamera)
+  "name": "Router",
+  "type": "ping",
+  "host": "192.168.1.1",
+  "refreshSeconds": 20
+}

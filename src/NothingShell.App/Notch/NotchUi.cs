@@ -62,6 +62,74 @@ internal static class NotchUi
         }, width);
 }
 
+/// <summary>
+/// Elenco delle pagine alte del notch: la rotellina (o due dita sul touchpad, in verticale) lo fa scorrere invece di
+/// cambiare pagina; se il contenuto ci sta tutto la rotellina torna a cambiare pagina. A destra una sottile barra
+/// grigia dice dove si è. Le pagine si cambiano sempre con lo scorrimento orizzontale o trascinando.
+/// </summary>
+public sealed class NotchScrollList : Grid
+{
+    private readonly WheelScrollViewer _scroll = new();
+    private readonly Border _thumb = new()
+    {
+        Width = 3,
+        CornerRadius = new CornerRadius(1.5),
+        Background = Theme.GreyBrush,
+        HorizontalAlignment = HorizontalAlignment.Right,
+        VerticalAlignment = VerticalAlignment.Top,
+        Margin = new Thickness(0, 0, -10, 0),
+        Opacity = 0.6,
+        IsHitTestVisible = false,
+    };
+
+    public NotchScrollList(UIElement content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        _scroll.Content = content;
+        _scroll.ScrollChanged += (_, _) => UpdateThumb();
+        Children.Add(_scroll);
+        Children.Add(_thumb);
+        _thumb.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>Torna in cima (nuove mail, pagina riaperta).</summary>
+    public void ScrollToTop() => _scroll.ScrollToTop();
+
+    private void UpdateThumb()
+    {
+        var total = _scroll.ExtentHeight;
+        var visible = _scroll.ViewportHeight;
+        if (total <= visible + 0.5 || visible <= 0)
+        {
+            _thumb.Visibility = Visibility.Collapsed;
+            return;
+        }
+        _thumb.Visibility = Visibility.Visible;
+        _thumb.Height = Math.Max(16, visible * visible / total);
+        _thumb.RenderTransform = new TranslateTransform(0, (visible - _thumb.Height) * (_scroll.VerticalOffset / _scroll.ScrollableHeight));
+    }
+
+    /// <summary>Con niente da scorrere la rotellina non si ferma qui: arriva alla pillola e cambia pagina.</summary>
+    private sealed class WheelScrollViewer : ScrollViewer
+    {
+        public WheelScrollViewer()
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+            CanContentScroll = false; // a pixel, non a righe intere
+            PanningMode = PanningMode.VerticalOnly;
+            Focusable = false;
+        }
+
+        protected override void OnMouseWheel(MouseWheelEventArgs e)
+        {
+            if (ScrollableHeight <= 0)
+                return;
+            base.OnMouseWheel(e);
+        }
+    }
+}
+
 /// <summary>Una pagina del notch espanso (docs/08-notch-mail-pages.md).</summary>
 public abstract class NotchPageView : Grid
 {

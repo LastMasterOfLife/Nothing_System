@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using NothingShell.App.Rendering;
+using NothingShell.Core.Connectors;
 using NothingShell.Core.DotMatrix;
 using NothingShell.Core.Notch;
 using NothingShell.Core.Plugins;
@@ -104,6 +105,25 @@ public interface IShellSettingsActions
     bool PhoneDirect { get; set; }
 
     NothingShell.App.Services.IPhoneActions Phone { get; }
+
+    /// <summary>Connettori (docs/14-agenti-connettori.md): i file letti, con l'errore se non sono validi.</summary>
+    IReadOnlyList<ConnectorLoadResult> ConnectorResults { get; }
+
+    string ConnectorFolder { get; }
+
+    /// <summary>Permesso di eseguire comandi e azioni, legato al contenuto del file.</summary>
+    bool IsConnectorGranted(ConnectorManifest manifest);
+
+    void SetConnectorGranted(ConnectorManifest manifest, bool granted);
+
+    bool HasConnectorSecret(ConnectorManifest manifest);
+
+    /// <summary>Token o password nel Gestore credenziali; vuoto lo cancella.</summary>
+    void SetConnectorSecret(ConnectorManifest manifest, string secret);
+
+    void ReloadConnectors();
+
+    void CopyConnectorExamples();
 }
 
 /// <summary>Impostazioni in stile Nothing (docs/07-settings-plugins.md). Ogni modifica si applica subito.</summary>
@@ -178,6 +198,8 @@ public sealed class SettingsWindow : Window
 
         PhoneSection();
         DevSection();
+        AgentsSection();
+        ConnectorsSection();
         AgendaSection();
         MailSection();
 
@@ -230,6 +252,86 @@ public sealed class SettingsWindow : Window
         Note("Altre shell: NothingShell.exe --task '{\"event\":\"done\",\"title\":\"make\",\"seconds\":40,\"exitCode\":0}'. " +
              "Editor per gli errori: \"editor\" in settings.json, altrimenti VS Code o Cursor dal PATH.", Theme.GreyBrush);
         ButtonRow(("COPIA RIGA DEL PROFILO", () => Clipboard.SetDataObject(profileLine, copy: true)));
+    }
+
+    /// <summary>Agenti al lavoro: Claude Code da solo, gli altri dalla pipe (docs/14-agenti-connettori.md).</summary>
+    private void AgentsSection()
+    {
+        Section("AGENTI");
+        ActivityRow(LiveActivity.Agents, "Agenti al lavoro",
+            "Token e costo dal vivo, scheda quando l'agente ha finito");
+        Note("Claude Code compare da solo (legge solo token, modello e stato dai transcript in ~/.claude/projects). Il costo è " +
+             "quello del listino dell'API: con un abbonamento è una stima, non quanto paghi. Altri agenti mandano i loro totali con " +
+             "NothingShell.exe --task '{\"event\":\"agent\",\"id\":\"mio-agente\",\"title\":\"Report\",\"model\":\"claude-sonnet-5-5\"," +
+             "\"input\":12000,\"output\":800,\"state\":\"working\"}' e \"state\":\"done\" alla fine.", Theme.GreyBrush);
+    }
+
+    /// <summary>
+    /// Connettori: elenco con lo stato, il token nel Gestore credenziali e il permesso per comandi e azioni. Il permesso
+    /// vale per il file com'è adesso: se cambia, va dato di nuovo.
+    /// </summary>
+    private void ConnectorsSection()
+    {
+        Section("CONNETTORI");
+        ActivityRow(LiveActivity.Connectors, "Dispositivi e sistemi",
+            "Pagina Dispositivi e avvisi quando un valore supera la soglia");
+        Note("Un file .json per connettore nella cartella dei connettori. Leggere non cambia nulla; i connettori che eseguono " +
+             "comandi o hanno azioni (accendi, riavvia, pubblica) partono solo col tuo permesso qui sotto.", Theme.GreyBrush);
+        foreach (var result in _shell.ConnectorResults)
+        {
+            if (result.Manifest is not { } m)
+            {
+                Note($"{result.FileName}: {result.Error}", Theme.RedBrush);
+                continue;
+            }
+            var kind = m.Kind switch
+            {
+                Core.Connectors.ConnectorKind.HomeAssistant => "Home Assistant",
+                Core.Connectors.ConnectorKind.Prometheus => "Prometheus",
+                Core.Connectors.ConnectorKind.Mqtt => "MQTT",
+                Core.Connectors.ConnectorKind.Ping => "ping",
+                Core.Connectors.ConnectorKind.Command => "comando",
+                Core.Connectors.ConnectorKind.File => "file",
+                _ => "http",
+            };
+            var values = m.Readings.Count switch { 0 => null, 1 => "1 valore", var n => $"{n} valori" };
+            var detail = string.Join(" · ", new[] { kind, values, m.Actions.Count > 0 ? $"azioni: {string.Join(", ", m.Actions.Select(a => a.Label))}" : null }
+                .Where(p => p is not null));
+            if (m.NeedsGrant)
+            {
+                var what = m.Kind == Core.Connectors.ConnectorKind.Command
+                    ? $"Esegue {m.Command} {string.Join(' ', m.Arguments)}"
+                    : "Può cambiare lo stato del dispositivo";
+                ToggleRow($"{m.Name}: consenti comandi e azioni", $"{detail}\n{what}", _shell.IsConnectorGranted(m), v =>
+                {
+                    _shell.SetConnectorGranted(m, v);
+                    Rebuild();
+                });
+            }
+            else
+            {
+                Note($"{m.Name} — {detail}", Theme.WhiteBrush);
+            }
+            if (m.Secret)
+            {
+                var label = m.Kind == Core.Connectors.ConnectorKind.Mqtt ? "Password del broker" : "Token";
+                var box = new PasswordBox();
+                AddField($"{label} di {m.Name} ({(_shell.HasConnectorSecret(m) ? "salvato nel Gestore credenziali" : "manca")})", box);
+                ButtonRow(("SALVA", () =>
+                {
+                    _shell.SetConnectorSecret(m, box.Password);
+                    Rebuild();
+                }));
+            }
+        }
+        ButtonRow(
+            ("APRI CARTELLA", () => OpenFolder(_shell.ConnectorFolder)),
+            ("COPIA GLI ESEMPI", _shell.CopyConnectorExamples),
+            ("RICARICA", () =>
+            {
+                _shell.ReloadConnectors();
+                Rebuild();
+            }));
     }
 
     /// <summary>Prossimo appuntamento e riepilogo del mattino, con i calendari da cui leggere gli appuntamenti.</summary>

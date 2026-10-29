@@ -10,7 +10,9 @@ using System.Windows.Threading;
 using NothingShell.App.Interop;
 using NothingShell.App.Rendering;
 using NothingShell.App.Services;
+using NothingShell.Core.Agents;
 using NothingShell.Core.Animation;
+using NothingShell.Core.Connectors;
 using NothingShell.Core.Design;
 using NothingShell.Core.Dev;
 using NothingShell.Core.DotMatrix;
@@ -63,6 +65,9 @@ public sealed class NotchWindow : Window
     private readonly StackPanel _taskView = new() { Orientation = Orientation.Horizontal };
     private readonly DotMatrixView _taskIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Terminal) };
     private readonly DotMatrixView _taskText = new() { Pitch = 2 };
+    private readonly StackPanel _agentView = new() { Orientation = Orientation.Horizontal };
+    private readonly DotMatrixView _agentIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Agent) };
+    private readonly DotMatrixView _agentText = new() { Pitch = 2 };
 
     // Avviso: [icona] testo che scorre, oppure [icona] livello a punti e valore (volume, luminosità)
     private readonly Grid _alert = new() { VerticalAlignment = VerticalAlignment.Top, Opacity = 0 };
@@ -88,6 +93,9 @@ public sealed class NotchWindow : Window
     private readonly WorkPage _work;
     private readonly ServersPage _servers;
     private readonly ClipboardPage _clipboard;
+    private readonly PhonePage _phone;
+    private readonly AgentsPage _agents = new();
+    private readonly DevicesPage _devices;
 
     private readonly DispatcherTimer _deadlineTimer = new();
     private readonly DispatcherTimer _equalizerTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
@@ -100,6 +108,7 @@ public sealed class NotchWindow : Window
     private IReadOnlyList<ActiveDownload> _downloads = [];
     private IReadOnlyList<RunningTask> _tasks = [];
     private bool _ciRunning;
+    private AgentSnapshot[] _working = [];
     private DateTime _now = DateTime.Now;
     private string _alertMessage = string.Empty;
     private NotchPage? _alertPage;
@@ -107,10 +116,13 @@ public sealed class NotchWindow : Window
     private TimeSpan _lastFrame;
     private bool _animating;
 
-    public NotchWindow(IMediaService media, DevPageActions dev)
+    public NotchWindow(IMediaService media, DevPageActions dev, ConnectedPageActions connected)
     {
         ArgumentNullException.ThrowIfNull(media);
         ArgumentNullException.ThrowIfNull(dev);
+        ArgumentNullException.ThrowIfNull(connected);
+        _phone = new PhonePage(connected);
+        _devices = new DevicesPage(connected);
         _home = new HomePage(media);
         _work = new WorkPage(dev.OpenTask);
         _servers = new ServersPage(dev.OpenServer, dev.KillServer);
@@ -268,6 +280,26 @@ public sealed class NotchWindow : Window
 
     public void SetServers(IReadOnlyList<DevServer> servers) => _servers.Update(servers);
 
+    public void SetPhone(PhonePageData data) => _phone.Update(data);
+
+    /// <summary>
+    /// Agenti (docs/14-agenti-connettori.md): pagina Agenti e, con un agente al lavoro, scintilla e costo del turno a destra
+    /// nella pillola, aggiornati a ogni risposta.
+    /// </summary>
+    public void SetAgents(IReadOnlyList<AgentSnapshot> sessions, double? today)
+    {
+        ArgumentNullException.ThrowIfNull(sessions);
+        _agents.Update(sessions, today);
+        _working = sessions.Where(s => s.State == AgentState.Working).ToArray();
+        if (_working.Length > 0)
+            _agentText.Dots = DotText.Render(_working.Any(s => s.TurnCost is null)
+                ? AgentFormat.Tokens(_working.Sum(s => s.TurnUsage.Output))
+                : AgentFormat.Cost(_working.Sum(s => s.TurnCost ?? 0)));
+        OnActivitiesChanged();
+    }
+
+    public void SetConnectors(IReadOnlyList<ConnectorState> states) => _devices.Update(states);
+
     public void SetClipboard(IReadOnlyList<ClipEntry> entries) => _clipboard.Update(entries);
 
     /// <summary>Avviso breve con icona; passandoci sopra col mouse si apre <paramref name="page"/>.</summary>
@@ -317,7 +349,8 @@ public sealed class NotchWindow : Window
     /// <summary>Prepara la pillola in uno stato e una pagina senza animazioni (per <c>--snapshot</c>).</summary>
     public FrameworkElement PrepareSnapshot(NotchState state, NotchPage page)
     {
-        var size = NotchLayout.For(state);
+        var size = state == NotchState.Expanded ? NotchLayout.Expanded(page) : NotchLayout.For(state);
+        _expanded.Height = NotchLayout.Expanded(page).Height;
         _width.SnapTo(size.Width);
         _height.SnapTo(size.Height);
         ApplyPillSize();
@@ -347,7 +380,8 @@ public sealed class NotchWindow : Window
     }
 
     private bool HasActivity =>
-        _countdown.IsRunning || _media?.IsPlaying == true || _privacy.Any || _downloads.Count > 0 || _tasks.Count > 0 || _ciRunning;
+        _countdown.IsRunning || _media?.IsPlaying == true || _privacy.Any || _downloads.Count > 0 || _tasks.Count > 0 || _ciRunning
+        || _working.Length > 0;
 
     private Grid BuildVisualTree()
     {
@@ -383,12 +417,21 @@ public sealed class NotchWindow : Window
         _taskText.Margin = new Thickness(6, 0, 0, 0);
         _taskView.Children.Add(_taskIcon);
         _taskView.Children.Add(_taskText);
+        _agentView.HorizontalAlignment = HorizontalAlignment.Right;
+        _agentView.VerticalAlignment = VerticalAlignment.Center;
+        _agentView.Margin = new Thickness(0, 0, 18, 0);
+        _agentIcon.VerticalAlignment = VerticalAlignment.Center;
+        _agentText.VerticalAlignment = VerticalAlignment.Center;
+        _agentText.Margin = new Thickness(6, 0, 0, 0);
+        _agentView.Children.Add(_agentIcon);
+        _agentView.Children.Add(_agentText);
         _compact.Children.Add(_compactClock);
         _compact.Children.Add(_liveDot);
         _compact.Children.Add(_equalizerView);
         _compact.Children.Add(_privacyIcons);
         _compact.Children.Add(_downloadView);
         _compact.Children.Add(_taskView);
+        _compact.Children.Add(_agentView);
         SetActivityVisible(false);
 
         var alertSize = NotchLayout.For(NotchState.Alert);
@@ -418,7 +461,7 @@ public sealed class NotchWindow : Window
         _card.HorizontalAlignment = HorizontalAlignment.Center;
         _card.Padding = new Thickness(NotchUi.Padding, 14, NotchUi.Padding, 14);
 
-        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _work, _servers, _clipboard, _timerPage, _system }.OrderBy(p => p.Page))
+        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _phone, _work, _agents, _servers, _devices, _clipboard, _timerPage, _system }.OrderBy(p => p.Page))
         {
             _pages[page.Page] = page;
             page.Visibility = Visibility.Collapsed;
@@ -528,6 +571,8 @@ public sealed class NotchWindow : Window
             dot.Fill = kind == page ? Theme.WhiteBrush : Theme.GreyBrush;
             dot.Width = dot.Height = kind == page ? 6 : 5;
         }
+        if (_machine.State == NotchState.Expanded)
+            ResizeExpanded(page);
 
         if (!animate)
             return;
@@ -536,6 +581,18 @@ public sealed class NotchWindow : Window
         transform.BeginAnimation(TranslateTransform.XProperty,
             new DoubleAnimation(fromRight ? 40 : -40, 0, Slide) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
         shown.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, Slide));
+    }
+
+    /// <summary>Il notch espanso si allunga o si accorcia con la pagina: le pagine con un elenco sono più alte.</summary>
+    private void ResizeExpanded(NotchPage page)
+    {
+        var size = NotchLayout.Expanded(page);
+        if (Math.Abs(_height.Target - size.Height) < 0.5)
+            return;
+        _expanded.Height = size.Height; // la pillola taglia mentre la sua altezza anima
+        _width.Target = size.Width;
+        _height.Target = size.Height;
+        StartAnimation();
     }
 
     private void OnPointerEnter()
@@ -670,7 +727,9 @@ public sealed class NotchWindow : Window
             return;
 
         var state = _machine.State;
-        var size = NotchLayout.For(state);
+        var size = state == NotchState.Expanded ? NotchLayout.Expanded(_pager.Current) : NotchLayout.For(state);
+        if (state == NotchState.Expanded)
+            _expanded.Height = size.Height;
         _width.Target = size.Width;
         _height.Target = size.Height;
         StartAnimation();
@@ -700,7 +759,7 @@ public sealed class NotchWindow : Window
 
     /// <summary>
     /// A sinistra microfono e webcam in uso (hanno la precedenza sul punto rosso), a destra il comando in corso,
-    /// poi il download, poi l'equalizzatore della musica.
+    /// poi l'agente al lavoro con il costo del turno, poi il download, poi l'equalizzatore della musica.
     /// </summary>
     private void SetActivityVisible(bool visible)
     {
@@ -709,9 +768,11 @@ public sealed class NotchWindow : Window
         _liveDot.Visibility = visible && !privacy ? Visibility.Visible : Visibility.Hidden;
         var task = visible && _tasks.Count > 0;
         _taskView.Visibility = task ? Visibility.Visible : Visibility.Hidden;
-        var downloading = visible && !task && _downloads.Count > 0;
+        var agent = visible && !task && _working.Length > 0;
+        _agentView.Visibility = agent ? Visibility.Visible : Visibility.Hidden;
+        var downloading = visible && !task && !agent && _downloads.Count > 0;
         _downloadView.Visibility = downloading ? Visibility.Visible : Visibility.Hidden;
-        var music = visible && !task && !downloading && _media?.IsPlaying == true;
+        var music = visible && !task && !agent && !downloading && _media?.IsPlaying == true;
         _equalizerView.Visibility = music ? Visibility.Visible : Visibility.Hidden;
         if (music)
             _equalizerTimer.Start();

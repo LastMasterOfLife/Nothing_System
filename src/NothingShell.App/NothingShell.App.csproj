@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <None Include="..\..\tools\NothingShell.psm1" Link="tools\NothingShell.psm1" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\connectors\*.json" Link="connectors\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

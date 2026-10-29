@@ -8,6 +8,15 @@ public static class NotchLayout
     public const double TopMargin = 6;
     public const double MaxCornerRadius = 28;
 
+    /// <summary>Altezza del notch espanso sulle pagine con un elenco che scorre (Posta, Telefono, Agenti, Dispositivi).</summary>
+    public const double TallHeight = 340;
+
+    public static bool IsTall(NotchPage page) => page is NotchPage.Mail or NotchPage.Phone or NotchPage.Agents or NotchPage.Devices;
+
+    /// <summary>Notch espanso su <paramref name="page"/>: le pagine con un elenco si allungano in verticale.</summary>
+    public static Size2 Expanded(NotchPage page) =>
+        IsTall(page) ? new(For(NotchState.Expanded).Width, TallHeight) : For(NotchState.Expanded);
+
     public static Size2 For(NotchState state) => state switch
     {
         NotchState.Idle => new(200, 34),
@@ -24,7 +33,7 @@ public static class NotchLayout
         get
         {
             var sizes = Enum.GetValues<NotchState>().Select(For).ToArray();
-            return new(sizes.Max(s => s.Width), sizes.Max(s => s.Height) + TopMargin);
+            return new(sizes.Max(s => s.Width), Math.Max(sizes.Max(s => s.Height), TallHeight) + TopMargin);
         }
     }
 

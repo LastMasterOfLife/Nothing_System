@@ -38,6 +38,12 @@ public enum LiveActivity
 
     /// <summary>Chiamate e notifiche del telefono da Collegamento al telefono (docs/13-telefono.md).</summary>
     Phone,
+
+    /// <summary>Agenti (Claude Code e altri): token e costo dal vivo, scheda alla fine del lavoro (docs/14-agenti-connettori.md).</summary>
+    Agents,
+
+    /// <summary>Connettori verso dispositivi e sistemi: pagina Dispositivi e avvisi sulle soglie.</summary>
+    Connectors,
 }
 
 /// <summary>

@@ -1,0 +1,18 @@
+{
+  // API http che rispondono in JSON: qui OctoPrint, con la chiave API in un'intestazione
+  "name": "Stampante 3D",
+  "type": "http",
+  "url": "http://octopi.local/api/job",
+  "secret": true,
+  "secretHeader": "X-Api-Key",
+  "secretFormat": "{secret}",
+  "refreshSeconds": 15,
+  "readings": [
+    { "label": "Stato", "value": "{state}" },
+    { "label": "Avanzamento", "value": "{progress.completion}", "unit": "%", "decimals": 0 },
+    { "label": "Mancano", "value": "{progress.printTimeLeft}", "scale": 0.0166667, "unit": "min", "decimals": 0 }
+  ],
+  "actions": [
+    { "label": "Pausa", "type": "http", "method": "POST", "url": "/api/job", "body": { "command": "pause", "action": "toggle" }, "confirm": true }
+  ]
+}
