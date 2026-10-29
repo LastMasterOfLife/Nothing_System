@@ -321,8 +321,10 @@ public partial class App : Application
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-screenshot.png"));
         notch.ShowCard(NotchCards.Download(Path.Combine(folder, "notch-volume.png"), () => { }), TimeSpan.FromSeconds(8));
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-download.png"));
-        notch.ShowCard(NotchCards.Call(new PhoneEvent(PhoneEventKind.IncomingCall, "Giulia Bianchi", "Chiamata in arrivo", DateTimeOffset.Now), () => { }, () => { }), TimeSpan.FromSeconds(20));
+        notch.ShowCard(NotchCards.Call(new PhoneEvent(PhoneEventKind.IncomingCall, "Giulia Bianchi", "Chiamata in arrivo", DateTimeOffset.Now), "RISPONDI", () => { }, () => { }), TimeSpan.FromSeconds(20));
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-call.png"));
+        notch.ShowCard(NotchCards.PairRequest(new NothingShell.Core.Phone.PhoneDevice("a", "Pixel 8", true, false) { VerificationKey = "3FA9C21B" }, () => { }, () => { }, () => { }), TimeSpan.FromSeconds(30));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-pair.png"));
 
         // Agenda (docs/11-agenda-pannello-rapido.md)
         notch.ShowCard(NotchCards.Appointment(agenda[1], ReminderKind.Soon, DateTimeOffset.Now, _ => { }, () => { }, () => { }), TimeSpan.FromSeconds(8));
@@ -333,7 +335,7 @@ public partial class App : Application
         notch.SetAgenda([], DateTimeOffset.Now, "Collega un calendario nelle impostazioni di Nothing Shell");
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Agenda), Path.Combine(folder, "notch-agenda-empty.png"));
 
-        var quick = new QuickPanelWindow(() => { }, () => { });
+        var quick = new QuickPanelWindow(() => { }, () => { }, new SnapshotPhone(), () => true);
         SaveSnapshot(quick.PrepareSnapshot(), Path.Combine(folder, "quick-panel.png"));
         quick.Close();
 
@@ -526,7 +528,63 @@ public partial class App : Application
                     lines.Add($"    hint {hint.Key}={hint.Value}");
             }
         }
+        lines.AddRange(KdeConnectService.Diagnose());
+        lines.Add(await KdeConnectService.SelfTestAsync());
         await File.WriteAllLinesAsync(file, lines);
+    }
+
+    /// <summary>Telefono collegato d'esempio per disegnare pannello rapido e impostazioni.</summary>
+    private sealed class SnapshotPhone : IPhoneActions
+    {
+        public string Status => "Collegato a Pixel 8";
+
+        public IReadOnlyList<NothingShell.Core.Phone.PhoneDevice> Devices { get; } =
+        [
+            new("0123456789abcdef0123456789abcdef", "Pixel 8", Connected: true, Paired: true) { Battery = new(76, false, false) },
+            new("fedcba9876543210fedcba9876543210", "Galaxy Tab", Connected: true, Paired: false),
+        ];
+
+        public NothingShell.Core.Phone.PhoneDevice? Current => Devices[0];
+
+        public event Action? Changed
+        {
+            add { }
+            remove { }
+        }
+
+        public void Discover(System.Net.IPAddress? address = null)
+        {
+        }
+
+        public void RequestPair(string deviceId)
+        {
+        }
+
+        public void AcceptPair(string deviceId)
+        {
+        }
+
+        public void RejectPair(string deviceId)
+        {
+        }
+
+        public void Unpair(string deviceId)
+        {
+        }
+
+        public void FindPhone()
+        {
+        }
+
+        public void SendClipboard(string text)
+        {
+        }
+
+        public Task<string?> SendFileAsync(string path) => Task.FromResult<string?>(null);
+
+        public void AllowFirewall()
+        {
+        }
     }
 
     /// <summary>Mail d'esempio per disegnare il lettore senza collegarsi a una casella.</summary>
@@ -568,6 +626,10 @@ public partial class App : Application
     /// <summary>Stato fittizio ma realistico per disegnare le impostazioni senza avviare la shell.</summary>
     private sealed class SnapshotSettings(IReadOnlyList<PluginLoadResult> results) : IShellSettingsActions
     {
+        public bool PhoneDirect { get; set; } = true;
+
+        public IPhoneActions Phone { get; } = new SnapshotPhone();
+
         public bool NotchEnabled { get; set; } = true;
 
         public bool BarEnabled { get; set; } = true;

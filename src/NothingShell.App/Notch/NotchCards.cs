@@ -116,11 +116,14 @@ internal static class NotchCards
         return Layout(icon, "SCARICATO", detail, actions);
     }
 
-    /// <summary>Chiamata in arrivo sul telefono (docs/13-telefono.md): si risponde da Collegamento al telefono.</summary>
-    public static UIElement Call(PhoneEvent call, Action openPhoneLink, Action dismiss)
+    /// <summary>
+    /// Chiamata in arrivo sul telefono (docs/13-telefono.md): <paramref name="action"/> è "Rispondi" (apre
+    /// Collegamento al telefono) o "Silenzia" (collegamento diretto).
+    /// </summary>
+    public static UIElement Call(PhoneEvent call, string actionLabel, Action action, Action dismiss)
     {
         ArgumentNullException.ThrowIfNull(call);
-        ArgumentNullException.ThrowIfNull(openPhoneLink);
+        ArgumentNullException.ThrowIfNull(action);
         ArgumentNullException.ThrowIfNull(dismiss);
         var tile = Tile(new DotMatrixView
         {
@@ -130,13 +133,44 @@ internal static class NotchCards
             HorizontalAlignment = HorizontalAlignment.Center,
         });
         var actions = Actions(
-            ("RISPONDI", () =>
+            (actionLabel, () =>
             {
-                openPhoneLink();
+                action();
                 dismiss();
             }),
             ("CHIUDI", dismiss));
         return Layout(tile, "CHIAMATA", [call.Title.Length > 0 ? call.Title : "Numero sconosciuto"], actions, Theme.Red);
+    }
+
+    /// <summary>Il telefono chiede l'associazione: il codice deve essere uguale a quello sul telefono.</summary>
+    public static UIElement PairRequest(Core.Phone.PhoneDevice device, Action accept, Action reject, Action dismiss)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        ArgumentNullException.ThrowIfNull(accept);
+        ArgumentNullException.ThrowIfNull(reject);
+        ArgumentNullException.ThrowIfNull(dismiss);
+        var tile = Tile(
+            new DotMatrixView { Pitch = 3, Dots = DotGrid.From(DotIcons.Phone), DotColor = Theme.Red, HorizontalAlignment = HorizontalAlignment.Center },
+            new DotMatrixView
+            {
+                Pitch = 1.5,
+                Dots = DotText.Render(device.VerificationKey?[..4] ?? "?"),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 8, 0, 0),
+            });
+        var actions = Actions(
+            ("ASSOCIA", () =>
+            {
+                accept();
+                dismiss();
+            }),
+            ("RIFIUTA", () =>
+            {
+                reject();
+                dismiss();
+            }));
+        var key = device.VerificationKey is { } k ? $"Codice {k}: uguale sul telefono?" : "Conferma sul telefono";
+        return Layout(tile, "ASSOCIA", [device.Name, key], actions, Theme.Red);
     }
 
     /// <summary>

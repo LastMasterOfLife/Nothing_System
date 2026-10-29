@@ -99,6 +99,11 @@ public interface IShellSettingsActions
     void ResetWidgetLayout();
 
     void ReloadPlugins();
+
+    /// <summary>Collegamento diretto col telefono (KDE Connect sulla rete locale), spento di serie.</summary>
+    bool PhoneDirect { get; set; }
+
+    NothingShell.App.Services.IPhoneActions Phone { get; }
 }
 
 /// <summary>Impostazioni in stile Nothing (docs/07-settings-plugins.md). Ogni modifica si applica subito.</summary>
@@ -111,6 +116,7 @@ public sealed class SettingsWindow : Window
     private readonly StackPanel _sections = new() { Margin = new Thickness(0, 0, 8, 0) };
     private TextBlock? _mailStatus;
     private TextBlock? _calendarStatus;
+    private TextBlock? _phoneStatus;
 
     public SettingsWindow(IShellSettingsActions shell)
     {
@@ -135,8 +141,10 @@ public sealed class SettingsWindow : Window
         // Lo stato della casella cambia da solo (connessione, errori): si aggiorna la riga senza rifare il modulo.
         _shell.MailAccountChanged += OnMailAccountChanged;
         _shell.CalendarChanged += OnCalendarChanged;
+        _shell.Phone.Changed += OnPhoneChanged;
         Closed += (_, _) =>
         {
+            _shell.Phone.Changed -= OnPhoneChanged;
             _shell.MailAccountChanged -= OnMailAccountChanged;
             _shell.CalendarChanged -= OnCalendarChanged;
         };
@@ -148,6 +156,7 @@ public sealed class SettingsWindow : Window
         _sections.Children.Clear();
         _mailStatus = null;
         _calendarStatus = null;
+        _phoneStatus = null;
 
         Section("GENERALE");
         ToggleRow("Avvia con Windows", "Solo per questo utente", Autostart.IsEnabled, Autostart.Set);
@@ -167,6 +176,7 @@ public sealed class SettingsWindow : Window
         ActivityRow(LiveActivity.Bluetooth, "Cuffie Bluetooth", "Collegamento e batteria");
         ActivityRow(LiveActivity.Phone, "Telefono", "Chiamate e notifiche da Collegamento al telefono (serve l'accesso alle notifiche)");
 
+        PhoneSection();
         DevSection();
         AgendaSection();
         MailSection();
@@ -223,6 +233,86 @@ public sealed class SettingsWindow : Window
     }
 
     /// <summary>Prossimo appuntamento e riepilogo del mattino, con i calendari da cui leggere gli appuntamenti.</summary>
+    /// <summary>Collegamento diretto col telefono (docs/13-telefono.md): stato, telefoni in rete e associazione.</summary>
+    private void PhoneSection()
+    {
+        Section("TELEFONO");
+        ToggleRow("Collegamento diretto (KDE Connect)",
+            "Batteria, notifiche, chiamate, appunti, file e Trova il telefono, sulla rete di casa",
+            _shell.PhoneDirect, v =>
+            {
+                _shell.PhoneDirect = v;
+                Rebuild();
+            });
+        if (!_shell.PhoneDirect)
+        {
+            Note("Senza collegamento diretto chiamate e notifiche arrivano da Collegamento al telefono di Windows.", Theme.GreyBrush);
+            return;
+        }
+        Note("Sul telefono installa KDE Connect (Play Store o F-Droid), sulla stessa rete Wi-Fi del PC; il telefono " +
+             "compare qui sotto. Windows deve consentire le porte 1714–1764 sulle reti private.", Theme.GreyBrush);
+        _phoneStatus = Note(_shell.Phone.Status, Theme.GreyBrush);
+        foreach (var device in _shell.Phone.Devices)
+        {
+            var detail = device switch
+            {
+                { PairPending: true, VerificationKey: { } key } => $"Codice {key}: confermalo sul telefono",
+                { PairPending: true } => "Associazione in corso…",
+                { Paired: true, Connected: true, Battery: { } b } => $"Collegato · batteria {b.Charge}%{(b.Charging ? " in carica" : string.Empty)}",
+                { Paired: true, Connected: true } => "Collegato",
+                { Paired: true } => "Associato, non raggiungibile",
+                _ => "In rete, non associato",
+            };
+            var id = device.DeviceId;
+            (string, Action)[] actions = device switch
+            {
+                { PairPending: true, PairRequestedByPhone: true } => [("ACCETTA", () => _shell.Phone.AcceptPair(id)), ("RIFIUTA", () => _shell.Phone.RejectPair(id))],
+                { PairPending: true } => [],
+                { Paired: true } => [("DISSOCIA", () => _shell.Phone.Unpair(id))],
+                _ => [("ASSOCIA", () => _shell.Phone.RequestPair(id))],
+            };
+            ToggleFreeRow(device.Name, detail, actions);
+        }
+        var address = Field("Indirizzo IP del telefono (se non compare da solo)", "");
+        ButtonRow(
+            ("CERCA", () => _shell.Phone.Discover(System.Net.IPAddress.TryParse(address.Text.Trim(), out var ip) ? ip : null)),
+            ("CONSENTI NEL FIREWALL", _shell.Phone.AllowFirewall));
+    }
+
+    /// <summary>Riga con titolo, dettaglio e pulsanti di testo a destra (telefoni).</summary>
+    private void ToggleFreeRow(string title, string detail, (string Text, Action Click)[] actions)
+    {
+        var row = new Grid { Margin = new Thickness(0, 6, 0, 6) };
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 150, 0) };
+        text.Children.Add(Label(title, 14, Theme.WhiteBrush));
+        var d = Label(detail, 11, Theme.GreyBrush);
+        d.Margin = new Thickness(0, 2, 0, 0);
+        text.Children.Add(d);
+        row.Children.Add(text);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var (label, click) in actions)
+        {
+            var button = Label(label, 11, Theme.RedBrush);
+            button.Margin = new Thickness(12, 0, 0, 0);
+            button.Cursor = Cursors.Hand;
+            button.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                click();
+            };
+            buttons.Children.Add(button);
+        }
+        row.Children.Add(buttons);
+        _sections.Children.Add(row);
+    }
+
+    /// <summary>Il telefono cambia stato da solo (collegato, batteria, associazione): si ridisegna la sezione.</summary>
+    private void OnPhoneChanged()
+    {
+        if (_phoneStatus is not null && IsVisible)
+            Rebuild();
+    }
+
     private void AgendaSection()
     {
         Section("AGENDA");

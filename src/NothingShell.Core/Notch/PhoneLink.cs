@@ -8,6 +8,9 @@ public enum PhoneEventKind
     IncomingCall,
 
     MissedCall,
+
+    /// <summary>Chiamata risposta, rifiutata o finita: la scheda della chiamata si chiude.</summary>
+    CallEnded,
 }
 
 /// <summary>Chiamata o notifica del telefono arrivata da Collegamento al telefono. Resta solo in memoria.</summary>

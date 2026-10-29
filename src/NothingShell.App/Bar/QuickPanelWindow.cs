@@ -48,6 +48,11 @@ public sealed class QuickPanelWindow : Window
     private readonly QuickTile _wifi;
     private readonly QuickTile _bluetooth;
     private readonly QuickTile _mic;
+    private readonly QuickTile _phone;
+    private readonly QuickTile _phoneFile;
+    private readonly QuickTile _phoneClip;
+    private readonly IPhoneActions _phoneActions;
+    private readonly Func<bool> _phoneOn;
     private readonly PillSlider _volume;
     private readonly PillSlider _brightness;
 
@@ -57,12 +62,17 @@ public sealed class QuickPanelWindow : Window
     private int? _brightnessTarget;
     private DateTime _hiddenAt;
 
-    public QuickPanelWindow(Action lockPc, Action openSettings)
+    /// <param name="phoneOn">Collegamento diretto col telefono acceso nelle impostazioni (docs/13-telefono.md).</param>
+    public QuickPanelWindow(Action lockPc, Action openSettings, IPhoneActions phone, Func<bool> phoneOn)
     {
         ArgumentNullException.ThrowIfNull(lockPc);
         ArgumentNullException.ThrowIfNull(openSettings);
+        ArgumentNullException.ThrowIfNull(phone);
+        ArgumentNullException.ThrowIfNull(phoneOn);
         _lock = lockPc;
         _openSettings = openSettings;
+        _phoneActions = phone;
+        _phoneOn = phoneOn;
 
         Width = PanelWidth;
         WindowStyle = WindowStyle.None;
@@ -79,6 +89,9 @@ public sealed class QuickPanelWindow : Window
         var screenshot = new QuickTile(DotIcons.Screenshot, "Screenshot", Screenshot) { State = "Cattura" };
         var project = new QuickTile(DotIcons.Display, "Proietta", () => AfterHide(() => WindowNative.PressKeys(VkLeftWin, VkP))) { State = "Schermi" };
         var lockTile = new QuickTile(DotIcons.Lock, "Blocca", () => AfterHide(_lock)) { State = "Win+L" };
+        _phone = new QuickTile(DotIcons.Phone, "Telefono", FindPhone);
+        _phoneFile = new QuickTile(DotIcons.Download, "Invia file", () => _ = SendFileAsync());
+        _phoneClip = new QuickTile(DotIcons.Clip, "Appunti", SendClipboard);
 
         _volume = new PillSlider(DotIcons.Speaker, v => _speaker.SetLevel(v), ToggleSpeakerMute);
         _brightness = new PillSlider(DotIcons.Sun, v =>
@@ -88,16 +101,19 @@ public sealed class QuickPanelWindow : Window
         }, onIcon: null);
         _brightnessApply.Tick += (_, _) => ApplyBrightness();
 
-        _root = BuildVisualTree([_wifi, _bluetooth, _mic, screenshot, project, lockTile]);
+        _root = BuildVisualTree([_wifi, _bluetooth, _mic, screenshot, project, lockTile, _phone, _phoneFile, _phoneClip]);
         Content = _root;
 
         _speaker.Changed += (level, muted) => ShowVolume(level, muted);
         _microphone.Changed += (_, muted) => ShowMicrophone(muted);
+        _phoneActions.Changed += ShowPhone;
+        ShowPhone();
         Deactivated += (_, _) => HidePanel();
         Closed += (_, _) =>
         {
             _speaker.Dispose();
             _microphone.Dispose();
+            _phoneActions.Changed -= ShowPhone;
         };
         PreviewKeyDown += (_, e) =>
         {
@@ -223,6 +239,64 @@ public sealed class QuickPanelWindow : Window
         if (level is { } l)
             _brightness.Value = l / 100.0;
         ShowRadios();
+        ShowPhone();
+    }
+
+    /// <summary>Telefono collegato: Trova lo fa squillare, gli altri due mandano file e appunti.</summary>
+    private void ShowPhone()
+    {
+        var current = _phoneActions.Current;
+        if (current is null)
+        {
+            var state = _phoneOn() ? "Non collegato" : "Spento";
+            _phone.Set(false, state); // il clic apre le impostazioni
+            _phoneFile.Set(null, state);
+            _phoneClip.Set(null, state);
+            return;
+        }
+        _phone.Set(true, current.Battery is { } b ? $"{current.Name} · {b.Charge}%" : current.Name);
+        _phoneFile.Set(false, "Al telefono");
+        _phoneClip.Set(false, "Al telefono");
+    }
+
+    private void FindPhone()
+    {
+        if (_phoneActions.Current is null)
+        {
+            AfterHide(_openSettings);
+            return;
+        }
+        _phoneActions.FindPhone();
+        _phone.State = "Squilla…";
+    }
+
+    private async Task SendFileAsync()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog { Title = "Invia al telefono" };
+        HidePanel();
+        if (dialog.ShowDialog() != true)
+            return;
+        _phoneFile.State = "Invio…";
+        var error = await _phoneActions.SendFileAsync(dialog.FileName);
+        _phoneFile.State = error ?? "Inviato";
+    }
+
+    private void SendClipboard()
+    {
+        try
+        {
+            if (!Clipboard.ContainsText())
+            {
+                _phoneClip.State = "Appunti vuoti";
+                return;
+            }
+            _phoneActions.SendClipboard(Clipboard.GetText());
+            _phoneClip.State = "Inviati";
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            _phoneClip.State = "Appunti occupati";
+        }
     }
 
     private void ShowVolume(double level, bool muted)

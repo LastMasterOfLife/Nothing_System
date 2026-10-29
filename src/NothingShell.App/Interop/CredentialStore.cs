@@ -29,7 +29,7 @@ internal static class CredentialStore
         public string UserName;
     }
 
-    public static bool Write(string target, string userName, string password)
+    public static bool Write(string target, string userName, string password, string comment = "Nothing Shell: casella di posta del notch")
     {
         var blob = Encoding.Unicode.GetBytes(password);
         var pointer = Marshal.AllocHGlobal(blob.Length);
@@ -40,7 +40,7 @@ internal static class CredentialStore
             {
                 Type = CredTypeGeneric,
                 TargetName = target,
-                Comment = "Nothing Shell: casella di posta del notch",
+                Comment = comment,
                 CredentialBlobSize = (uint)blob.Length,
                 CredentialBlob = pointer,
                 Persist = CredPersistLocalMachine,

@@ -16,7 +16,8 @@ public sealed record ShellSettings(
     IReadOnlyList<LiveActivity>? DisabledActivities = null,
     IReadOnlyList<string>? CalendarFeeds = null,
     DateOnly? MorningBriefShown = null,
-    string? Editor = null)
+    string? Editor = null,
+    bool PhoneDirect = false)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
 

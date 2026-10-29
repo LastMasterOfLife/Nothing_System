@@ -53,6 +53,8 @@ Tutto si spegne in Impostazioni › Sviluppo. Dettagli in [docs/12-sviluppo.md](
 
 **Telefono Android** tramite Collegamento al telefono di Windows: chiamata in arrivo come scheda nel notch
 (*Rispondi* apre Collegamento al telefono), chiamate perse e notifiche del telefono come avvisi.
+Con il **collegamento diretto** (protocollo KDE Connect, app KDE Connect sul telefono, Impostazioni ›
+TELEFONO) anche batteria, appunti, file avanti e indietro e *Trova il telefono* dal pannello rapido.
 Dettagli in [docs/13-telefono.md](docs/13-telefono.md).
 
 **Agenda**: il prossimo appuntamento sotto l'ora nella Home, la pagina Agenda con quelli di oggi e un
