@@ -9,6 +9,7 @@ using NothingShell.Core.Connectors;
 using NothingShell.Core.Design;
 using NothingShell.Core.Notch;
 using NothingShell.Core.Phone;
+using NothingShell.Core.Storage;
 
 namespace NothingShell.App;
 
@@ -45,6 +46,59 @@ public sealed partial class ShellController
     public void ReloadConnectors()
     {
         if (ActivityOn(LiveActivity.Connectors))
+            _connectors.Start();
+    }
+
+    /// <summary>
+    /// Connettore dalla libreria: scrive il file, mette il token nel Gestore credenziali e, se l'utente l'ha chiesto, dà
+    /// il permesso per questo contenuto. Accende i connettori se erano spenti.
+    /// </summary>
+    public string? AddConnector(ConnectorTemplate connector, string? name, IReadOnlyDictionary<string, string> values, bool grant)
+    {
+        ArgumentNullException.ThrowIfNull(connector);
+        var existing = Directory.Exists(ConnectorHost.Folder)
+            ? Directory.EnumerateFiles(ConnectorHost.Folder, "*.json").Select(Path.GetFileNameWithoutExtension).OfType<string>().ToArray()
+            : [];
+        var result = ConnectorCatalog.Create(connector, name, values, existing);
+        if (result.Error is { } error)
+            return error;
+        try
+        {
+            AtomicFile.WriteAllText(Path.Combine(ConnectorHost.Folder, result.Id + ".json"), result.Json!);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return $"file non scritto: {ex.Message}";
+        }
+        var manifest = ConnectorParser.Parse(result.Id!, result.Json!).Manifest!;
+        if (result.Secret is { } secret)
+            ConnectorHost.StoreSecret(manifest, secret);
+        if (grant && manifest.NeedsGrant)
+            Update(_settings.WithConnectorGrant(manifest.Id, manifest.Hash, true));
+        if (!ActivityOn(LiveActivity.Connectors))
+            SetActivityEnabled(LiveActivity.Connectors, true);
+        else
+            _connectors.Start();
+        return null;
+    }
+
+    /// <summary>Toglie il file, il segreto e il permesso del connettore.</summary>
+    public void RemoveConnector(ConnectorManifest manifest)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        try
+        {
+            File.Delete(Path.Combine(ConnectorHost.Folder, manifest.Id + ".json"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+        if (manifest.Secret)
+            ConnectorHost.StoreSecret(manifest, string.Empty);
+        if (IsConnectorGranted(manifest))
+            Update(_settings.WithConnectorGrant(manifest.Id, manifest.Hash, false));
+        if (_connectors.Running)
             _connectors.Start();
     }
 

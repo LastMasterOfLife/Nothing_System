@@ -80,11 +80,32 @@ sessione e di oggi, turni finiti. Senza testo dei messaggi.
 
 ## Connettori
 
-Un connettore è un file `~/.nothing-shell/connectors/<id>.json` (id: minuscole, cifre e trattini) che dice da dove
+Un connettore è un file `~/.nothing-shell/connectors/<id>.json`, scritto dalla libreria delle impostazioni o a mano, (id: minuscole, cifre e trattini) che dice da dove
 leggere dei valori e, se serve, quali azioni offrire. La pagina **Dispositivi** del notch (alta, scorre) mostra per ogni
 connettore nome, stato, da quanto è aggiornato e i valori; un valore oltre soglia è rosso e dà un avviso nel notch
 (solo quando entra in allarme, non a ogni giro: Core `ConnectorAlerts`). Esempi pronti in [connectors/](../connectors/):
 *Copia gli esempi* nelle impostazioni li mette in `connectors\esempi`, dove non partono; si spostano su quando sono pronti.
+
+### Libreria
+Impostazioni › Connettori › LIBRERIA: connettori pronti (Core `ConnectorCatalog`, testato) che si attivano scrivendo
+pochi dati, senza toccare file. Il modulo chiede il nome, i campi del connettore (con un valore proposto dove ha senso)
+e, per quelli che eseguono comandi o hanno pulsanti, il permesso con la descrizione di cosa fanno. *Attiva* scrive
+`connectors/<nome>.json` (con `"template"`: da quale connettore viene), mette token e password nel Gestore credenziali,
+dà il permesso se richiesto e accende i connettori se erano spenti.
+
+| Categoria | Connettori |
+|---|---|
+| Questo PC | Spazio su disco, Servizio di Windows (Avvia, Riavvia), App in esecuzione (Termina), Docker, File di log |
+| Rete e web | Dispositivo in rete (ping), Sito o servizio web, IP pubblico, Stato di un servizio online (Statuspage: Claude, GitHub…) |
+| Casa | Home Assistant (Accendi/spegni), Sensori MQTT, Presa Shelly, Presa Tasmota, Stampante 3D OctoPrint e Klipper |
+| Server | Server Linux via SSH e Raspberry Pi (Riavvia), Prometheus con node_exporter |
+| Sviluppo e AI | GitHub: PR da rivedere, GitHub: ultima CI, Ollama |
+| Informazioni | Meteo e Qualità dell'aria (Open-Meteo), Cambio valuta (BCE), Criptovaluta (CoinGecko) |
+| Personalizzati | API JSON, File di stato, Comando PowerShell |
+
+I valori del modulo entrano in comandi e indirizzi: ogni campo ha la sua forma (`Pattern`: un nome di servizio, un host,
+`utente@host`…) e i testi liberi passano a PowerShell tra apici. Il file generato passa comunque da `ConnectorParser`.
+Ogni connettore attivo ha la sua scheda con tipo, valori, permesso, token e *Rimuovi* (toglie file, segreto e permesso).
 
 ### Tipi
 | `type` | Legge | Campi |

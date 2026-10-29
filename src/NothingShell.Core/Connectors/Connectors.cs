@@ -116,6 +116,9 @@ public sealed record ConnectorManifest(string Id, string Name, ConnectorKind Kin
 
     public IReadOnlyList<ConnectorAction> Actions { get; init; } = [];
 
+    /// <summary>Connettore della libreria da cui è nato il file (<see cref="ConnectorCatalog"/>), se c'è.</summary>
+    public string? Template { get; init; }
+
     /// <summary>Hash del file: il permesso dato vale solo per questo contenuto.</summary>
     public string Hash { get; init; } = string.Empty;
 
@@ -216,6 +219,7 @@ public static partial class ConnectorParser
                 Tls = root.TryGetProperty("tls", out var tls) && tls.ValueKind == JsonValueKind.True,
                 UserName = String(root, "username"),
                 Actions = actions,
+                Template = String(root, "template"),
                 Hash = HashOf(json),
             };
             return Validate(manifest) is { } error ? Fail(id, error) : new ConnectorLoadResult(id, manifest, null);

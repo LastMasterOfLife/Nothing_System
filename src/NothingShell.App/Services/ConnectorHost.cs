@@ -113,13 +113,19 @@ public sealed class ConnectorHost : IDisposable
     /// <summary>Salva il token o la password nel Gestore credenziali (vuoto = cancella) e riparte.</summary>
     public void SetSecret(ConnectorManifest manifest, string secret)
     {
+        StoreSecret(manifest, secret);
+        if (Running)
+            Start();
+    }
+
+    /// <summary>Solo il Gestore credenziali, senza ripartire (chi chiama riparte dopo aver finito).</summary>
+    public static void StoreSecret(ConnectorManifest manifest, string secret)
+    {
         ArgumentNullException.ThrowIfNull(manifest);
         if (string.IsNullOrEmpty(secret))
             CredentialStore.Delete(manifest.CredentialTarget);
         else
             CredentialStore.Write(manifest.CredentialTarget, manifest.UserName ?? manifest.Id, secret, "Nothing Shell: connettore");
-        if (Running)
-            Start();
     }
 
     public static bool HasSecret(ConnectorManifest manifest) => CredentialStore.Read(manifest.CredentialTarget) is { Length: > 0 };

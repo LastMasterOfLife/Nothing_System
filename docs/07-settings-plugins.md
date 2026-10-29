@@ -1,9 +1,16 @@
 # 07 — Impostazioni e plugin (M5)
 
 ## Impostazioni
-Finestra Nothing (nera, 520 × 640 DIP, titolo a punti), aperta da: menu col tasto destro di barra,
+Finestra Nothing (nera, 1000 × 720 DIP, ridotta se lo schermo è più piccolo), aperta da: menu col tasto destro di barra,
 notch e widget (*Impostazioni…*) e dal launcher (voce "Impostazioni Nothing Shell").
 Ogni modifica si applica **subito**, senza riavvio.
+
+A sinistra il **menù** delle pagine (Generale, Notch, Telefono, Posta, Agenda, Sviluppo, Agenti, Connettori, Accesso,
+Widget, Plugin, Info): la pagina aperta ha il fondo chiaro e il punto rosso, Connettori e Plugin mostrano quanti ce ne
+sono. A destra il titolo a punti della pagina e le sue **schede** (fondo `Surface`, raggio 20), ognuna con un titolo
+grigio sopra; tra due interruttori di fila una linea sottile. Ctrl+Tab e Ctrl+Maiusc+Tab cambiano pagina, Esc chiude
+(o torna alla libreria dal modulo di un connettore). Il pulsante principale di un modulo (Collega, Attiva) è bianco
+pieno, gli altri a contorno; Rimuovi chiede un secondo clic entro 3 s.
 
 | Sezione | Voce | Effetto |
 |---|---|---|

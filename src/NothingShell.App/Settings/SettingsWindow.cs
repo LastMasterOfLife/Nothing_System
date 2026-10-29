@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Shapes;
 using NothingShell.App.Rendering;
 using NothingShell.Core.Connectors;
 using NothingShell.Core.DotMatrix;
@@ -121,19 +123,70 @@ public interface IShellSettingsActions
     /// <summary>Token o password nel Gestore credenziali; vuoto lo cancella.</summary>
     void SetConnectorSecret(ConnectorManifest manifest, string secret);
 
+    /// <summary>Connettore dalla libreria (<see cref="ConnectorCatalog"/>): null se attivato, altrimenti il motivo.</summary>
+    string? AddConnector(ConnectorTemplate connector, string? name, IReadOnlyDictionary<string, string> values, bool grant);
+
+    void RemoveConnector(ConnectorManifest manifest);
+
     void ReloadConnectors();
 
     void CopyConnectorExamples();
 }
 
-/// <summary>Impostazioni in stile Nothing (docs/07-settings-plugins.md). Ogni modifica si applica subito.</summary>
+/// <summary>Pagine del menù laterale, nell'ordine in cui compaiono.</summary>
+public enum SettingsPage
+{
+    General,
+    Notch,
+    Phone,
+    Mail,
+    Agenda,
+    Dev,
+    Agents,
+    Connectors,
+    Access,
+    Widgets,
+    Plugins,
+    Info,
+}
+
+/// <summary>
+/// Impostazioni in stile Nothing (docs/07-settings-plugins.md): menù laterale con le pagine, ogni pagina fatta di
+/// schede. Ogni modifica si applica subito.
+/// </summary>
 public sealed class SettingsWindow : Window
 {
-    private const double PanelWidth = 520;
-    private const double PanelHeight = 640;
+    private const double PanelWidth = 1000;
+    private const double PanelHeight = 720;
+    private const double SidebarWidth = 236;
+    private const string RowTag = "row";
+
+    private static readonly (SettingsPage Page, string Title, string Subtitle)[] Pages =
+    [
+        (SettingsPage.General, "Generale", "Avvio e componenti della shell"),
+        (SettingsPage.Notch, "Notch", "Pagine e attività dal vivo"),
+        (SettingsPage.Phone, "Telefono", "Chiamate, notifiche e collegamento diretto"),
+        (SettingsPage.Mail, "Posta", "Mail nel notch e casella collegata"),
+        (SettingsPage.Agenda, "Agenda", "Appuntamenti, calendari e riepilogo"),
+        (SettingsPage.Dev, "Sviluppo", "Build, appunti e server locali"),
+        (SettingsPage.Agents, "Agenti", "Claude Code e altri agenti al lavoro"),
+        (SettingsPage.Connectors, "Connettori", "Dispositivi, servizi e automazioni"),
+        (SettingsPage.Access, "Accesso", "Blocco e sblocco"),
+        (SettingsPage.Widgets, "Widget", "Widget sul desktop"),
+        (SettingsPage.Plugins, "Plugin", "Widget aggiuntivi"),
+        (SettingsPage.Info, "Info", "Versione e dati"),
+    ];
 
     private readonly IShellSettingsActions _shell;
-    private readonly StackPanel _sections = new() { Margin = new Thickness(0, 0, 8, 0) };
+    private readonly StackPanel _nav = new();
+    private readonly StackPanel _page = new() { Margin = new Thickness(0, 0, 4, 24) };
+    private readonly DotMatrixView _pageTitle = new() { Pitch = 3, HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly TextBlock _pageSubtitle = Label(string.Empty, 12, Theme.GreyBrush);
+    private readonly ScrollViewer _scroll = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Hidden };
+    private Panel _current;
+    private SettingsPage _selected = SettingsPage.General;
+    private ConnectorTemplate? _draft;
+    private string? _libraryCategory;
     private TextBlock? _mailStatus;
     private TextBlock? _calendarStatus;
     private TextBlock? _phoneStatus;
@@ -142,9 +195,11 @@ public sealed class SettingsWindow : Window
     {
         ArgumentNullException.ThrowIfNull(shell);
         _shell = shell;
+        _current = _page;
 
-        Width = PanelWidth;
-        Height = PanelHeight;
+        var area = SystemParameters.WorkArea;
+        Width = Math.Min(PanelWidth, area.Width - 40);
+        Height = Math.Min(PanelHeight, area.Height - 40);
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
         Background = Brushes.Transparent;
@@ -156,7 +211,25 @@ public sealed class SettingsWindow : Window
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape)
-                Close();
+            {
+                if (_draft is not null)
+                {
+                    _draft = null;
+                    Rebuild();
+                }
+                else
+                {
+                    Close();
+                }
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Tab && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+            {
+                var step = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? -1 : 1;
+                var index = Array.FindIndex(Pages, p => p.Page == _selected);
+                Show(Pages[(index + step + Pages.Length) % Pages.Length].Page);
+                e.Handled = true;
+            }
         };
         // Lo stato della casella cambia da solo (connessione, errori): si aggiorna la riga senza rifare il modulo.
         _shell.MailAccountChanged += OnMailAccountChanged;
@@ -170,15 +243,86 @@ public sealed class SettingsWindow : Window
         };
     }
 
-    /// <summary>Ridisegna le sezioni (dopo una ricarica dei plugin cambiano i widget e gli errori).</summary>
+    /// <summary>Apre una pagina del menù laterale.</summary>
+    public void Show(SettingsPage page)
+    {
+        if (page != _selected)
+            _draft = null;
+        _selected = page;
+        Rebuild();
+        _scroll.ScrollToTop();
+    }
+
+    /// <summary>Apre il modulo di un connettore della libreria (anche per le istantanee).</summary>
+    public void ShowConnectorTemplate(string id)
+    {
+        _selected = SettingsPage.Connectors;
+        _draft = ConnectorCatalog.Find(id);
+        Rebuild();
+        _scroll.ScrollToTop();
+    }
+
+    /// <summary>Ridisegna il menù e la pagina aperta (dopo una ricarica dei plugin cambiano i widget e gli errori).</summary>
     public void Rebuild()
     {
-        _sections.Children.Clear();
+        BuildNav();
+        _page.Children.Clear();
+        _current = _page;
         _mailStatus = null;
         _calendarStatus = null;
         _phoneStatus = null;
 
-        Section("GENERALE");
+        var (_, title, subtitle) = Pages.First(p => p.Page == _selected);
+        _pageTitle.Dots = DotText.Render(title.ToUpperInvariant());
+        _pageSubtitle.Text = subtitle;
+
+        switch (_selected)
+        {
+            case SettingsPage.General:
+                GeneralPage();
+                break;
+            case SettingsPage.Notch:
+                NotchPage();
+                break;
+            case SettingsPage.Phone:
+                PhonePage();
+                break;
+            case SettingsPage.Mail:
+                MailPage();
+                break;
+            case SettingsPage.Agenda:
+                AgendaPage();
+                break;
+            case SettingsPage.Dev:
+                DevPage();
+                break;
+            case SettingsPage.Agents:
+                AgentsPage();
+                break;
+            case SettingsPage.Connectors:
+                if (_draft is { } template)
+                    ConnectorForm(template);
+                else
+                    ConnectorsPage();
+                break;
+            case SettingsPage.Access:
+                AccessPage();
+                break;
+            case SettingsPage.Widgets:
+                WidgetsPage();
+                break;
+            case SettingsPage.Plugins:
+                PluginsPage();
+                break;
+            case SettingsPage.Info:
+                InfoPage();
+                break;
+        }
+    }
+
+    private void GeneralPage()
+    {
+        Section("AVVIO");
         ToggleRow("Avvia con Windows", "Solo per questo utente", Autostart.IsEnabled, Autostart.Set);
 
         Section("COMPONENTI");
@@ -186,39 +330,339 @@ public sealed class SettingsWindow : Window
         ToggleRow("Barra al posto della taskbar", "Spenta: torna la taskbar di Windows", _shell.BarEnabled, v => _shell.BarEnabled = v);
         ToggleRow("Tasto Win apre il launcher", "Le combinazioni Win+… restano a Windows", _shell.UseWinKey, v => _shell.UseWinKey = v);
 
-        Section("NOTCH");
-        Note("Swipe sul notch aperto (touchpad, rotellina o trascinamento) per Agenda, Posta, Lavoro, Server, Appunti, Timer e Sistema.", Theme.GreyBrush);
+        Section("SCORCIATOIE");
+        Note("Ctrl+Win spegne e riaccende la shell. Ctrl+Tab passa alla pagina successiva delle impostazioni, Esc chiude.", Theme.GreyBrush);
+    }
+
+    private void NotchPage()
+    {
+        Section("PAGINE");
+        Note("Swipe sul notch aperto (touchpad, rotellina o trascinamento) per Agenda, Posta, Telefono, Lavoro, Agenti, Server, " +
+             "Dispositivi, Appunti, Timer e Sistema. Le pagine si accendono e spengono con le loro funzioni.", Theme.GreyBrush);
+
+        Section("ATTIVITÀ DAL VIVO");
         ActivityRow(LiveActivity.Volume, "Volume", "Con i tasti del volume, al posto dell'indicatore di Windows");
         ActivityRow(LiveActivity.Brightness, "Luminosità", "Schermo del portatile (i monitor esterni non la comunicano)");
         ActivityRow(LiveActivity.Privacy, "Microfono e webcam in uso", "Icone rosse nel notch, le app nella pagina Sistema");
         ActivityRow(LiveActivity.Downloads, "Download", "In corso dalla cartella Download, poi Apri e Cartella");
         ActivityRow(LiveActivity.Screenshots, "Screenshot rapido", "Strumento di cattura (Win+Maiusc+S, Stamp) e Greenshot: anteprima da trascinare");
         ActivityRow(LiveActivity.Bluetooth, "Cuffie Bluetooth", "Collegamento e batteria");
-        ActivityRow(LiveActivity.Phone, "Telefono", "Chiamate e notifiche da Collegamento al telefono (serve l'accesso alle notifiche)");
+    }
 
-        PhoneSection();
-        DevSection();
-        AgentsSection();
-        ConnectorsSection();
-        AgendaSection();
-        MailSection();
+    /// <summary>Lavoro nel notch, appunti intelligenti e server locali (docs/12-sviluppo.md).</summary>
+    private void DevPage()
+    {
+        Section("NEL NOTCH");
+        ActivityRow(LiveActivity.Tasks, "Comandi e build", "Tempo nella pillola, scheda alla fine con il primo errore, pagina Lavoro");
+        ActivityRow(LiveActivity.Ci, "CI di GitHub dopo il push", "Con GitHub CLI (gh): esito delle Actions e Rilancia");
+        ActivityRow(LiveActivity.Servers, "Server locali", "Porte in ascolto: avviso, Apri nel browser, Termina");
 
-        Section("ACCESSO");
+        Section("APPUNTI");
+        ActivityRow(LiveActivity.Clipboard, "Cronologia degli appunti", "Pagina Appunti: ultime copie con Formatta, Apri, Copia HEX… (solo in memoria)");
+        ActivityRow(LiveActivity.ClipboardHints, "Avviso alla copia", "JSON, errori, colori e timestamp appena copiati");
+        ActivityRow(LiveActivity.ClipboardSecrets, "Proteggi chiavi e token", "Chiavi API, JWT e password copiati spariscono dagli appunti dopo 30 s");
+
+        Section("TERMINALE");
+        var module = System.IO.Path.Combine(AppContext.BaseDirectory, "tools", "NothingShell.psm1");
+        var profileLine = $"Import-Module '{module}'; Enable-NothingShellPrompt";
+        Note("Nel terminale: ns seguito dal comando (ns dotnet build, ns npm test) manda inizio e fine al notch. " +
+             "Con l'hook del prompt arrivano anche i comandi lunghi (30 s o più) e i git push. Aggiungi al profilo " +
+             "di PowerShell ($PROFILE):", Theme.GreyBrush);
+        Code(profileLine);
+        Note("Altre shell: NothingShell.exe --task '{\"event\":\"done\",\"title\":\"make\",\"seconds\":40,\"exitCode\":0}'. " +
+             "Editor per gli errori: \"editor\" in settings.json, altrimenti VS Code o Cursor dal PATH.", Theme.GreyBrush);
+        ButtonRow(("COPIA RIGA DEL PROFILO", () => Clipboard.SetDataObject(profileLine, copy: true)));
+    }
+
+    /// <summary>Agenti al lavoro: Claude Code da solo, gli altri dalla pipe (docs/14-agenti-connettori.md).</summary>
+    private void AgentsPage()
+    {
+        Section("NEL NOTCH");
+        ActivityRow(LiveActivity.Agents, "Agenti al lavoro", "Token e costo dal vivo, scheda quando l'agente ha finito");
+
+        Section("CLAUDE CODE");
+        Note("Compare da solo: Nothing Shell legge solo token, modello e stato dai transcript in ~/.claude/projects, mai il " +
+             "testo dei messaggi. Il costo è quello del listino dell'API: con un abbonamento è una stima, non quanto paghi.", Theme.GreyBrush);
+
+        Section("ALTRI AGENTI");
+        Note("Mandano i loro totali dalla riga di comando, con \"state\":\"done\" alla fine:", Theme.GreyBrush);
+        Code("NothingShell.exe --task '{\"event\":\"agent\",\"id\":\"mio-agente\",\"title\":\"Report\",\"model\":\"claude-sonnet-5-5\"," +
+             "\"input\":12000,\"output\":800,\"state\":\"working\"}'");
+        Note("Per dare agli agenti occhi su casa, server e servizi usa i connettori: valori e avvisi finiscono nella pagina " +
+             "Dispositivi del notch.", Theme.GreyBrush);
+        ButtonRow(("APRI CONNETTORI", () => Show(SettingsPage.Connectors)));
+    }
+
+    /// <summary>
+    /// Connettori: quelli attivi (stato, token nel Gestore credenziali, permesso per comandi e azioni, rimozione) e la
+    /// libreria di connettori pronti, che si attivano scrivendo pochi dati. Il permesso vale per il file com'è adesso.
+    /// </summary>
+    private void ConnectorsPage()
+    {
+        Section("NEL NOTCH");
+        ActivityRow(LiveActivity.Connectors, "Dispositivi e sistemi", "Pagina Dispositivi e avvisi quando un valore supera la soglia");
+
+        var results = _shell.ConnectorResults;
+        Heading(results.Count == 0 ? "ATTIVI" : $"ATTIVI · {results.Count}");
+        if (results.Count == 0)
+            Card(() => Note("Nessun connettore: scegline uno dalla libreria qui sotto.", Theme.GreyBrush));
+        foreach (var result in results)
+            Card(() => ConnectorCard(result));
+
+        Heading("LIBRERIA");
+        Note("Connettori pronti: scrivi pochi dati e partono subito. Leggere non cambia nulla; quelli che eseguono comandi o hanno " +
+             "pulsanti (accendi, riavvia) chiedono il tuo permesso.", Theme.GreyBrush);
+        var chips = new WrapPanel { Margin = new Thickness(0, 10, 0, 6) };
+        foreach (var category in new string?[] { null }.Concat(ConnectorCatalog.Categories))
+        {
+            var selected = category == _libraryCategory;
+            var chip = Chip(category?.ToUpperInvariant() ?? "TUTTI", selected);
+            chip.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                _libraryCategory = category;
+                Rebuild();
+            };
+            chips.Children.Add(chip);
+        }
+        _page.Children.Add(chips);
+
+        var active = results.Select(r => r.Manifest?.Template).OfType<string>().ToArray();
+        var grid = new UniformGrid { Columns = 2 };
+        foreach (var template in ConnectorCatalog.All.Where(t => _libraryCategory is null || t.Category == _libraryCategory))
+            grid.Children.Add(TemplateTile(template, active.Count(a => a == template.Id)));
+        _page.Children.Add(grid);
+
+        Heading("AVANZATE");
+        Card(() =>
+        {
+            Note("Ogni connettore è un file .json nella cartella dei connettori: si può scrivere a mano per casi particolari " +
+                 "(formato in docs/14-agenti-connettori.md). Gli esempi copiati vanno in connectors\\esempi, dove non partono.", Theme.GreyBrush);
+            ButtonRow(
+                ("APRI CARTELLA", () => OpenFolder(_shell.ConnectorFolder)),
+                ("COPIA GLI ESEMPI", _shell.CopyConnectorExamples),
+                ("RICARICA", () =>
+                {
+                    _shell.ReloadConnectors();
+                    Rebuild();
+                }));
+        });
+    }
+
+    /// <summary>Un connettore attivo: tipo e valori, permesso, token e rimozione con conferma.</summary>
+    private void ConnectorCard(ConnectorLoadResult result)
+    {
+        if (result.Manifest is not { } m)
+        {
+            CardTitle(result.FileName, "NON VALIDO", Theme.RedBrush);
+            Note(result.Error ?? string.Empty, Theme.RedBrush);
+            ButtonRow(("APRI CARTELLA", () => OpenFolder(_shell.ConnectorFolder)));
+            return;
+        }
+        var kind = m.Kind switch
+        {
+            ConnectorKind.HomeAssistant => "HOME ASSISTANT",
+            ConnectorKind.Prometheus => "PROMETHEUS",
+            ConnectorKind.Mqtt => "MQTT",
+            ConnectorKind.Ping => "PING",
+            ConnectorKind.Command => "COMANDO",
+            ConnectorKind.File => "FILE",
+            _ => "HTTP",
+        };
+        var granted = _shell.IsConnectorGranted(m);
+        CardTitle(m.Name, kind, Theme.GreyBrush);
+        var values = m.Readings.Count == 0 ? null : string.Join(", ", m.Readings.Select(r => r.Label ?? r.Source ?? r.Value).Where(l => l is not null).Take(5));
+        var origin = m.Template is { } t && ConnectorCatalog.Find(t) is { } template ? template.Name : null;
+        Note(string.Join(" · ", new[] { origin, values, $"ogni {FormatRefresh(m.Refresh)}" }.Where(p => p is not null)), Theme.GreyBrush);
+        if (m.Actions.Count > 0)
+            Note($"Pulsanti: {string.Join(", ", m.Actions.Select(a => a.Label))}", Theme.GreyBrush);
+
+        if (m.NeedsGrant)
+        {
+            var what = m.Kind == ConnectorKind.Command
+                ? $"Esegue {m.Command} {string.Join(' ', m.Arguments)}"
+                : "Può cambiare lo stato del dispositivo";
+            if (what.Length > 160)
+                what = what[..157] + "…";
+            ToggleRow("Consenti comandi e azioni", what, granted, v =>
+            {
+                _shell.SetConnectorGranted(m, v);
+                Rebuild();
+            });
+        }
+        if (m.Secret)
+        {
+            var label = m.Kind == ConnectorKind.Mqtt ? "Password del broker" : "Token";
+            var box = new PasswordBox();
+            AddField($"{label} ({(_shell.HasConnectorSecret(m) ? "salvato nel Gestore credenziali" : "manca")})", box);
+            ButtonRow(("SALVA", () =>
+            {
+                _shell.SetConnectorSecret(m, box.Password);
+                Rebuild();
+            }));
+        }
+        ConfirmButtonRow("RIMUOVI", "CONFERMA RIMOZIONE", () =>
+        {
+            _shell.RemoveConnector(m);
+            Rebuild();
+        });
+    }
+
+    /// <summary>Tessera della libreria: categoria, nome, descrizione; un clic apre il modulo.</summary>
+    private Border TemplateTile(ConnectorTemplate template, int active)
+    {
+        var stack = new StackPanel();
+        var top = new Grid();
+        top.Children.Add(Label(template.Category.ToUpperInvariant(), 10, Theme.GreyBrush));
+        if (template.Permission is not null)
+        {
+            var tag = Label("PERMESSO", 10, Theme.GreyBrush);
+            tag.HorizontalAlignment = HorizontalAlignment.Right;
+            tag.ToolTip = template.Permission;
+            top.Children.Add(tag);
+        }
+        stack.Children.Add(top);
+        var name = Label(template.Name, 15, Theme.WhiteBrush);
+        name.FontWeight = FontWeights.SemiBold;
+        name.Margin = new Thickness(0, 6, 0, 4);
+        stack.Children.Add(name);
+        var description = Label(template.Description, 12, Theme.GreyBrush);
+        description.TextWrapping = TextWrapping.Wrap;
+        description.Height = 34;
+        stack.Children.Add(description);
+        var footer = Label(active > 0 ? $"+ AGGIUNGI ANCORA · {active} ATTIVO" : "+ AGGIUNGI", 11, active > 0 ? Theme.GreyBrush : Theme.RedBrush);
+        footer.Margin = new Thickness(0, 10, 0, 0);
+        stack.Children.Add(footer);
+
+        var tile = new Border
+        {
+            Background = Theme.SurfaceBrush,
+            BorderBrush = Theme.OutlineBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(16, 14, 16, 14),
+            Margin = new Thickness(0, 0, 10, 10),
+            Cursor = Cursors.Hand,
+            Child = stack,
+        };
+        tile.MouseEnter += (_, _) => tile.BorderBrush = Theme.GreyBrush;
+        tile.MouseLeave += (_, _) => tile.BorderBrush = Theme.OutlineBrush;
+        tile.MouseLeftButtonDown += (_, e) => e.Handled = true;
+        tile.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            ShowConnectorTemplate(template.Id);
+        };
+        return tile;
+    }
+
+    /// <summary>Modulo di un connettore della libreria: nome, i pochi campi che servono, permesso e Attiva.</summary>
+    private void ConnectorForm(ConnectorTemplate template)
+    {
+        var back = Label("‹  LIBRERIA", 11, Theme.GreyBrush);
+        back.Cursor = Cursors.Hand;
+        back.Margin = new Thickness(0, 0, 0, 14);
+        back.MouseLeftButtonDown += (_, e) => e.Handled = true;
+        back.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            _draft = null;
+            Rebuild();
+        };
+        _page.Children.Add(back);
+
+        Section(template.Category.ToUpperInvariant());
+        CardTitle(template.Name, null, Theme.GreyBrush);
+        Note(template.Description, Theme.GreyBrush);
+        var name = Field("Nome nella pagina Dispositivi", template.Name);
+        var inputs = new List<(ConnectorField Field, Func<string> Read)>();
+        foreach (var field in template.Fields)
+        {
+            var caption = field.Label + (field.Optional ? "  ·  facoltativo" : string.Empty) +
+                          (field.Hint is { } hint ? $"  ·  es. {hint}" : string.Empty) +
+                          (field.Kind == FieldKind.List ? "  ·  separati da virgole" : string.Empty);
+            if (field.Kind == FieldKind.Secret)
+            {
+                var box = new PasswordBox();
+                AddField(caption + "  ·  va nel Gestore credenziali", box);
+                inputs.Add((field, () => box.Password));
+            }
+            else
+            {
+                var box = Field(caption, field.Default ?? string.Empty);
+                inputs.Add((field, () => box.Text));
+            }
+        }
+
+        var grant = template.Permission is not null;
+        if (template.Permission is { } permission)
+        {
+            Section("PERMESSO");
+            ToggleRow("Consenti comandi e azioni", permission, grant, v => grant = v);
+            Note("Il permesso vale per il connettore com'è adesso: se il file cambia va dato di nuovo. I pulsanti delicati " +
+                 "(riavvia, termina) chiedono un secondo clic.", Theme.GreyBrush);
+        }
+
+        Section("ATTIVA");
+        Note("Il connettore compare nella pagina Dispositivi del notch; i valori arrivano al primo aggiornamento.", Theme.GreyBrush);
+        var result = Note(string.Empty, Theme.RedBrush);
+        result.Visibility = Visibility.Collapsed;
+        ButtonRow(primary: true,
+            ("ATTIVA", () =>
+            {
+                var values = inputs.ToDictionary(i => i.Field.Key, i => i.Read(), StringComparer.Ordinal);
+                if (_shell.AddConnector(template, name.Text, values, grant) is { } error)
+                {
+                    result.Text = error;
+                    result.Visibility = Visibility.Visible;
+                    return;
+                }
+                _draft = null;
+                Rebuild();
+                _scroll.ScrollToTop();
+            }),
+            ("ANNULLA", () =>
+            {
+                _draft = null;
+                Rebuild();
+            }));
+    }
+
+    private void AccessPage()
+    {
+        Section("ANIMAZIONI");
         ToggleRow("Animazioni di blocco e sblocco", "Card con il tuo account prima e dopo il blocco di Windows",
             _shell.AccessAnimations, v => _shell.AccessAnimations = v);
-        Note("Password, PIN e Windows Hello restano a Windows: Nothing Shell anima solo il prima e il dopo.", Theme.GreyBrush);
+        Note("Password, PIN e Windows Hello restano a Windows: Nothing Shell anima solo il prima e il dopo. " +
+             "Blocca dal launcher o con NothingShell.exe --lock.", Theme.GreyBrush);
+    }
 
-        Section("WIDGET");
+    private void WidgetsPage()
+    {
+        Section("SUL DESKTOP");
         foreach (var (id, name) in _shell.Widgets)
             ToggleRow(name, null, _shell.IsWidgetEnabled(id), v => _shell.SetWidgetEnabled(id, v));
+
+        Section("DISPOSIZIONE");
         ToggleRow("Blocca posizione", "I widget non si trascinano", _shell.WidgetsLocked, v => _shell.WidgetsLocked = v);
         ButtonRow(("RIPRISTINA DISPOSIZIONE", _shell.ResetWidgetLayout));
+    }
 
-        Section("PLUGIN");
-        var valid = _shell.PluginResults.Count(r => r.Manifest is not null);
-        Note(valid == 0 ? "Nessun plugin installato." : $"{valid} plugin attivi.", Theme.GreyBrush);
+    private void PluginsPage()
+    {
+        Section("INSTALLATI");
+        var valid = _shell.PluginResults.Where(r => r.Manifest is not null).ToArray();
+        if (valid.Length == 0)
+            Note("Nessun plugin installato.", Theme.GreyBrush);
+        foreach (var plugin in valid)
+            ToggleRow(plugin.Manifest!.Name, plugin.FolderName, _shell.IsWidgetEnabled(plugin.Manifest.WidgetId),
+                v => _shell.SetWidgetEnabled(plugin.Manifest.WidgetId, v));
         foreach (var bad in _shell.PluginResults.Where(r => r.Error is not null))
             Note($"{bad.FolderName}: {bad.Error}", Theme.RedBrush);
+
+        Section("CARTELLA");
+        Note("Un plugin è una cartella con plugin.json: i dati arrivano da una URL JSON o da un comando che stampa JSON " +
+             "(formato in docs/07-settings-plugins.md).", Theme.GreyBrush);
         ButtonRow(
             ("APRI CARTELLA", () => OpenFolder(_shell.PluginFolder)),
             ("RICARICA", () =>
@@ -226,119 +670,27 @@ public sealed class SettingsWindow : Window
                 _shell.ReloadPlugins();
                 Rebuild();
             }));
+    }
 
-        Section("INFO");
-        Note($"Nothing Shell {typeof(SettingsWindow).Assembly.GetName().Version?.ToString(2)}", Theme.GreyBrush);
-        Note($"Dati: {_shell.DataFolder}", Theme.GreyBrush);
+    private void InfoPage()
+    {
+        Section("VERSIONE");
+        CardTitle($"Nothing Shell {typeof(SettingsWindow).Assembly.GetName().Version?.ToString(2)}", null, Theme.GreyBrush);
+        Note("Strato grafico in stile Nothing OS sopra Windows 11. Non sostituisce explorer.exe.", Theme.GreyBrush);
+
+        Section("DATI");
+        Note(_shell.DataFolder, Theme.WhiteBrush);
+        Note("Impostazioni, posizioni dei widget, plugin e connettori. Password e token sono nel Gestore credenziali di Windows.", Theme.GreyBrush);
         ButtonRow(("APRI CARTELLA DEI DATI", () => OpenFolder(_shell.DataFolder)));
     }
 
-    /// <summary>Lavoro nel notch, appunti intelligenti e server locali (docs/12-sviluppo.md).</summary>
-    private void DevSection()
+    /// <summary>Collegamento al telefono di Windows e collegamento diretto (docs/13-telefono.md).</summary>
+    private void PhonePage()
     {
-        Section("SVILUPPO");
-        ActivityRow(LiveActivity.Tasks, "Comandi e build", "Tempo nella pillola, scheda alla fine con il primo errore, pagina Lavoro");
-        ActivityRow(LiveActivity.Ci, "CI di GitHub dopo il push", "Con GitHub CLI (gh): esito delle Actions e Rilancia");
-        ActivityRow(LiveActivity.Clipboard, "Cronologia degli appunti", "Pagina Appunti: ultime copie con Formatta, Apri, Copia HEX… (solo in memoria)");
-        ActivityRow(LiveActivity.ClipboardHints, "Avviso alla copia", "JSON, errori, colori e timestamp appena copiati");
-        ActivityRow(LiveActivity.ClipboardSecrets, "Proteggi chiavi e token", "Chiavi API, JWT e password copiati spariscono dagli appunti dopo 30 s");
-        ActivityRow(LiveActivity.Servers, "Server locali", "Porte in ascolto: avviso, Apri nel browser, Termina");
-        var module = System.IO.Path.Combine(AppContext.BaseDirectory, "tools", "NothingShell.psm1");
-        var profileLine = $"Import-Module '{module}'; Enable-NothingShellPrompt";
-        Note("Nel terminale: ns seguito dal comando (ns dotnet build, ns npm test) manda inizio e fine al notch. " +
-             "Con l'hook del prompt arrivano anche i comandi lunghi (30 s o più) e i git push. Aggiungi al profilo " +
-             "di PowerShell ($PROFILE):", Theme.GreyBrush);
-        Note(profileLine, Theme.WhiteBrush);
-        Note("Altre shell: NothingShell.exe --task '{\"event\":\"done\",\"title\":\"make\",\"seconds\":40,\"exitCode\":0}'. " +
-             "Editor per gli errori: \"editor\" in settings.json, altrimenti VS Code o Cursor dal PATH.", Theme.GreyBrush);
-        ButtonRow(("COPIA RIGA DEL PROFILO", () => Clipboard.SetDataObject(profileLine, copy: true)));
-    }
+        Section("COLLEGAMENTO AL TELEFONO");
+        ActivityRow(LiveActivity.Phone, "Chiamate e notifiche", "Da Collegamento al telefono di Windows (serve l'accesso alle notifiche)");
 
-    /// <summary>Agenti al lavoro: Claude Code da solo, gli altri dalla pipe (docs/14-agenti-connettori.md).</summary>
-    private void AgentsSection()
-    {
-        Section("AGENTI");
-        ActivityRow(LiveActivity.Agents, "Agenti al lavoro",
-            "Token e costo dal vivo, scheda quando l'agente ha finito");
-        Note("Claude Code compare da solo (legge solo token, modello e stato dai transcript in ~/.claude/projects). Il costo è " +
-             "quello del listino dell'API: con un abbonamento è una stima, non quanto paghi. Altri agenti mandano i loro totali con " +
-             "NothingShell.exe --task '{\"event\":\"agent\",\"id\":\"mio-agente\",\"title\":\"Report\",\"model\":\"claude-sonnet-5-5\"," +
-             "\"input\":12000,\"output\":800,\"state\":\"working\"}' e \"state\":\"done\" alla fine.", Theme.GreyBrush);
-    }
-
-    /// <summary>
-    /// Connettori: elenco con lo stato, il token nel Gestore credenziali e il permesso per comandi e azioni. Il permesso
-    /// vale per il file com'è adesso: se cambia, va dato di nuovo.
-    /// </summary>
-    private void ConnectorsSection()
-    {
-        Section("CONNETTORI");
-        ActivityRow(LiveActivity.Connectors, "Dispositivi e sistemi",
-            "Pagina Dispositivi e avvisi quando un valore supera la soglia");
-        Note("Un file .json per connettore nella cartella dei connettori. Leggere non cambia nulla; i connettori che eseguono " +
-             "comandi o hanno azioni (accendi, riavvia, pubblica) partono solo col tuo permesso qui sotto.", Theme.GreyBrush);
-        foreach (var result in _shell.ConnectorResults)
-        {
-            if (result.Manifest is not { } m)
-            {
-                Note($"{result.FileName}: {result.Error}", Theme.RedBrush);
-                continue;
-            }
-            var kind = m.Kind switch
-            {
-                Core.Connectors.ConnectorKind.HomeAssistant => "Home Assistant",
-                Core.Connectors.ConnectorKind.Prometheus => "Prometheus",
-                Core.Connectors.ConnectorKind.Mqtt => "MQTT",
-                Core.Connectors.ConnectorKind.Ping => "ping",
-                Core.Connectors.ConnectorKind.Command => "comando",
-                Core.Connectors.ConnectorKind.File => "file",
-                _ => "http",
-            };
-            var values = m.Readings.Count switch { 0 => null, 1 => "1 valore", var n => $"{n} valori" };
-            var detail = string.Join(" · ", new[] { kind, values, m.Actions.Count > 0 ? $"azioni: {string.Join(", ", m.Actions.Select(a => a.Label))}" : null }
-                .Where(p => p is not null));
-            if (m.NeedsGrant)
-            {
-                var what = m.Kind == Core.Connectors.ConnectorKind.Command
-                    ? $"Esegue {m.Command} {string.Join(' ', m.Arguments)}"
-                    : "Può cambiare lo stato del dispositivo";
-                ToggleRow($"{m.Name}: consenti comandi e azioni", $"{detail}\n{what}", _shell.IsConnectorGranted(m), v =>
-                {
-                    _shell.SetConnectorGranted(m, v);
-                    Rebuild();
-                });
-            }
-            else
-            {
-                Note($"{m.Name} — {detail}", Theme.WhiteBrush);
-            }
-            if (m.Secret)
-            {
-                var label = m.Kind == Core.Connectors.ConnectorKind.Mqtt ? "Password del broker" : "Token";
-                var box = new PasswordBox();
-                AddField($"{label} di {m.Name} ({(_shell.HasConnectorSecret(m) ? "salvato nel Gestore credenziali" : "manca")})", box);
-                ButtonRow(("SALVA", () =>
-                {
-                    _shell.SetConnectorSecret(m, box.Password);
-                    Rebuild();
-                }));
-            }
-        }
-        ButtonRow(
-            ("APRI CARTELLA", () => OpenFolder(_shell.ConnectorFolder)),
-            ("COPIA GLI ESEMPI", _shell.CopyConnectorExamples),
-            ("RICARICA", () =>
-            {
-                _shell.ReloadConnectors();
-                Rebuild();
-            }));
-    }
-
-    /// <summary>Prossimo appuntamento e riepilogo del mattino, con i calendari da cui leggere gli appuntamenti.</summary>
-    /// <summary>Collegamento diretto col telefono (docs/13-telefono.md): stato, telefoni in rete e associazione.</summary>
-    private void PhoneSection()
-    {
-        Section("TELEFONO");
+        Section("COLLEGAMENTO DIRETTO");
         ToggleRow("Collegamento diretto (KDE Connect)",
             "Batteria, notifiche, chiamate, appunti, file e Trova il telefono, sulla rete di casa",
             _shell.PhoneDirect, v =>
@@ -354,6 +706,10 @@ public sealed class SettingsWindow : Window
         Note("Sul telefono installa KDE Connect (Play Store o F-Droid), sulla stessa rete Wi-Fi del PC; il telefono " +
              "compare qui sotto. Windows deve consentire le porte 1714–1764 sulle reti private.", Theme.GreyBrush);
         _phoneStatus = Note(_shell.Phone.Status, Theme.GreyBrush);
+
+        Section("TELEFONI");
+        if (_shell.Phone.Devices.Count == 0)
+            Note("Nessun telefono in rete per ora.", Theme.GreyBrush);
         foreach (var device in _shell.Phone.Devices)
         {
             var detail = device switch
@@ -373,7 +729,7 @@ public sealed class SettingsWindow : Window
                 { Paired: true } => [("DISSOCIA", () => _shell.Phone.Unpair(id))],
                 _ => [("ASSOCIA", () => _shell.Phone.RequestPair(id))],
             };
-            ToggleFreeRow(device.Name, detail, actions);
+            ActionRow(device.Name, detail, actions);
         }
         var address = Field("Indirizzo IP del telefono (se non compare da solo)", "");
         ButtonRow(
@@ -381,45 +737,21 @@ public sealed class SettingsWindow : Window
             ("CONSENTI NEL FIREWALL", _shell.Phone.AllowFirewall));
     }
 
-    /// <summary>Riga con titolo, dettaglio e pulsanti di testo a destra (telefoni).</summary>
-    private void ToggleFreeRow(string title, string detail, (string Text, Action Click)[] actions)
-    {
-        var row = new Grid { Margin = new Thickness(0, 6, 0, 6) };
-        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 150, 0) };
-        text.Children.Add(Label(title, 14, Theme.WhiteBrush));
-        var d = Label(detail, 11, Theme.GreyBrush);
-        d.Margin = new Thickness(0, 2, 0, 0);
-        text.Children.Add(d);
-        row.Children.Add(text);
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-        foreach (var (label, click) in actions)
-        {
-            var button = Label(label, 11, Theme.RedBrush);
-            button.Margin = new Thickness(12, 0, 0, 0);
-            button.Cursor = Cursors.Hand;
-            button.MouseLeftButtonUp += (_, e) =>
-            {
-                e.Handled = true;
-                click();
-            };
-            buttons.Children.Add(button);
-        }
-        row.Children.Add(buttons);
-        _sections.Children.Add(row);
-    }
-
-    /// <summary>Il telefono cambia stato da solo (collegato, batteria, associazione): si ridisegna la sezione.</summary>
+    /// <summary>Il telefono cambia stato da solo (collegato, batteria, associazione): si ridisegna la pagina.</summary>
     private void OnPhoneChanged()
     {
         if (_phoneStatus is not null && IsVisible)
             Rebuild();
     }
 
-    private void AgendaSection()
+    /// <summary>Prossimo appuntamento e riepilogo del mattino, con i calendari da cui leggere gli appuntamenti.</summary>
+    private void AgendaPage()
     {
-        Section("AGENDA");
+        Section("NEL NOTCH");
         ActivityRow(LiveActivity.Agenda, "Prossimo appuntamento", "Sotto l'ora, nella pagina Agenda e 10 minuti prima, con Partecipa");
         ActivityRow(LiveActivity.MorningBrief, "Riepilogo del mattino", "Al primo accesso della giornata: appuntamenti e mail da leggere");
+
+        Section("CALENDARI");
         Note("Nothing Shell legge il calendario di Windows (se Windows lo consente alle app desktop) e i link iCal " +
              "(.ics) che aggiungi qui. Outlook: Impostazioni › Calendario › Calendari condivisi › Pubblica un " +
              "calendario, link ICS. Google Calendar: impostazioni del calendario › Indirizzo segreto in formato iCal. " +
@@ -427,27 +759,11 @@ public sealed class SettingsWindow : Window
 
         var feeds = _shell.CalendarFeeds;
         foreach (var feed in feeds)
-        {
-            var row = new Grid { Margin = new Thickness(0, 6, 0, 0) };
-            var label = Label(feed, 12, Theme.WhiteBrush);
-            label.TextTrimming = TextTrimming.CharacterEllipsis;
-            label.VerticalAlignment = VerticalAlignment.Center;
-            label.Margin = new Thickness(0, 0, 90, 0);
-            label.ToolTip = feed;
-            row.Children.Add(label);
-            var remove = Label("RIMUOVI", 11, Theme.RedBrush);
-            remove.HorizontalAlignment = HorizontalAlignment.Right;
-            remove.VerticalAlignment = VerticalAlignment.Center;
-            remove.Cursor = Cursors.Hand;
-            remove.MouseLeftButtonUp += (_, e) =>
+            ActionRow(feed, null, [("RIMUOVI", () =>
             {
-                e.Handled = true;
                 _shell.SetCalendarFeeds(feeds.Where(f => f != feed).ToArray());
                 Rebuild();
-            };
-            row.Children.Add(remove);
-            _sections.Children.Add(row);
-        }
+            })]);
 
         var link = Field("Aggiungi un link iCal (https:// o webcal://)", "");
         var result = Note(string.Empty, Theme.RedBrush);
@@ -478,9 +794,9 @@ public sealed class SettingsWindow : Window
     /// Come collegare la posta al notch (docs/08-notch-mail-pages.md). Due strade: la casella collegata
     /// direttamente (IMAP, consigliata) oppure le notifiche che un'app di posta mostra in Windows.
     /// </summary>
-    private void MailSection()
+    private void MailPage()
     {
-        Section("POSTA NEL NOTCH");
+        Section("NEL NOTCH");
         ToggleRow("Mail nel notch", "Busta e oggetto per qualche secondo, elenco nella pagina Posta",
             _shell.MailInNotch, v =>
             {
@@ -490,7 +806,7 @@ public sealed class SettingsWindow : Window
         if (!_shell.MailInNotch)
             return;
 
-        Heading("Collega la tua casella", "consigliato");
+        Section("CASELLA COLLEGATA", "consigliato");
         Note("Nothing Shell si collega direttamente alla casella (IMAP) e avvisa appena arriva una mail, senza " +
              "altre app aperte. Un clic su una mail nel notch la apre nel lettore di Nothing: la mail resta non " +
              "letta finché non premi Segna come letta, l'unica modifica che Nothing Shell fa alla casella. " +
@@ -518,7 +834,7 @@ public sealed class SettingsWindow : Window
         else
             MailAccountForm();
 
-        Heading("Oppure: le notifiche di un'app di posta", null);
+        Section("OPPURE: NOTIFICHE DI UN'APP DI POSTA");
         Note("Per Gmail, Outlook.com o un programma di posta già configurato sul PC: Nothing Shell legge le " +
              "notifiche che mostrano in Windows. Le webmail aziendali (Exchange) di solito non ne mandano: per " +
              "quelle usa la casella collegata qui sopra.", Theme.GreyBrush);
@@ -556,7 +872,7 @@ public sealed class SettingsWindow : Window
         }
 
         var last = _shell.LastMail;
-        Heading("Verifica", null);
+        Section("VERIFICA");
         Note(last is null
                 ? "Nessuna mail rilevata finora."
                 : $"Ultima mail rilevata alle {last.Received.ToLocalTime():HH:mm} da {last.App}: «{last.Subject}»",
@@ -583,7 +899,7 @@ public sealed class SettingsWindow : Window
 
         var result = Note(string.Empty, Theme.GreyBrush);
         var busy = false;
-        ButtonRow(("COLLEGA", async () =>
+        ButtonRow(primary: true, ("COLLEGA", async () =>
         {
             if (busy)
                 return;
@@ -607,63 +923,6 @@ public sealed class SettingsWindow : Window
         }));
     }
 
-    private TextBox Field(string label, string text)
-    {
-        var box = new TextBox { Text = text };
-        AddField(label, box);
-        return box;
-    }
-
-    /// <summary>Campo in stile Nothing: etichetta grigia, riquadro scuro con bordo Outline e angoli arrotondati.</summary>
-    private void AddField(string label, Control input)
-    {
-        var caption = Label(label, 11, Theme.GreyBrush);
-        caption.TextWrapping = TextWrapping.Wrap;
-        caption.Margin = new Thickness(0, 10, 0, 4);
-        _sections.Children.Add(caption);
-
-        input.Background = Brushes.Transparent;
-        input.BorderThickness = new Thickness(0);
-        input.Foreground = Theme.WhiteBrush;
-        input.FontFamily = Theme.BodyFont;
-        input.FontSize = 13;
-        input.VerticalContentAlignment = VerticalAlignment.Center;
-        switch (input)
-        {
-            case TextBox t:
-                t.CaretBrush = Theme.WhiteBrush;
-                break;
-            case PasswordBox p:
-                p.CaretBrush = Theme.WhiteBrush;
-                break;
-        }
-        _sections.Children.Add(new Border
-        {
-            Background = Theme.SurfaceBrush,
-            BorderBrush = Theme.OutlineBrush,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(10, 6, 10, 6),
-            Child = input,
-        });
-    }
-
-    private void Heading(string title, string? tag)
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 18, 0, 4) };
-        var label = Label(title, 14, Theme.WhiteBrush);
-        label.FontWeight = FontWeights.SemiBold;
-        row.Children.Add(label);
-        if (tag is not null)
-        {
-            var badge = Label(tag.ToUpperInvariant(), 10, Theme.RedBrush);
-            badge.VerticalAlignment = VerticalAlignment.Center;
-            badge.Margin = new Thickness(10, 1, 0, 0);
-            row.Children.Add(badge);
-        }
-        _sections.Children.Add(row);
-    }
-
     private void OnMailAccountChanged()
     {
         if (_mailStatus is null)
@@ -672,43 +931,54 @@ public sealed class SettingsWindow : Window
         _mailStatus.Foreground = _shell.MailAccountConnected ? Theme.WhiteBrush : Theme.RedBrush;
     }
 
-    /// <summary>Passo numerato: numero a punti rosso finché c'è da fare, grigio quando è a posto.</summary>
-    private void Step(int number, string title, bool? done)
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 14, 0, 4) };
-        row.Children.Add(new DotMatrixView
-        {
-            Pitch = 2,
-            Dots = DotText.Render(number.ToString("00", System.Globalization.CultureInfo.InvariantCulture)),
-            DotColor = done == true ? Theme.Grey : Theme.Red,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 10, 0),
-        });
-        var label = Label(done == true ? $"{title}  ·  fatto" : title, 14, Theme.WhiteBrush);
-        label.VerticalAlignment = VerticalAlignment.Center;
-        row.Children.Add(label);
-        _sections.Children.Add(row);
-    }
+    // ── Struttura della finestra ────────────────────────────────────────────────
 
     private Border BuildVisualTree()
     {
-        var header = new Grid { Margin = new Thickness(0, 0, 0, 18), Background = Brushes.Transparent };
-        header.Children.Add(new DotMatrixView
+        var sidebar = new DockPanel { Background = Brushes.Transparent };
+        var brand = new StackPanel { Margin = new Thickness(10, 4, 0, 26) };
+        brand.Children.Add(new DotMatrixView { Pitch = 2, Dots = DotText.Render("NOTHING"), DotColor = Theme.Red, HorizontalAlignment = HorizontalAlignment.Left });
+        var shell = Label("SHELL · IMPOSTAZIONI", 10, Theme.GreyBrush);
+        shell.Margin = new Thickness(0, 8, 0, 0);
+        brand.Children.Add(shell);
+        DockPanel.SetDock(brand, Dock.Top);
+        sidebar.Children.Add(brand);
+        var version = Label($"v{typeof(SettingsWindow).Assembly.GetName().Version?.ToString(2)}", 10, Theme.GreyBrush);
+        version.Margin = new Thickness(12, 12, 0, 0);
+        DockPanel.SetDock(version, Dock.Bottom);
+        sidebar.Children.Add(version);
+        sidebar.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Hidden, Content = _nav });
+        sidebar.MouseLeftButtonDown += DragWindow;
+
+        var sidebarBorder = new Border
         {
-            Pitch = 3,
-            Dots = DotText.Render("IMPOSTAZIONI"),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Center,
-        });
+            Width = SidebarWidth,
+            Background = Theme.SurfaceBrush,
+            BorderBrush = Theme.OutlineBrush,
+            BorderThickness = new Thickness(0, 0, 1, 0),
+            CornerRadius = new CornerRadius(27, 0, 0, 27),
+            Padding = new Thickness(14, 24, 14, 18),
+            Child = sidebar,
+        };
+
+        var header = new Grid { Margin = new Thickness(0, 0, 0, 22), Background = Brushes.Transparent };
+        var titles = new StackPanel();
+        titles.Children.Add(_pageTitle);
+        _pageSubtitle.Margin = new Thickness(0, 10, 0, 0);
+        titles.Children.Add(_pageSubtitle);
+        header.Children.Add(titles);
         var close = new Border
         {
-            Width = 32,
-            Height = 32,
-            CornerRadius = new CornerRadius(16),
+            Width = 34,
+            Height = 34,
+            CornerRadius = new CornerRadius(17),
             Background = Brushes.Transparent,
+            BorderBrush = Theme.OutlineBrush,
+            BorderThickness = new Thickness(1),
             HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
             Cursor = Cursors.Hand,
-            ToolTip = "Chiudi",
+            ToolTip = "Chiudi (Esc)",
             Child = new DotMatrixView
             {
                 Pitch = 2,
@@ -728,21 +998,20 @@ public sealed class SettingsWindow : Window
             Close();
         };
         header.Children.Add(close);
-        header.MouseLeftButtonDown += (_, e) =>
-        {
-            if (e.ButtonState == MouseButtonState.Pressed)
-                DragMove();
-        };
+        header.MouseLeftButtonDown += DragWindow;
 
-        var scroll = new ScrollViewer
-        {
-            VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
-            Content = _sections,
-        };
-        var dock = new DockPanel();
+        _scroll.Content = _page;
+        var content = new DockPanel { Margin = new Thickness(36, 28, 32, 0) };
         DockPanel.SetDock(header, Dock.Top);
-        dock.Children.Add(header);
-        dock.Children.Add(scroll);
+        content.Children.Add(header);
+        content.Children.Add(_scroll);
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.Children.Add(sidebarBorder);
+        Grid.SetColumn(content, 1);
+        grid.Children.Add(content);
 
         return new Border
         {
@@ -750,16 +1019,144 @@ public sealed class SettingsWindow : Window
             BorderBrush = Theme.OutlineBrush,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(28),
-            Padding = new Thickness(24, 20, 24, 20),
-            Child = dock,
+            Child = grid,
         };
     }
 
-    private void Section(string title)
+    private void DragWindow(object sender, MouseButtonEventArgs e)
     {
-        var label = Label(title, 11, Theme.GreyBrush);
-        label.Margin = new Thickness(0, _sections.Children.Count == 0 ? 0 : 22, 0, 8);
-        _sections.Children.Add(label);
+        if (e.ButtonState == MouseButtonState.Pressed)
+            DragMove();
+    }
+
+    /// <summary>Voci del menù: la pagina aperta su fondo chiaro con il punto rosso; un numero dove serve.</summary>
+    private void BuildNav()
+    {
+        _nav.Children.Clear();
+        foreach (var (page, title, _) in Pages)
+        {
+            var selected = page == _selected;
+            var row = new Grid();
+            var dot = new Ellipse { Width = 6, Height = 6, Fill = selected ? Theme.RedBrush : Brushes.Transparent, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
+            row.Children.Add(dot);
+            var label = Label(title, 13, selected ? Theme.WhiteBrush : Theme.GreyBrush);
+            label.Margin = new Thickness(16, 0, 0, 0);
+            label.VerticalAlignment = VerticalAlignment.Center;
+            if (selected)
+                label.FontWeight = FontWeights.SemiBold;
+            row.Children.Add(label);
+            var count = page switch
+            {
+                SettingsPage.Connectors => _shell.ConnectorResults.Count,
+                SettingsPage.Plugins => _shell.PluginResults.Count(r => r.Manifest is not null),
+                _ => 0,
+            };
+            if (count > 0)
+            {
+                var badge = Label(count.ToString(System.Globalization.CultureInfo.InvariantCulture), 11, Theme.GreyBrush);
+                badge.HorizontalAlignment = HorizontalAlignment.Right;
+                badge.VerticalAlignment = VerticalAlignment.Center;
+                row.Children.Add(badge);
+            }
+            var item = new Border
+            {
+                Height = 38,
+                CornerRadius = new CornerRadius(12),
+                Padding = new Thickness(12, 0, 12, 0),
+                Margin = new Thickness(0, 0, 0, 2),
+                Background = selected ? Theme.OutlineBrush : Brushes.Transparent,
+                Cursor = Cursors.Hand,
+                Child = row,
+            };
+            if (!selected)
+            {
+                item.MouseEnter += (_, _) => label.Foreground = Theme.WhiteBrush;
+                item.MouseLeave += (_, _) => label.Foreground = Theme.GreyBrush;
+            }
+            item.MouseLeftButtonDown += (_, e) => e.Handled = true;
+            item.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                Show(page);
+            };
+            _nav.Children.Add(item);
+        }
+    }
+
+    // ── Mattoni delle pagine ────────────────────────────────────────────────────
+
+    /// <summary>Titolo grigio e una nuova scheda: le righe che seguono finiscono dentro.</summary>
+    private void Section(string title, string? tag = null)
+    {
+        Heading(title, tag);
+        _current = NewCard();
+    }
+
+    /// <summary>Titolo grigio fuori dalle schede (le righe successive vanno sulla pagina).</summary>
+    private void Heading(string title, string? tag = null)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, _page.Children.Count == 0 ? 0 : 26, 0, 10) };
+        row.Children.Add(Label(title, 11, Theme.GreyBrush));
+        if (tag is not null)
+        {
+            var badge = Label(tag.ToUpperInvariant(), 10, Theme.RedBrush);
+            badge.VerticalAlignment = VerticalAlignment.Center;
+            badge.Margin = new Thickness(10, 0, 0, 0);
+            row.Children.Add(badge);
+        }
+        _page.Children.Add(row);
+        _current = _page;
+    }
+
+    /// <summary>Scheda a sé (un connettore): il contenuto si costruisce dentro, poi si torna alla pagina.</summary>
+    private void Card(Action build)
+    {
+        _current = NewCard();
+        build();
+        _current = _page;
+    }
+
+    private StackPanel NewCard()
+    {
+        var stack = new StackPanel();
+        _page.Children.Add(new Border
+        {
+            Background = Theme.SurfaceBrush,
+            BorderBrush = Theme.OutlineBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(20),
+            Padding = new Thickness(20, 12, 20, 14),
+            Margin = new Thickness(0, 0, 0, 10),
+            Child = stack,
+        });
+        return stack;
+    }
+
+    /// <summary>Riga di una scheda; tra due righe di fila una linea sottile.</summary>
+    private void AddRow(FrameworkElement row)
+    {
+        if (_current.Children.Count > 0 && _current.Children[^1] is FrameworkElement { Tag: RowTag })
+            _current.Children.Add(new Border { Height = 1, Background = Theme.OutlineBrush, Margin = new Thickness(0, 2, 0, 2) });
+        row.Tag = RowTag;
+        _current.Children.Add(row);
+    }
+
+    private void CardTitle(string text, string? tag, Brush tagBrush)
+    {
+        var row = new Grid { Margin = new Thickness(0, 4, 0, 4) };
+        var label = Label(text, 16, Theme.WhiteBrush);
+        label.FontWeight = FontWeights.SemiBold;
+        label.Margin = new Thickness(0, 0, 110, 0);
+        label.TextTrimming = TextTrimming.CharacterEllipsis;
+        row.Children.Add(label);
+        if (tag is not null)
+        {
+            var badge = Label(tag, 10, tagBrush);
+            badge.HorizontalAlignment = HorizontalAlignment.Right;
+            badge.VerticalAlignment = VerticalAlignment.Center;
+            row.Children.Add(badge);
+        }
+        _current.Children.Add(row);
     }
 
     private void ActivityRow(LiveActivity activity, string title, string description) =>
@@ -767,47 +1164,137 @@ public sealed class SettingsWindow : Window
 
     private void ToggleRow(string title, string? description, bool isOn, Action<bool> changed)
     {
-        var row = new Grid { Margin = new Thickness(0, 6, 0, 6) };
-        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 60, 0) };
+        var row = new Grid { Margin = new Thickness(0, 8, 0, 8) };
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 64, 0) };
         text.Children.Add(Label(title, 14, Theme.WhiteBrush));
         if (description is not null)
         {
-            var d = Label(description, 11, Theme.GreyBrush);
-            d.Margin = new Thickness(0, 2, 0, 0);
+            var d = Label(description, 12, Theme.GreyBrush);
+            d.Margin = new Thickness(0, 3, 0, 0);
+            d.TextWrapping = TextWrapping.Wrap;
             text.Children.Add(d);
         }
         var toggle = new DotToggle(isOn) { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         toggle.Toggled += changed;
         row.Children.Add(text);
         row.Children.Add(toggle);
-        _sections.Children.Add(row);
+        AddRow(row);
     }
 
-    private void ButtonRow(params (string Text, Action Click)[] buttons) =>
-        ButtonRow(buttons.Select(b => (b.Text, (Func<Task>)(() =>
+    /// <summary>Riga con titolo, dettaglio e pulsanti di testo rossi a destra (telefoni, calendari).</summary>
+    private void ActionRow(string title, string? detail, (string Text, Action Click)[] actions)
+    {
+        var row = new Grid { Margin = new Thickness(0, 8, 0, 8) };
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 150, 0) };
+        var t = Label(title, 14, Theme.WhiteBrush);
+        t.TextTrimming = TextTrimming.CharacterEllipsis;
+        t.ToolTip = title;
+        text.Children.Add(t);
+        if (detail is not null)
+        {
+            var d = Label(detail, 12, Theme.GreyBrush);
+            d.Margin = new Thickness(0, 3, 0, 0);
+            text.Children.Add(d);
+        }
+        row.Children.Add(text);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var (label, click) in actions)
+        {
+            var button = Label(label, 11, Theme.RedBrush);
+            button.Margin = new Thickness(14, 0, 0, 0);
+            button.Cursor = Cursors.Hand;
+            button.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                click();
+            };
+            buttons.Children.Add(button);
+        }
+        row.Children.Add(buttons);
+        AddRow(row);
+    }
+
+    /// <summary>Passo numerato: numero a punti rosso finché c'è da fare, grigio quando è a posto.</summary>
+    private void Step(int number, string title, bool? done)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 14, 0, 4) };
+        row.Children.Add(new DotMatrixView
+        {
+            Pitch = 2,
+            Dots = DotText.Render(number.ToString("00", System.Globalization.CultureInfo.InvariantCulture)),
+            DotColor = done == true ? Theme.Grey : Theme.Red,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 10, 0),
+        });
+        var label = Label(done == true ? $"{title}  ·  fatto" : title, 14, Theme.WhiteBrush);
+        label.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(label);
+        _current.Children.Add(row);
+    }
+
+    private TextBox Field(string label, string text)
+    {
+        var box = new TextBox { Text = text };
+        AddField(label, box);
+        return box;
+    }
+
+    /// <summary>Campo in stile Nothing: etichetta grigia, riquadro nero con bordo Outline e angoli arrotondati.</summary>
+    private void AddField(string label, Control input)
+    {
+        var caption = Label(label, 11, Theme.GreyBrush);
+        caption.TextWrapping = TextWrapping.Wrap;
+        caption.Margin = new Thickness(0, 12, 0, 5);
+        _current.Children.Add(caption);
+
+        input.Background = Brushes.Transparent;
+        input.BorderThickness = new Thickness(0);
+        input.Foreground = Theme.WhiteBrush;
+        input.FontFamily = Theme.BodyFont;
+        input.FontSize = 13;
+        input.VerticalContentAlignment = VerticalAlignment.Center;
+        switch (input)
+        {
+            case TextBox t:
+                t.CaretBrush = Theme.WhiteBrush;
+                break;
+            case PasswordBox p:
+                p.CaretBrush = Theme.WhiteBrush;
+                break;
+        }
+        var frame = new Border
+        {
+            Background = Theme.BlackBrush,
+            BorderBrush = Theme.OutlineBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(12, 8, 12, 8),
+            Child = input,
+        };
+        input.GotKeyboardFocus += (_, _) => frame.BorderBrush = Theme.GreyBrush;
+        input.LostKeyboardFocus += (_, _) => frame.BorderBrush = Theme.OutlineBrush;
+        _current.Children.Add(frame);
+    }
+
+    private void ButtonRow(params (string Text, Action Click)[] buttons) => ButtonRow(false, buttons);
+
+    /// <summary>Pulsanti a pillola; con <paramref name="primary"/> il primo è bianco pieno (l'azione del modulo).</summary>
+    private void ButtonRow(bool primary, params (string Text, Action Click)[] buttons) =>
+        ButtonRow(primary, buttons.Select(b => (b.Text, (Func<Task>)(() =>
         {
             b.Click();
             return Task.CompletedTask;
         }))).ToArray());
 
-    private void ButtonRow(params (string Text, Func<Task> Click)[] buttons)
+    private void ButtonRow(params (string Text, Func<Task> Click)[] buttons) => ButtonRow(false, buttons);
+
+    private void ButtonRow(bool primary, params (string Text, Func<Task> Click)[] buttons)
     {
-        var row = new WrapPanel { Margin = new Thickness(0, 8, 0, 4) };
-        foreach (var (text, click) in buttons)
+        var row = new WrapPanel { Margin = new Thickness(0, 12, 0, 4) };
+        for (var i = 0; i < buttons.Length; i++)
         {
-            var button = new Border
-            {
-                BorderBrush = Theme.GreyBrush,
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(16),
-                Padding = new Thickness(14, 7, 14, 7),
-                Margin = new Thickness(0, 0, 8, 0),
-                Background = Brushes.Transparent,
-                Cursor = Cursors.Hand,
-                Child = Label(text, 11, Theme.WhiteBrush),
-            };
-            button.MouseEnter += (_, _) => button.Background = Theme.SurfaceBrush;
-            button.MouseLeave += (_, _) => button.Background = Brushes.Transparent;
+            var (text, click) = buttons[i];
+            var button = Button(text, primary && i == 0);
             button.MouseLeftButtonUp += async (_, e) =>
             {
                 e.Handled = true;
@@ -815,17 +1302,118 @@ public sealed class SettingsWindow : Window
             };
             row.Children.Add(button);
         }
-        _sections.Children.Add(row);
+        _current.Children.Add(row);
     }
+
+    /// <summary>Pulsante che chiede un secondo clic entro 3 s (rimuovi): il testo diventa rosso con la conferma.</summary>
+    private void ConfirmButtonRow(string text, string confirmText, Action confirmed)
+    {
+        var row = new WrapPanel { Margin = new Thickness(0, 12, 0, 4) };
+        var button = Button(text, primary: false);
+        var label = (TextBlock)button.Child;
+        var armed = false;
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            armed = false;
+            label.Text = text;
+            label.Foreground = Theme.WhiteBrush;
+        };
+        button.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            if (armed)
+            {
+                timer.Stop();
+                confirmed();
+                return;
+            }
+            armed = true;
+            label.Text = confirmText;
+            label.Foreground = Theme.RedBrush;
+            timer.Start();
+        };
+        row.Children.Add(button);
+        _current.Children.Add(row);
+    }
+
+    private static Border Button(string text, bool primary)
+    {
+        var button = new Border
+        {
+            BorderBrush = primary ? Theme.WhiteBrush : Theme.GreyBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(17),
+            Padding = new Thickness(16, 8, 16, 8),
+            Margin = new Thickness(0, 0, 8, 0),
+            Background = primary ? Theme.WhiteBrush : Brushes.Transparent,
+            Cursor = Cursors.Hand,
+            Child = Label(text, 11, primary ? Theme.BlackBrush : Theme.WhiteBrush),
+        };
+        if (!primary)
+        {
+            button.MouseEnter += (_, _) => button.Background = Theme.OutlineBrush;
+            button.MouseLeave += (_, _) => button.Background = Brushes.Transparent;
+        }
+        return button;
+    }
+
+    /// <summary>Filtro a pillola della libreria: quello scelto è pieno.</summary>
+    private static Border Chip(string text, bool selected) => new()
+    {
+        BorderBrush = selected ? Theme.WhiteBrush : Theme.OutlineBrush,
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(14),
+        Padding = new Thickness(12, 6, 12, 6),
+        Margin = new Thickness(0, 0, 6, 6),
+        Background = selected ? Theme.WhiteBrush : Brushes.Transparent,
+        Cursor = Cursors.Hand,
+        Child = Label(text, 10, selected ? Theme.BlackBrush : Theme.GreyBrush),
+    };
 
     private TextBlock Note(string text, Brush brush)
     {
         var note = Label(text, 12, brush);
         note.TextWrapping = TextWrapping.Wrap;
-        note.Margin = new Thickness(0, 2, 0, 2);
-        _sections.Children.Add(note);
+        note.LineHeight = 18;
+        note.Margin = new Thickness(0, 3, 0, 3);
+        _current.Children.Add(note);
         return note;
     }
+
+    /// <summary>Riga da copiare (comandi): carattere a spaziatura fissa su fondo nero, selezionabile.</summary>
+    private void Code(string text)
+    {
+        _current.Children.Add(new Border
+        {
+            Background = Theme.BlackBrush,
+            BorderBrush = Theme.OutlineBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(12, 8, 12, 8),
+            Margin = new Thickness(0, 6, 0, 6),
+            Child = new TextBox
+            {
+                Text = text,
+                IsReadOnly = true,
+                TextWrapping = TextWrapping.Wrap,
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Foreground = Theme.WhiteBrush,
+                CaretBrush = Theme.WhiteBrush,
+                FontFamily = new FontFamily("Cascadia Mono, Consolas"),
+                FontSize = 12,
+            },
+        });
+    }
+
+    private static string FormatRefresh(TimeSpan refresh) => refresh.TotalSeconds switch
+    {
+        < 60 => $"{refresh.TotalSeconds:0} s",
+        < 3600 => $"{refresh.TotalMinutes:0} min",
+        _ => $"{refresh.TotalHours:0.#} h",
+    };
 
     private static void OpenFolder(string path)
     {

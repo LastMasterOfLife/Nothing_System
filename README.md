@@ -65,7 +65,9 @@ Dettagli in [docs/13-telefono.md](docs/13-telefono.md).
 uscita e il costo di ogni sessione (e di oggi), aggiornati a ogni risposta; quando l'agente ha finito arriva la scheda
 *HA FINITO*. Claude Code si legge da solo dai transcript (solo token, modello e stato); altri agenti mandano i loro totali
 con `NothingShell.exe --task '{"event":"agent",…}'`.
-**Connettori**: un file JSON per connettore in `%USERPROFILE%\.nothing-shell\connectors\` legge valori da Home Assistant,
+**Connettori**: una **libreria** di connettori pronti in Impostazioni › Connettori (disco, servizi e app di Windows, Docker,
+ping, siti, pagine di stato, Home Assistant, MQTT, Shelly, Tasmota, stampanti 3D, server via SSH, Prometheus, GitHub,
+Ollama, meteo, aria, cambi…) si attiva scrivendo pochi dati. Sotto, un file JSON per connettore in `%USERPROFILE%\.nothing-shell\connectors\` legge valori da Home Assistant,
 Prometheus, MQTT, ping, API http, file e comandi qualsiasi (PowerShell, ssh…), con soglie e avvisi nella pagina
 **Dispositivi**. Comandi e azioni (accendi, riavvia, pubblica) partono solo col permesso dato nelle impostazioni, legato
 al contenuto del file. Esempi in [connectors/](connectors/), dettagli in [docs/14-agenti-connettori.md](docs/14-agenti-connettori.md).
@@ -89,8 +91,8 @@ Windows è nel menu col tasto destro della barra, dove si può anche disattivare
 Uso e preferenze in `%USERPROFILE%\.nothing-shell\launcher.json`.
 
 Le impostazioni (tasto destro su barra, notch o widget → *Impostazioni…*, oppure "Impostazioni
-Nothing Shell" nel launcher) accendono e spengono subito notch, barra, tasto Win, singoli widget e
-l'avvio con Windows.
+Nothing Shell" nel launcher) hanno un menù laterale con una pagina per funzione (Generale, Notch, Telefono, Posta,
+Agenda, Sviluppo, Agenti, Connettori, Accesso, Widget, Plugin, Info) e applicano subito ogni modifica.
 
 **Plugin**: widget aggiuntivi descritti da una cartella con `plugin.json` in
 `%USERPROFILE%\.nothing-shell\plugins\`; i dati arrivano da una URL JSON o da un comando qualsiasi

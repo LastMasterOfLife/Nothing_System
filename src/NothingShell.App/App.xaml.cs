@@ -523,8 +523,15 @@ public partial class App : Application
         root.Width = settings.Width;
         root.Height = settings.Height;
         SaveSnapshot(root, Path.Combine(folder, "settings.png"));
-        root.Height = 2600; // tutte le sezioni, senza scorrimento
-        SaveSnapshot(root, Path.Combine(folder, "settings-full.png"));
+        root.Height = 2200; // tutta la pagina, senza scorrimento
+        foreach (var page in Enum.GetValues<SettingsPage>())
+        {
+            settings.Show(page);
+            SaveSnapshot(root, Path.Combine(folder, $"settings-{page.ToString().ToLowerInvariant()}.png"));
+        }
+        settings.ShowConnectorTemplate("homeassistant");
+        root.Height = settings.Height;
+        SaveSnapshot(root, Path.Combine(folder, "settings-connector-form.png"));
     }
 
     /// <summary>
@@ -806,7 +813,7 @@ public partial class App : Application
 
         public IReadOnlyList<ConnectorLoadResult> ConnectorResults { get; } =
         [
-            ConnectorParser.Parse("casa", """{"name":"Casa","type":"homeassistant","url":"http://homeassistant.local:8123","secret":true,"readings":[{"entity":"sensor.soggiorno"}],"actions":[{"label":"Luci off","service":"light.turn_off","data":{"entity_id":"all"}}]}"""),
+            ConnectorParser.Parse("casa", """{"name":"Casa","template":"homeassistant","type":"homeassistant","url":"http://homeassistant.local:8123","secret":true,"readings":[{"entity":"sensor.soggiorno"}],"actions":[{"label":"Luci off","service":"light.turn_off","data":{"entity_id":"all"}}]}"""),
             ConnectorParser.Parse("raspberry", """{"name":"Raspberry","type":"command","command":"ssh","args":["pi@raspberry","vcgencmd measure_temp"]}"""),
             ConnectorParser.Parse("router", """{"name":"Router","type":"ping","host":"192.168.1.1"}"""),
             new ConnectorLoadResult("vecchio", null, "manca \"name\""),
@@ -823,6 +830,12 @@ public partial class App : Application
         public bool HasConnectorSecret(ConnectorManifest manifest) => true;
 
         public void SetConnectorSecret(ConnectorManifest manifest, string secret)
+        {
+        }
+
+        public string? AddConnector(ConnectorTemplate connector, string? name, IReadOnlyDictionary<string, string> values, bool grant) => null;
+
+        public void RemoveConnector(ConnectorManifest manifest)
         {
         }
 
