@@ -30,7 +30,9 @@ Dettagli in [docs/05-bar.md](docs/05-bar.md).
 Quando arriva una mail il notch mostra per qualche secondo la busta e l'oggetto: dalla casella collegata
 direttamente (IMAP, nelle impostazioni) oppure dalle notifiche (da qualsiasi
 client che manda notifiche di Windows: Outlook, Posta, Thunderbird, Gmail nel browser).
-Un clic su una mail della pagina Posta la apre nel **lettore** di Nothing (senza segnarla come letta),
+Un clic su una mail della pagina Posta la apre nel **lettore** di Nothing (senza segnarla come letta): si ridimensiona dai
+bordi, si ingrandisce col doppio clic, ha ricerca (Ctrl+F), filtro *Non lette*, mail divise per giorno, divisore
+trascinabile e testo ingrandibile (Ctrl+rotellina), e ricorda misure e posizione;
 con *Rispondi*, *Apri nella webmail* (o nella sua app di Edge), *Segna come letta* e *Copia codice* per i
 codici di verifica; le mail arrivate da una notifica aprono l'app che l'ha mandata.
 Sul notch aperto, uno swipe (touchpad a due dita, rotellina o trascinamento) scorre le pagine
@@ -65,14 +67,14 @@ Dettagli in [docs/13-telefono.md](docs/13-telefono.md).
 uscita e il costo di ogni sessione (e di oggi), aggiornati a ogni risposta; quando l'agente ha finito arriva la scheda
 *HA FINITO*. Claude Code si legge da solo dai transcript (solo token, modello e stato); altri agenti mandano i loro totali
 con `NothingShell.exe --task '{"event":"agent",…}'`.
-**Connettori**: una **libreria** di connettori pronti in Impostazioni › Connettori (disco, servizi e app di Windows, Docker,
+**Connettori**: una **libreria** di connettori pronti in Impostazioni › Connettori (disco, cartelle, cestino, unità rimovibili, file duplicati, servizi e app di Windows, Docker,
 ping, siti, pagine di stato, Home Assistant, MQTT, Shelly, Tasmota, stampanti 3D, server via SSH, Prometheus, GitHub,
-Ollama, meteo, aria, cambi…) si attiva scrivendo pochi dati. Sotto, un file JSON per connettore in `%USERPROFILE%\.nothing-shell\connectors\` legge valori da Home Assistant,
+repository Git, Ollama, meteo, aria, cambi…) si attiva scrivendo pochi dati. Sotto, un file JSON per connettore in `%USERPROFILE%\.nothing-shell\connectors\` legge valori da Home Assistant,
 Prometheus, MQTT, ping, API http, file e comandi qualsiasi (PowerShell, ssh…), con soglie e avvisi nella pagina
 **Dispositivi**. Comandi e azioni (accendi, riavvia, pubblica) partono solo col permesso dato nelle impostazioni, legato
 al contenuto del file. Lo stesso connettore si attiva quante volte serve (più siti, server, processi) e si modifica o
 duplica dalla sua scheda; ognuno può diventare un **widget** sul desktop. Categoria **Sicurezza**: Defender, firewall,
-aggiornamenti, certificati SSL, intestazioni HTTP, porte esposte, amministratori, accessi SSH falliti, catalogo CISA.
+aggiornamenti, integrità dei file (SHA-256), certificati SSL, intestazioni HTTP, porte esposte, amministratori, accessi SSH falliti, catalogo CISA.
 **Costi LLM**: per un sito che usa un modello, la spesa in euro di oggi e del mese (listino Anthropic, prezzi propri o costo
 del sito; dollari col cambio BCE), budget con avviso ed esportazione CSV; pronto anche per l'Admin API di Anthropic.
 Esempi in [connectors/](connectors/), dettagli in [docs/14-agenti-connettori.md](docs/14-agenti-connettori.md).

@@ -79,13 +79,32 @@ Nothing Shell si collega direttamente al server IMAP con MailKit:
 
 ## Aprire una mail
 Un clic su una mail della pagina Posta (righe evidenziate al passaggio del mouse, punto rosso = non letta):
-- **casella collegata** → **lettore di posta** di Nothing (880 × 600): a sinistra le ultime mail con data e
-  non lette, a destra la mail scelta (↑↓ per scorrere, Esc per chiudere). La mail si scarica con una
+- **casella collegata** → **lettore di posta** di Nothing (960 × 640 la prima volta): a sinistra le ultime mail divise
+  per giorno (OGGI, IERI, QUESTA SETTIMANA, PRIMA; Core `MailGroups`) con avatar a punti delle iniziali (Core
+  `MailSearch.Initials`), punto rosso se non letta e trattino rosso sulla scelta; a destra la mail scelta. La mail si scarica con una
   connessione a parte, Posta in arrivo in sola lettura e `BODY.PEEK`: **aprirla non la segna come letta**.
   Testo semplice se c'è, altrimenti l'HTML ripulito (Core `MailText`); degli allegati solo i nomi.
   Contenuti solo in memoria, finché il lettore è aperto.
 - **notifica** → si apre l'app che l'ha mandata (AppUserModelID della notifica, se è nello Start); altrimenti
   il lettore mostra oggetto e mittente.
+
+Finestra del lettore:
+| Cosa | Come |
+|---|---|
+| Ridimensionare | dai bordi e dagli angoli (puntini in basso a destra); minimo 560 × 420 |
+| Ingrandire | doppio clic sull'intestazione o il quadrato in alto: occupa l'area di lavoro del suo monitor, senza angoli; trascinando l'intestazione torna alla misura di prima |
+| Larghezza dell'elenco | trascinando il divisore (220–440 DIP) |
+| Finestra stretta (< 700 DIP) | un riquadro alla volta: elenco, poi la mail con `<` (o Esc) per tornare |
+| Cercare | Ctrl+F: tutte le parole in mittente, indirizzo, oggetto o app, senza badare a maiuscole e accenti (Core `MailSearch.Matches`); Invio apre la prima, Esc svuota |
+| Solo da leggere | controllo a segmenti TUTTE · NON LETTE |
+| Testo più grande | Ctrl+rotellina o Ctrl + / Ctrl − (11–22 punti), Ctrl+0 torna a 13 |
+| Muoversi, chiudere | ↑↓ tra le mail visibili; Esc chiude (sfumando) |
+
+Misure, posizione, larghezza dell'elenco e dimensione del testo restano in `settings.json` (`mailReader`, Core
+`MailReaderLayout`, testato): alla riapertura la finestra torna lì, riportata dentro lo schermo se un monitor non c'è più.
+Il testo della mail è in una scheda che occupa lo spazio rimasto e segue il ridimensionamento, con una sottile barra
+grigia che dice dove si è. Il **codice di verifica** compare in grande, a punti, in una scheda rossa con *Copia*; gli
+allegati sono gettoni (un clic apre la webmail).
 
 Azioni del lettore:
 | Azione | Cosa fa |

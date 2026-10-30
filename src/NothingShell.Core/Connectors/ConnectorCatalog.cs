@@ -140,6 +140,80 @@ public static partial class ConnectorCatalog
             Permission = "Esegue PowerShell per leggere l'ultima riga del file.",
         },
 
+        // Questi quattro prendono spunto dai plugin di un file manager (Ski): cartelle, cestino, unità, duplicati.
+        new("cartella", "Dimensione di una cartella", "Questo PC", "Quanto occupa una cartella (Download, progetti, backup) e quanti file ha; Apri.",
+            [
+                new("path", "Cartella") { Hint = @"C:\Users\nome\Downloads" },
+                new("max", "Avvisa sopra (GB)", FieldKind.Number) { Optional = true },
+            ],
+            v =>
+            {
+                var path = Quote(v["path"]);
+                var o = PowerShell(
+                    $"$f = Get-ChildItem -LiteralPath {path} -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum; @{{ gb = [math]::Round($f.Sum / 1GB, 2); file = $f.Count }} | ConvertTo-Json",
+                    1800,
+                    Reading("Occupa", "{gb}", "GB").With("above", v.Number("max")),
+                    Reading("File", "{file}"));
+                o["actions"] = new JsonArray(PowerShellAction("Apri", $"Invoke-Item -LiteralPath {path}", confirm: false));
+                return o;
+            })
+        {
+            Permission = "Esegue PowerShell per sommare i file della cartella (Get-ChildItem) e, col pulsante, la apre in Esplora file.",
+        },
+        new("cestino", "Cestino", "Questo PC", "Quanti elementi ci sono nel cestino e quanto spazio occupano; Svuota.",
+            [new("max", "Avvisa sopra (MB)", FieldKind.Number) { Optional = true }],
+            v =>
+            {
+                var o = PowerShell(
+                    "$i = @((New-Object -ComObject Shell.Application).Namespace(10).Items()); " +
+                    "@{ elementi = $i.Count; mb = [math]::Round((($i | ForEach-Object { $_.Size }) | Measure-Object -Sum).Sum / 1MB) } | ConvertTo-Json",
+                    600,
+                    Reading("Elementi", "{elementi}"),
+                    Reading("Occupa", "{mb}", "MB").With("above", v.Number("max")));
+                o["actions"] = new JsonArray(PowerShellAction("Svuota", "Clear-RecycleBin -Force -ErrorAction SilentlyContinue", confirm: true));
+                return o;
+            })
+        {
+            Permission = "Esegue PowerShell per leggere il cestino e, col pulsante, svuotarlo (Clear-RecycleBin): i file non si recuperano più.",
+        },
+        new("unita-rimovibile", "Unità rimovibile", "Questo PC", "Chiavetta USB o disco esterno: se è collegato, nome e spazio libero; Espelli.",
+            [new("drive", "Lettera dell'unità") { Default = "E", Hint = "E", Pattern = "^[A-Za-z]:?$" }],
+            v =>
+            {
+                var letter = v["drive"].TrimEnd(':').ToUpperInvariant();
+                var o = PowerShell(
+                    $"$v = Get-Volume -DriveLetter {letter} -ErrorAction SilentlyContinue; " +
+                    "$(if ($v) { @{ stato = 'COLLEGATA'; nome = \"$($v.FileSystemLabel)\"; libero = [math]::Round($v.SizeRemaining / 1GB, 1) } } " +
+                    "else { @{ stato = 'ASSENTE'; nome = '-'; libero = 0 } }) | ConvertTo-Json",
+                    30,
+                    Reading("Stato", "{stato}"),
+                    Reading("Nome", "{nome}"),
+                    Reading("Libero", "{libero}", "GB"));
+                o["actions"] = new JsonArray(PowerShellAction("Espelli",
+                    $"(New-Object -ComObject Shell.Application).Namespace(17).ParseName('{letter}:').InvokeVerb('Eject')", confirm: false));
+                return o;
+            })
+        {
+            Permission = "Esegue PowerShell per leggere l'unità (Get-Volume) e, col pulsante, espellerla come da Esplora file.",
+        },
+        new("duplicati", "File duplicati", "Questo PC", "Copie identiche dentro una cartella (stesso contenuto, SHA-256) e lo spazio che sprecano.",
+            [
+                new("path", "Cartella") { Hint = @"C:\Users\nome\Downloads" },
+                new("max", "Avvisa sopra (MB sprecati)", FieldKind.Number) { Optional = true },
+            ],
+            v => PowerShell(
+                // prima per dimensione (veloce), l'impronta solo per i file della stessa dimensione
+                $"$g = @(Get-ChildItem -LiteralPath {Quote(v["path"])} -Recurse -File -ErrorAction SilentlyContinue | Where-Object Length -gt 0 | Group-Object Length | Where-Object Count -gt 1 | " +
+                "ForEach-Object { $n = $_.Name; $_.Group | Get-FileHash -Algorithm SHA256 -ErrorAction SilentlyContinue | Add-Member -NotePropertyName Size -NotePropertyValue ([long]$n) -PassThru } | " +
+                "Group-Object Hash | Where-Object Count -gt 1); " +
+                "@{ copie = [int](($g | ForEach-Object { $_.Count - 1 }) | Measure-Object -Sum).Sum; mb = [math]::Round((($g | ForEach-Object { $_.Group[0].Size * ($_.Count - 1) }) | Measure-Object -Sum).Sum / 1MB, 1) } | ConvertTo-Json",
+                21600,
+                Reading("Copie in più", "{copie}"),
+                Reading("Sprecati", "{mb}", "MB").With("above", v.Number("max"))))
+        {
+            Permission = "Esegue PowerShell per leggere i file della cartella e calcolarne l'impronta (Get-FileHash); non cancella niente.",
+        },
+
         // ── Rete e web ────────────────────────────────────────────────────────────
         new("ping", "Dispositivo in rete", "Rete e web", "Online o offline e latenza di router, NAS, stampante, telecamera…",
             [new("host", "Indirizzo o nome") { Hint = "192.168.1.1", Pattern = HostName }],
@@ -292,6 +366,29 @@ public static partial class ConnectorCatalog
                 Reading("Workflow", "{workflow_runs[0].name}"),
                 Reading("Stato", "{workflow_runs[0].status}"),
                 Reading("Esito", "{workflow_runs[0].conclusion}").With("alertOn", "failure"))),
+        new("git", "Repository Git", "Sviluppo e AI", "Ramo, file modificati e commit da inviare o da ricevere di un repository sul PC; Fetch e Apri.",
+            [new("path", "Cartella del repository") { Hint = @"C:\dev\progetto" }],
+            v =>
+            {
+                var path = Quote(v["path"]);
+                var o = PowerShell(
+                    $"$s = @(git -C {path} status --porcelain=v2 --branch 2>$null); if ($LASTEXITCODE) {{ throw 'non è un repository git' }}; " +
+                    "$b = \"$($s -match '^# branch.head ')\" -replace '^# branch.head ', ''; $a = 0; $d = 0; " +
+                    "if (\"$($s -match '^# branch.ab ')\" -match '\\+(\\d+) -(\\d+)') { $a = [int]$Matches[1]; $d = [int]$Matches[2] }; " +
+                    "@{ ramo = $b; modifiche = @($s -notmatch '^#').Count; avanti = $a; indietro = $d } | ConvertTo-Json",
+                    60,
+                    Reading("Ramo", "{ramo}"),
+                    Reading("Modificati", "{modifiche}", "file"),
+                    Reading("Da inviare", "{avanti}"),
+                    Reading("Da ricevere", "{indietro}").With("above", 0));
+                o["actions"] = new JsonArray(
+                    PowerShellAction("Fetch", $"git -C {path} fetch --quiet", confirm: false),
+                    PowerShellAction("Apri", $"Invoke-Item -LiteralPath {path}", confirm: false));
+                return o;
+            })
+        {
+            Permission = "Esegue git sul PC (status e, col pulsante, fetch) e apre la cartella in Esplora file.",
+        },
         new("ollama", "Ollama", "Sviluppo e AI", "Modello locale caricato in memoria e quanta VRAM occupa.",
             [new("url", "Indirizzo") { Default = "http://localhost:11434", Pattern = HttpUrl }],
             v => Obj(("type", "http"), ("url", v["url"].TrimEnd('/') + "/api/ps"), ("refreshSeconds", 15),
@@ -394,6 +491,23 @@ public static partial class ConnectorCatalog
                 Reading("Riavvio", "{riavvio}").With("alertOn", "SI")))
         {
             Permission = "Esegue PowerShell per leggere gli aggiornamenti installati (Get-HotFix) e il riavvio in sospeso.",
+        },
+        new("integrita", "Integrità di un file", "Sicurezza",
+            "Impronta SHA-256 di un file (hosts, script, eseguibili): diversa da quella attesa diventa un avviso. Vuota = mostra quella attuale.",
+            [
+                new("path", "File") { Default = @"C:\Windows\System32\drivers\etc\hosts" },
+                new("hash", "Impronta attesa (SHA-256)") { Optional = true, Hint = "64 caratteri esadecimali", Pattern = "^[A-Fa-f0-9]{64}$" },
+            ],
+            v => PowerShell(
+                $"$p = {Quote(v["path"])}; $h = (Get-FileHash -LiteralPath $p -Algorithm SHA256 -ErrorAction Stop).Hash; $e = {Quote(v["hash"].ToUpperInvariant())}; " +
+                "@{ impronta = $h.Substring(0, 16); esito = $(if (-not $e) { 'DA FISSARE' } elseif ($h -eq $e) { 'INTEGRO' } else { 'CAMBIATO' }); " +
+                "modificato = (Get-Item -LiteralPath $p).LastWriteTime.ToString('dd/MM/yyyy HH:mm') } | ConvertTo-Json",
+                900,
+                Reading("SHA-256", "{impronta}"),
+                Reading("Esito", "{esito}").With("alertOn", "CAMBIATO"),
+                Reading("Modificato", "{modificato}")))
+        {
+            Permission = "Esegue PowerShell per calcolare l'impronta del file (Get-FileHash); non lo modifica.",
         },
         new("certificato", "Certificato SSL di un sito", "Sicurezza", "Quanti giorni mancano alla scadenza del certificato HTTPS, se è valido e chi lo emette.",
             [

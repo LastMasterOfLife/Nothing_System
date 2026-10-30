@@ -106,12 +106,11 @@ internal static class DevRows
             Padding = new Thickness(9, 2, 9, 2),
             Margin = new Thickness(6, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
-            Background = Theme.BlackBrush,
             Cursor = Cursors.Hand,
             Child = text,
         };
-        button.MouseEnter += (_, _) => button.Background = Theme.SurfaceBrush;
-        button.MouseLeave += (_, _) => button.Background = Theme.BlackBrush;
+        Motion.StateLayer(button, Theme.Black, Theme.Surface);
+        Motion.Press(button);
         button.MouseLeftButtonUp += (_, e) =>
         {
             e.Handled = true;

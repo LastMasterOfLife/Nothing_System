@@ -40,12 +40,11 @@ internal static class NotchUi
             Height = 34,
             CornerRadius = new CornerRadius(17),
             Margin = new Thickness(5, 0, 5, 0),
-            Background = Brushes.Transparent,
             Cursor = Cursors.Hand,
             Child = content,
         };
-        button.MouseEnter += (_, _) => button.Background = Theme.SurfaceBrush;
-        button.MouseLeave += (_, _) => button.Background = Brushes.Transparent;
+        Motion.StateLayer(button, Colors.Transparent, Theme.Surface);
+        Motion.Press(button);
         button.MouseLeftButtonUp += async (_, e) =>
         {
             e.Handled = true;

@@ -100,14 +100,20 @@ segreti), così ogni scheda ha **Modifica** (riscrive lo stesso connettore; il t
 
 | Categoria | Connettori |
 |---|---|
-| Questo PC | Spazio su disco, Servizio di Windows (Avvia, Riavvia), App in esecuzione (Termina), Docker, File di log |
+| Questo PC | Spazio su disco, Servizio di Windows (Avvia, Riavvia), App in esecuzione (Termina), Docker, File di log, Dimensione di una cartella (Apri), Cestino (Svuota), Unità rimovibile (Espelli), File duplicati |
 | Rete e web | Dispositivo in rete (ping), Sito o servizio web, IP pubblico, Stato di un servizio online (Statuspage: Claude, GitHub…) |
 | Casa | Home Assistant (Accendi/spegni), Sensori MQTT, Presa Shelly, Presa Tasmota, Stampante 3D OctoPrint e Klipper |
 | Server | Server Linux via SSH e Raspberry Pi (Riavvia), Prometheus con node_exporter |
-| Sicurezza | Microsoft Defender (Scansione rapida), Firewall di Windows, Aggiornamenti di Windows, Certificato SSL di un sito, Intestazioni di sicurezza, Porte esposte, Amministratori del PC, Accessi SSH falliti, Vulnerabilità sfruttate (CISA KEV) |
-| Sviluppo e AI | GitHub: PR da rivedere, GitHub: ultima CI, Ollama, Costi API Anthropic, Sito con LLM: costi |
+| Sicurezza | Microsoft Defender (Scansione rapida), Firewall di Windows, Aggiornamenti di Windows, Integrità di un file (SHA-256), Certificato SSL di un sito, Intestazioni di sicurezza, Porte esposte, Amministratori del PC, Accessi SSH falliti, Vulnerabilità sfruttate (CISA KEV) |
+| Sviluppo e AI | Repository Git (Fetch, Apri), GitHub: PR da rivedere, GitHub: ultima CI, Ollama, Costi API Anthropic, Sito con LLM: costi |
 | Informazioni | Meteo e Qualità dell'aria (Open-Meteo), Cambio valuta (BCE), Criptovaluta (CoinGecko) |
 | Personalizzati | API JSON, File di stato, Comando PowerShell |
+
+Cartella, Cestino, Unità rimovibile, File duplicati, Repository Git e Integrità di un file riprendono i plugin del file
+manager Ski (dimensioni delle cartelle, cestino, unità con espulsione, duplicati, stato git, checksum). *File duplicati*
+confronta prima le dimensioni e calcola l'impronta solo dei file della stessa dimensione, ogni 6 ore, e non cancella niente.
+*Integrità di un file* senza impronta attesa mostra quella attuale (DA FISSARE): copiata nel campo, ogni cambiamento del
+file diventa un avviso (CAMBIATO). *Svuota* del Cestino chiede conferma.
 
 I valori del modulo entrano in comandi e indirizzi: ogni campo ha la sua forma (`Pattern`: un nome di servizio, un host,
 `utente@host`…) e i testi liberi passano a PowerShell tra apici. Il file generato passa comunque da `ConnectorParser`.

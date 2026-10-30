@@ -48,6 +48,7 @@ public partial class App : Application
         switch (e.Args)
         {
             case ["--snapshot", var folder]:
+                Rendering.Motion.Suspended = true; // le immagini mostrano lo stato finale, non l'inizio delle animazioni
                 RenderSnapshots(folder);
                 await RenderLauncherSnapshot(folder);
                 await RenderBarSnapshots(folder);
@@ -381,6 +382,9 @@ public partial class App : Application
         readerRoot.Width = reader.Width;
         readerRoot.Height = reader.Height;
         SaveSnapshot(readerRoot, Path.Combine(folder, "mail-reader.png"));
+        reader.Width = readerRoot.Width = 620; // stretta: un riquadro alla volta
+        reader.Select(demo[1]);
+        SaveSnapshot(readerRoot, Path.Combine(folder, "mail-reader-compact.png"));
 
         // Attività dal vivo (docs/10-live-activities.md)
         notch.ShowLevel(NothingShell.Core.Design.DotIcons.Speaker, 0.64, muted: false);
@@ -726,6 +730,8 @@ public partial class App : Application
         }
 
         public bool OpenSourceApp(MailItem mail) => false;
+
+        public MailReaderLayout ReaderLayout { get; set; } = MailReaderLayout.Default;
     }
 
     /// <summary>Stato fittizio ma realistico per disegnare le impostazioni senza avviare la shell.</summary>

@@ -311,6 +311,12 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
             Update(_settings with { MailAccount = account with { Webmail = string.IsNullOrWhiteSpace(url) ? null : url.Trim() } });
     }
 
+    public MailReaderLayout ReaderLayout
+    {
+        get => _settings.MailReader ?? MailReaderLayout.Default;
+        set => Update(_settings with { MailReader = value });
+    }
+
     public string? WebmailAddress => _settings.MailAccount is { } account ? MailLinks.Webmail(account)?.AbsoluteUri : null;
 
     private Uri? Webmail() => _settings.MailAccount is { } account ? MailLinks.Webmail(account) : null;

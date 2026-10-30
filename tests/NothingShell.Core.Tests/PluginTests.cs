@@ -43,6 +43,23 @@ public class PluginManifestTests
         Assert.Equal(["C"], m.Arguments);
     }
 
+    /// <summary>Gli esempi della cartella <c>plugins/</c> del repository devono restare validi.</summary>
+    [Fact]
+    public void RepositoryExamplesAreValid()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "NothingShell.sln")))
+            root = root.Parent;
+        Assert.NotNull(root);
+        var folders = Directory.GetDirectories(Path.Combine(root.FullName, "plugins"));
+        Assert.NotEmpty(folders);
+        foreach (var folder in folders)
+        {
+            var result = PluginManifestParser.Parse(Path.GetFileName(folder), File.ReadAllText(Path.Combine(folder, "plugin.json")));
+            Assert.True(result.Manifest is not null, $"{Path.GetFileName(folder)}: {result.Error}");
+        }
+    }
+
     [Theory]
     [InlineData("Meteo", "{}", "nome della cartella")]
     [InlineData("meteo", "non json", "JSON non valido")]

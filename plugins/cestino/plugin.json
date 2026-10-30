@@ -1,0 +1,7 @@
+{
+  // Cestino: quanto occupa, rosso oltre 5 GB. La soglia è il secondo argomento.
+  "name": "Cestino",
+  "size": "small",
+  "refreshSeconds": 600,
+  "source": { "type": "command", "command": "cestino.ps1", "args": ["5"] }
+}

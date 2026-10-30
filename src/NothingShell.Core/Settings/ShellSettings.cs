@@ -20,7 +20,8 @@ public sealed record ShellSettings(
     string? Editor = null,
     bool PhoneDirect = false,
     IReadOnlyDictionary<string, string>? ConnectorGrants = null,
-    IReadOnlyList<string>? ConnectorWidgets = null)
+    IReadOnlyList<string>? ConnectorWidgets = null,
+    MailReaderLayout? MailReader = null)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
 

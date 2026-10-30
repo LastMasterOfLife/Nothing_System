@@ -1,0 +1,7 @@
+{
+  // Repository Git: ramo, file modificati e commit da inviare/ricevere. Cambia il percorso negli args.
+  "name": "Git",
+  "size": "wide",
+  "refreshSeconds": 60,
+  "source": { "type": "command", "command": "git.ps1", "args": ["C:\\dev\\progetto"] }
+}
