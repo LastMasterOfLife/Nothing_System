@@ -97,6 +97,12 @@ cercare, ↑↓ e Invio per avviare. Le combinazioni Win+qualcosa restano a Wind
 Windows è nel menu col tasto destro della barra, dove si può anche disattivare l'uso del tasto Win.
 Uso e preferenze in `%USERPROFILE%\.nothing-shell\launcher.json`.
 
+**Terminale e cervello dei comandi**: *Terminale Nothing* (o `>` nel launcher) è PowerShell vero, quindi ogni comando parte com'è.
+Le frasi che PowerShell non capisce ("quanta ram è libera") passano dalle scorciatoie imparate, poi da un piccolo modello
+locale. Ciò che propone il modello aspetta Invio; ciò che viene confermato e riesce diventa una scorciatoia da meno di un
+millisecondo, e dopo 3 riuscite un comando di sola lettura parte da solo. Il modello (469 MB) si scarica solo su richiesta da
+Impostazioni › Sviluppo. Dettagli in [docs/15-comandi-cervello.md](docs/15-comandi-cervello.md).
+
 Le impostazioni (tasto destro su barra, notch o widget → *Impostazioni…*, oppure "Impostazioni
 Nothing Shell" nel launcher) hanno un menù laterale con una pagina per funzione (Generale, Notch, Telefono, Posta,
 Agenda, Sviluppo, Agenti, Connettori, Accesso, Widget, Plugin, Info) e applicano subito ogni modifica.

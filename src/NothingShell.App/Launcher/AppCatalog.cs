@@ -14,7 +14,9 @@ public sealed class AppCatalog
 
     public static readonly AppEntry SettingsEntry = new($"{InternalPrefix}settings", "Impostazioni Nothing Shell");
 
-    public IReadOnlyList<AppEntry> Apps { get; private set; } = [SettingsEntry];
+    public static readonly AppEntry TerminalEntry = new($"{InternalPrefix}terminal", "Terminale Nothing");
+
+    public IReadOnlyList<AppEntry> Apps { get; private set; } = [SettingsEntry, TerminalEntry];
 
     /// <summary>Incrementata a ogni ricarica che cambia l'elenco.</summary>
     public int Version { get; private set; }
@@ -24,6 +26,7 @@ public sealed class AppCatalog
     {
         var apps = await RunOnStaThread(ReadAppsFolder);
         apps.Add(SettingsEntry);
+        apps.Add(TerminalEntry);
         apps.Sort((a, b) => StringComparer.CurrentCultureIgnoreCase.Compare(a.Name, b.Name));
         if (apps.Count == Apps.Count && apps.SequenceEqual(Apps))
             return;

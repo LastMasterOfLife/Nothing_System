@@ -91,10 +91,17 @@ function Invoke-NothingShellTask {
 function Watch-NothingShellLastCommand {
     param([bool]$Succeeded, $ExitCode)
     $last = Get-History -Count 1
+    $phrase = $script:PendingPhrase
+    $script:PendingPhrase = $null
     if (-not $last -or $last.Id -eq $script:LastHistoryId) { return }
     $script:LastHistoryId = $last.Id
     $code = if ($Succeeded) { 0 } elseif ($ExitCode -is [int] -and $ExitCode -ne 0) { $ExitCode } else { 1 }
     $folder = Get-NothingShellFolder
+
+    # Il comando eseguito è quello con cui si impara: se è stato modificato prima di Invio, è una correzione.
+    if ($phrase) {
+        Send-NothingShellBrain @{ op = 'outcome'; input = $phrase; command = ($last.CommandLine -replace $script:BrainNote, ''); ok = ($code -eq 0) } 500 | Out-Null
+    }
 
     if ($code -eq 0 -and $last.CommandLine -match '^\s*git\s+push\b') {
         Send-NothingShellMessage @{ event = 'push'; cwd = $folder }
@@ -134,5 +141,160 @@ function Disable-NothingShellPrompt {
     $script:OriginalPrompt = $null
 }
 
+# --- Cervello dei comandi (docs/15-comandi-cervello.md) ---
+
+$script:BrainPipe = if ($env:NOTHINGSHELL_BRAIN_PIPE) { $env:NOTHINGSHELL_BRAIN_PIPE } else { 'NothingShell.Brain' }
+$script:BrainNote = '\s+# nothing:.*$'
+$script:BrainWait = 35000
+$script:PendingPhrase = $null
+$script:BrainKeywords = 'if', 'else', 'elseif', 'for', 'foreach', 'while', 'do', 'switch', 'function', 'filter', 'try', 'catch',
+    'finally', 'param', 'class', 'enum', 'return', 'exit', 'throw', 'break', 'continue', 'trap', 'using', 'begin', 'process', 'end', 'data'
+
+# Una riga JSON verso la shell, una di risposta; $null se Nothing Shell non è aperta.
+function Send-NothingShellBrain {
+    param([Parameter(Mandatory)][hashtable]$Message, [int]$WaitMilliseconds = 2000)
+    try {
+        $pipe = [System.IO.Pipes.NamedPipeClientStream]::new('.', $script:BrainPipe, [System.IO.Pipes.PipeDirection]::InOut)
+        try {
+            $pipe.Connect(150)
+            $utf8 = [System.Text.UTF8Encoding]::new($false)
+            $writer = [System.IO.StreamWriter]::new($pipe, $utf8)
+            $writer.AutoFlush = $true
+            $writer.WriteLine(($Message | ConvertTo-Json -Compress))
+            $read = [System.IO.StreamReader]::new($pipe, $utf8).ReadLineAsync()
+            if ($read.Wait($WaitMilliseconds) -and $read.Result) { return $read.Result | ConvertFrom-Json }
+        }
+        finally {
+            $pipe.Dispose()
+        }
+    }
+    catch {
+        # Nothing Shell non è aperta: PowerShell funziona come sempre
+    }
+    return $null
+}
+
+# Solo ciò che PowerShell non saprebbe eseguire passa dal cervello: un comando vero parte com'è, senza attese.
+function Test-NothingShellPhrase {
+    param([string]$Line)
+    if ($Line -match '[\r\n|;&$<>{}=]') { return $false }
+    if ($Line -notmatch "^\s*([\p{L}]+(?:['’][\p{L}]+)?)(?:\s|$)") { return $false }
+    $word = $Matches[1]
+    if ($script:BrainKeywords -contains $word.ToLowerInvariant()) { return $false }
+    return -not (Get-Command -Name $word -ErrorAction Ignore)
+}
+
+function Format-NothingShellNote {
+    param($Reply)
+    $origin = switch ($Reply.source) { 'model' { 'modello' } 'similar' { 'simile' } default { 'scorciatoia' } }
+    $state = if ($Reply.runNow) { 'eseguo' } elseif ($Reply.risk -eq 'dangerous') { 'PERICOLOSO, Invio per eseguire' } else { 'Invio per eseguire' }
+    "  # nothing: $origin $([int][math]::Ceiling($Reply.ms)) ms, $state"
+}
+
+# Il tasto Invio del terminale.
+function Invoke-NothingShellEnter {
+    $line = $null
+    $cursor = $null
+    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+
+    # Seconda pressione su una proposta, comando normale o frase forzata con il punto interrogativo
+    $forced = $line -match '^\s*\?\s*(\S.*)$'
+    $phrase = if ($forced) { $Matches[1].Trim() } else { $line.Trim() }
+    if ($script:PendingPhrase -or $phrase.Length -eq 0 -or (-not $forced -and -not (Test-NothingShellPhrase $line))) {
+        [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+        return
+    }
+
+    $working = "$line  # nothing: penso..."
+    [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $working)
+    $reply = Send-NothingShellBrain @{ op = 'decide'; input = $phrase; forced = [bool]$forced; cwd = (Get-NothingShellFolder) } $script:BrainWait
+    $valid = $false
+    if ($reply -and $reply.command) {
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($reply.command, [ref]$null, [ref]$errors)
+        # Il modello a volte risponde con una frase: si propone solo un comando che esiste davvero.
+        $names = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() } | Where-Object { $_ }
+        $valid = $errors.Count -eq 0 -and $names -and -not ($names | Where-Object { -not (Get-Command -Name $_ -ErrorAction Ignore) })
+    }
+
+    if (-not $valid) {
+        if ($forced) {
+            $why = if ($reply -and $reply.note) { $reply.note } elseif (-not $reply) { 'Nothing Shell non è aperta' } else { 'nessuna decisione' }
+            [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $working.Length, "# nothing: $why")
+            return
+        }
+        # Nessuna decisione: la riga va a PowerShell, che dà il suo errore come sempre.
+        [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $working.Length, $line)
+        [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+        return
+    }
+
+    $script:PendingPhrase = $phrase
+    [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $working.Length, $reply.command + (Format-NothingShellNote $reply))
+    if ($reply.runNow) { [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine() }
+}
+
+<#
+.SYNOPSIS
+Le frasi che PowerShell non capisce passano dal cervello di Nothing Shell; "? frase" lo chiede sempre.
+#>
+function Enable-NothingShellBrain {
+    Enable-NothingShellPrompt
+    if (-not (Get-Module PSReadLine)) {
+        Write-Warning 'Nothing Shell: PSReadLine non è attivo, le frasi non vengono riconosciute.'
+        return
+    }
+    $module = $ExecutionContext.SessionState.Module
+    $handler = { param($key, $arg) & $module { Invoke-NothingShellEnter } }.GetNewClosure()
+    Set-PSReadLineKeyHandler -Key Enter -BriefDescription NothingShellEnter -Description 'Esegue la riga; una frase passa dal cervello di Nothing Shell' -ScriptBlock $handler
+}
+
+function Disable-NothingShellBrain {
+    Set-PSReadLineKeyHandler -Key Enter -Function AcceptLine
+}
+
+<#
+.SYNOPSIS
+Esegue un comando già confermato (dal launcher) e impara dall'esito.
+#>
+function Invoke-NothingShellProposal {
+    param([string]$Phrase, [Parameter(Mandatory)][string]$Command)
+    $global:LASTEXITCODE = 0
+    $failed = $false
+    try {
+        Invoke-Expression $Command | Out-Host
+        if (-not $?) { $failed = $true }
+    }
+    catch {
+        $failed = $true
+        Write-Error $_
+    }
+    if ($Phrase) {
+        Send-NothingShellBrain @{ op = 'outcome'; input = $Phrase; command = $Command; ok = (-not $failed -and $global:LASTEXITCODE -eq 0) } 500 | Out-Null
+    }
+}
+
+<#
+.SYNOPSIS
+Insegna una scorciatoia: ricorda "stato del server" "ssh pi@raspberry uptime"
+#>
+function Set-NothingShellShortcut {
+    param([Parameter(Mandatory)][string]$Phrase, [Parameter(Mandatory)][string]$Command)
+    $reply = Send-NothingShellBrain @{ op = 'remember'; input = $Phrase; command = $Command }
+    if (-not $reply) { Write-Warning 'Nothing Shell non è aperta.' } elseif ($reply.note) { Write-Warning $reply.note }
+}
+
+<#
+.SYNOPSIS
+Dimentica una scorciatoia: dimentica "stato del server"
+#>
+function Remove-NothingShellShortcut {
+    param([Parameter(Mandatory)][string]$Phrase)
+    $reply = Send-NothingShellBrain @{ op = 'forget'; input = $Phrase }
+    if (-not $reply) { Write-Warning 'Nothing Shell non è aperta.' } elseif ($reply.note) { Write-Warning $reply.note }
+}
+
 Set-Alias -Name ns -Value Invoke-NothingShellTask
-Export-ModuleMember -Function Invoke-NothingShellTask, Enable-NothingShellPrompt, Disable-NothingShellPrompt, Send-NothingShellMessage -Alias ns
+Set-Alias -Name ricorda -Value Set-NothingShellShortcut
+Set-Alias -Name dimentica -Value Remove-NothingShellShortcut
+Export-ModuleMember -Function Invoke-NothingShellTask, Enable-NothingShellPrompt, Disable-NothingShellPrompt, Send-NothingShellMessage, Enable-NothingShellBrain, Disable-NothingShellBrain, Invoke-NothingShellProposal, Set-NothingShellShortcut, Remove-NothingShellShortcut -Alias ns, ricorda, dimentica

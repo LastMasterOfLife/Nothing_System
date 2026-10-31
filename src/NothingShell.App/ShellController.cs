@@ -78,6 +78,8 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         {
             if (id == AppCatalog.SettingsEntry.Id)
                 OpenSettings();
+            else if (id == AppCatalog.TerminalEntry.Id)
+                OpenTerminal();
         };
         _launcher.LockRequested += Lock;
         _access.Enabled = _settings.Access;
@@ -129,6 +131,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         WireAgenda();
         WireDev();
         WireConnected();
+        WireBrain();
         _network.Changed += _bars.SetNetwork;
         _bars.SetNetwork(_network.Current);
         _tracker.FullscreenChanged += monitor =>
@@ -460,6 +463,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         _taskbar.Show();
         _quickPanel?.Close();
+        _brain.Dispose();
         _calendar.Dispose();
         _access.Dispose();
         _plugins.Dispose();

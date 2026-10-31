@@ -150,6 +150,26 @@ public interface IShellSettingsActions
     void ReloadConnectors();
 
     void CopyConnectorExamples();
+
+    /// <summary>Cervello dei comandi (docs/15-comandi-cervello.md): stato del modello locale.</summary>
+    string BrainStatus { get; }
+
+    /// <summary>Scorciatoie imparate dall'uso.</summary>
+    int BrainLearned { get; }
+
+    bool BrainModelInstalled { get; }
+
+    bool BrainInstalling { get; }
+
+    event Action? BrainChanged;
+
+    void InstallBrainModel();
+
+    void CancelBrainInstall();
+
+    void ClearBrainMemory();
+
+    void OpenTerminal();
 }
 
 /// <summary>Pagine del menù laterale, nell'ordine in cui compaiono.</summary>
@@ -261,8 +281,10 @@ public sealed class SettingsWindow : Window
         _shell.MailAccountChanged += OnMailAccountChanged;
         _shell.CalendarChanged += OnCalendarChanged;
         _shell.Phone.Changed += OnPhoneChanged;
+        _shell.BrainChanged += OnBrainChanged;
         Closed += (_, _) =>
         {
+            _shell.BrainChanged -= OnBrainChanged;
             _shell.Phone.Changed -= OnPhoneChanged;
             _shell.MailAccountChanged -= OnMailAccountChanged;
             _shell.CalendarChanged -= OnCalendarChanged;
@@ -412,8 +434,29 @@ public sealed class SettingsWindow : Window
     }
 
     /// <summary>Lavoro nel notch, appunti intelligenti e server locali (docs/12-sviluppo.md).</summary>
+    private void OnBrainChanged() => Dispatcher.BeginInvoke(() =>
+    {
+        if (_selected == SettingsPage.Dev)
+            Rebuild();
+    });
+
+    /// <summary>Terminale PowerShell con il cervello dei comandi (docs/15-comandi-cervello.md).</summary>
+    private void BrainSection()
+    {
+        Section("COMANDI E CERVELLO");
+        Note("Il terminale Nothing è PowerShell vero: ogni comando parte com'è. Le frasi che PowerShell non capisce passano dalle " +
+             "scorciatoie imparate e poi dal modello locale; nel launcher si scrive > e il comando o la frase.", Theme.GreyBrush);
+        Note($"{_shell.BrainStatus} · {_shell.BrainLearned} scorciatoie imparate", Theme.WhiteBrush);
+        ButtonRow(("APRI TERMINALE", _shell.OpenTerminal),
+            _shell.BrainInstalling ? ("ANNULLA DOWNLOAD", _shell.CancelBrainInstall)
+            : _shell.BrainModelInstalled ? ("DIMENTICA LE SCORCIATOIE", _shell.ClearBrainMemory)
+            : ("SCARICA IL MODELLO", _shell.InstallBrainModel));
+    }
+
     private void DevPage()
     {
+        BrainSection();
+
         Section("NEL NOTCH");
         ActivityRow(LiveActivity.Tasks, "Comandi e build", "Tempo nella pillola, scheda alla fine con il primo errore, pagina Lavoro");
         ActivityRow(LiveActivity.Ci, "CI di GitHub dopo il push", "Con GitHub CLI (gh): esito delle Actions e Rilancia");

@@ -2,7 +2,7 @@
 
 ## Stack
 - .NET 9, C#; UI in WPF (`net9.0-windows10.0.19041.0` per l'accesso alle API WinRT).
-- Nessuna dipendenza esterna a runtime.
+- Nessun servizio esterno a runtime. LLamaSharp (modello locale) gira in un processo a sé: docs/15-comandi-cervello.md.
 
 ## Progetti
 ```

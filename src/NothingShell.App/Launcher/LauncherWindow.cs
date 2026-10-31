@@ -11,6 +11,7 @@ using System.Windows.Threading;
 using NothingShell.App.Interop;
 using NothingShell.App.Rendering;
 using NothingShell.Core.Bar;
+using NothingShell.Core.Brain;
 using NothingShell.Core.Design;
 using NothingShell.Core.DotMatrix;
 using NothingShell.Core.Launcher;
@@ -19,7 +20,7 @@ using NothingShell.Core.Widgets;
 namespace NothingShell.App.Launcher;
 
 /// <summary>Launcher Nothing: ricerca e avvio delle app (docs/06-launcher.md).</summary>
-public sealed class LauncherWindow : Window
+public sealed partial class LauncherWindow : Window
 {
     private const double PanelWidth = 560;
     private const double PanelHeight = 660;
@@ -51,7 +52,7 @@ public sealed class LauncherWindow : Window
         FontSize = 18,
         VerticalContentAlignment = VerticalAlignment.Center,
     };
-    private readonly TextBlock _placeholder = Label("Cerca app", 18, Theme.GreyBrush);
+    private readonly TextBlock _placeholder = Label("Cerca app, > per un comando", 18, Theme.GreyBrush);
     private readonly StackPanel _content = new();
     private readonly ScrollViewer _scroll = new()
     {
@@ -67,6 +68,9 @@ public sealed class LauncherWindow : Window
     private int _selected = -1;
     private bool _closing;
     private bool _eagerIcons;
+    private CancellationTokenSource? _deciding;
+    private Action? _commandRun;
+    private Action? _literalRun;
 
     public LauncherWindow(AppCatalog catalog, ShellIcons icons, LauncherSettingsStore store)
     {
@@ -113,6 +117,12 @@ public sealed class LauncherWindow : Window
 
     /// <summary>Pulsante Blocca: lo gestisce l'accesso Nothing (docs/09-access.md).</summary>
     public event Action? LockRequested;
+
+    /// <summary>Riga di comando confermata: la frase da cui viene (null se scritta com'è) e il comando.</summary>
+    public event Action<string?, string>? CommandLineRequested;
+
+    /// <summary>Il cervello dei comandi (docs/15-comandi-cervello.md).</summary>
+    public Func<string, CancellationToken, Task<BrainReply?>>? Decide { get; set; }
 
     /// <summary>Prepara il contenuto senza mostrare la finestra, con icone caricate subito (per <c>--snapshot</c>).</summary>
     public void PrepareSnapshot(string? query)
@@ -284,11 +294,106 @@ public sealed class LauncherWindow : Window
         _content.Children.Clear();
         _navigable.Clear();
         _selected = -1;
+        _deciding?.Cancel();
+        _deciding = null;
+        _commandRun = null;
+        _literalRun = null;
 
-        if (string.IsNullOrWhiteSpace(query))
+        if (query.TrimStart().StartsWith('>'))
+            ShowCommand(query.TrimStart()[1..].Trim());
+        else if (string.IsNullOrWhiteSpace(query))
             ShowHome();
         else
             ShowResults(query);
+    }
+
+    /// <summary>
+    /// Riga <c>&gt;</c>: un comando PowerShell o una frase (docs/15-comandi-cervello.md). Invio esegue ciò che si vede;
+    /// Ctrl+Invio il testo così com'è scritto. Si apre sempre il terminale: i programmi interattivi funzionano.
+    /// </summary>
+    private void ShowCommand(string text)
+    {
+        if (text.Length == 0)
+        {
+            _content.Children.Add(CommandRow("Scrivi un comando PowerShell o una frase", null, Theme.GreyBrush));
+            return;
+        }
+        _literalRun = () => RunCommandLine(null, text);
+        _commandRun = _literalRun;
+        _content.Children.Add(CommandRow(text, "ESEGUI COSÌ COM'È", Theme.WhiteBrush));
+        if (Decide is null || LiteralCommand().IsMatch(text))
+            return;
+
+        var cancel = new CancellationTokenSource();
+        _deciding = cancel;
+        _ = ShowDecisionAsync(text, cancel.Token);
+    }
+
+    private async Task ShowDecisionAsync(string text, CancellationToken token)
+    {
+        BrainReply? reply;
+        try
+        {
+            reply = await Decide!(text, token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        if (token.IsCancellationRequested || reply?.Command is not { } command)
+            return;
+
+        var dangerous = reply.Risk == "dangerous";
+        var origin = reply.Source == "model" ? "MODELLO" : reply.Source == "similar" ? "SIMILE" : "SCORCIATOIA";
+        var tag = $"{origin} · {reply.Ms:0.#} MS{(dangerous ? " · PERICOLOSO, INVIO DUE VOLTE" : string.Empty)}";
+        var row = CommandRow(command, tag, dangerous ? Theme.RedBrush : Theme.WhiteBrush);
+        row.Background = Theme.SurfaceBrush;
+        _content.Children.Insert(0, row);
+        var armed = !dangerous;
+        _commandRun = () =>
+        {
+            if (armed)
+            {
+                RunCommandLine(text, command);
+                return;
+            }
+            armed = true;
+            row.Background = Theme.RedBrush;
+        };
+    }
+
+    /// <summary>Comando scritto per esteso (Verbo-Nome, simboli della shell, percorsi): non serve chiedere al modello.</summary>
+    [System.Text.RegularExpressions.GeneratedRegex(@"[|;&$<>{}=\\/]|^\S+-\S+", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex LiteralCommand();
+
+    private void RunCommandLine(string? phrase, string command)
+    {
+        Dismiss();
+        CommandLineRequested?.Invoke(phrase, command);
+    }
+
+    private static Border CommandRow(string text, string? tag, Brush foreground)
+    {
+        var stack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        var line = Label(text, 14, foreground);
+        line.TextTrimming = TextTrimming.CharacterEllipsis;
+        line.FontFamily = new FontFamily("Cascadia Mono, Consolas");
+        line.ToolTip = text;
+        stack.Children.Add(line);
+        if (tag is not null)
+        {
+            var label = Label(tag, 10, Theme.GreyBrush);
+            label.Margin = new Thickness(0, 4, 0, 0);
+            stack.Children.Add(label);
+        }
+        return new Border
+        {
+            Child = stack,
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(12, 10, 12, 10),
+            Margin = new Thickness(0, 0, 0, 4),
+            Background = Brushes.Transparent,
+        };
     }
 
     private void ShowHome()
@@ -444,6 +549,14 @@ public sealed class LauncherWindow : Window
     {
         switch (e.Key)
         {
+            case Key.Enter when Keyboard.Modifiers.HasFlag(ModifierKeys.Control) && _literalRun is not null:
+                _literalRun();
+                e.Handled = true;
+                break;
+            case Key.Enter when _commandRun is not null:
+                _commandRun();
+                e.Handled = true;
+                break;
             case Key.Escape:
                 Dismiss();
                 e.Handled = true;

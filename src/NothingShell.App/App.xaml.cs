@@ -13,6 +13,7 @@ using NothingShell.App.Services;
 using NothingShell.App.Settings;
 using NothingShell.App.Widgets;
 using NothingShell.Core.Access;
+using NothingShell.Core.Brain;
 using NothingShell.Core.Connectors;
 using NothingShell.Core.Notch;
 using NothingShell.Core.Plugins;
@@ -88,6 +89,28 @@ public partial class App : Application
                 return;
             case ["--dev-check", var report]:
                 await DevCheck(report);
+                Shutdown();
+                return;
+            case ["--brain", var model]:
+                await BrainWorker.RunAsync(model);
+                Shutdown();
+                return;
+            case ["--brain-check", var report]:
+                await BrainCheck(report);
+                Shutdown();
+                return;
+            case ["--brain-serve", var memory, var pipe, var seconds]:
+                // Per le prove: solo il cervello, senza barra né notch, con scorciatoie e pipe proprie (NOTHINGSHELL_BRAIN_PIPE).
+                using (var brain = new BrainService(memory, pipe))
+                {
+                    brain.Start();
+                    await Task.Delay(TimeSpan.FromSeconds(double.Parse(seconds, System.Globalization.CultureInfo.InvariantCulture)));
+                }
+                Shutdown();
+                return;
+            case ["--brain-install"]:
+                using (var brain = new BrainService())
+                    Console.WriteLine(await brain.InstallModelAsync() ?? "installato");
                 Shutdown();
                 return;
             case ["--restore-taskbar"]:
@@ -519,6 +542,41 @@ public partial class App : Application
         await File.WriteAllLinesAsync(file, lines);
     }
 
+    /// <summary>
+    /// Diagnostica di docs/15-comandi-cervello.md: tempi delle scorciatoie, ogni scorciatoia di serie provata in PowerShell
+    /// (sono tutte di sola lettura) e, se il modello è scaricato, tempi e risposte del modello. Non impara nulla.
+    /// </summary>
+    private static async Task BrainCheck(string file)
+    {
+        var lines = new List<string>();
+        var memory = new ShortcutMemory();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        const int Rounds = 10_000;
+        for (var i = 0; i < Rounds; i++)
+            memory.Decide("mi mostri quanta ram è libera?");
+        lines.Add($"scorciatoia: {clock.Elapsed.TotalMilliseconds * 1000 / Rounds:0.0} µs a decisione");
+
+        foreach (var command in ShortcutSeeds.All.Select(s => s.Command).Distinct())
+        {
+            var encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(command + " | Out-Null"));
+            var result = await DevTools.RunAsync("powershell.exe", $"-NoProfile -EncodedCommand {encoded}", Environment.CurrentDirectory, TimeSpan.FromSeconds(30));
+            lines.Add($"{(result is { ExitCode: 0 } ? "ok " : "NO ")} {command}");
+        }
+
+        using var brain = new BrainService();
+        lines.Add(brain.Status);
+        if (brain.ModelInstalled)
+        {
+            string[] phrases = ["elenca le variabili di ambiente", "chi sta usando la porta 3000", "crea una cartella chiamata prova", "che tempo fa a parigi", "cancella tutti i file temporanei"];
+            foreach (var phrase in phrases)
+            {
+                var reply = await brain.DecideAsync(phrase, forced: true, Environment.CurrentDirectory, CancellationToken.None);
+                lines.Add($"{reply.Ms,6:0} ms {reply.Risk,-9} | {phrase} => {reply.Command ?? reply.Note ?? "nessuna decisione"}");
+            }
+        }
+        await File.WriteAllLinesAsync(file, lines);
+    }
+
     /// <summary>Widget dei plugin installati (dati veri dalle loro sorgenti) e finestra delle impostazioni, in PNG.</summary>
     private static async Task RenderPluginAndSettingsSnapshots(string folder)
     {
@@ -869,6 +927,36 @@ public partial class App : Application
         {
         }
 
+        public string BrainStatus => "Modello Qwen2.5 0.5B pronto";
+
+        public int BrainLearned => 12;
+
+        public bool BrainModelInstalled => true;
+
+        public bool BrainInstalling => false;
+
+        public event Action? BrainChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public void InstallBrainModel()
+        {
+        }
+
+        public void CancelBrainInstall()
+        {
+        }
+
+        public void ClearBrainMemory()
+        {
+        }
+
+        public void OpenTerminal()
+        {
+        }
+
         public string ConnectorFolder => ConnectorHost.Folder;
 
         public bool IsConnectorGranted(ConnectorManifest manifest) => manifest.Id == "casa";
@@ -1027,6 +1115,11 @@ public partial class App : Application
         SaveSnapshot((FrameworkElement)launcher.Content, Path.Combine(folder, "launcher.png"));
         launcher.PrepareSnapshot(query: "vsc");
         SaveSnapshot((FrameworkElement)launcher.Content, Path.Combine(folder, "launcher-search.png"));
+        var seeds = new ShortcutMemory();
+        launcher.Decide = (input, _) => Task.FromResult<BrainReply?>(seeds.Decide(input) is { } known ? BrainProtocol.Reply(known, 0.2) : null);
+        launcher.PrepareSnapshot(query: "> quanta ram è libera");
+        await Task.Yield();
+        SaveSnapshot((FrameworkElement)launcher.Content, Path.Combine(folder, "launcher-command.png"));
         File.WriteAllText(Path.Combine(folder, "launcher-apps.txt"), $"{catalog.Apps.Count} app");
     }
 
