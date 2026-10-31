@@ -73,6 +73,92 @@ public class PrivacyUsageTests
 public class DownloadTrackerTests
 {
     private static readonly TimeSpan T0 = TimeSpan.FromSeconds(100);
+    private const string PhoneVideo = @"C:\D\Mobile Devices\Ponyo sulla scogliera.mp4";
+
+    [Theory]
+    [InlineData(PhoneVideo, true)]
+    [InlineData(@"C:\D\mobile devices\a.jpg", true)]
+    [InlineData(@"C:\D\a.mp4", false)]
+    [InlineData(@"C:\D\Mobile Devices\sotto\a.mp4", false)]
+    public void PhoneFilesAreInTheirFolder(string path, bool expected) =>
+        Assert.Equal(expected, DownloadTracker.IsPhoneFile(path));
+
+    [Fact]
+    public void APhoneFileKeepsItsNameAndExtensionWhileGrowing()
+    {
+        var tracker = new DownloadTracker();
+        Assert.True(tracker.OnPhoneFile(PhoneVideo, 0, T0));
+        Assert.False(tracker.OnPhoneFile(PhoneVideo, 0, T0)); // lo stesso file non riparte
+
+        tracker.OnSize(PhoneVideo, 2_500_000, T0 + TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        var file = Assert.Single(tracker.Active);
+        Assert.Equal("Ponyo sulla scogliera.mp4", file.Name);
+        Assert.True(file.FromPhone);
+        Assert.Equal(2_500_000, file.Bytes);
+        Assert.Equal(2_500_000, file.BytesPerSecond);
+    }
+
+    [Fact]
+    public void WhatAPhoneFileAlreadyHadIsNotCountedAsSpeed()
+    {
+        var tracker = new DownloadTracker();
+        tracker.OnPhoneFile(PhoneVideo, 200_000_000, T0);
+        tracker.OnSize(PhoneVideo, 201_000_000, T0 + TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        Assert.Equal(1_000_000, Assert.Single(tracker.Active).BytesPerSecond);
+    }
+
+    [Fact]
+    public void APhoneFileArrivesWhenItStaysStill()
+    {
+        var tracker = new DownloadTracker();
+        tracker.OnPhoneFile(PhoneVideo, 0, T0);
+        tracker.OnSize(PhoneVideo, 1234, T0, TimeSpan.FromSeconds(1));
+
+        // Le pause fra una raffica e l'altra non sono la fine
+        Assert.Empty(tracker.TakeSettledPhoneFiles(T0 + DownloadTracker.PhoneSettleTime));
+        tracker.OnSize(PhoneVideo, 596_682_366, T0 + DownloadTracker.PhoneSettleTime, TimeSpan.FromSeconds(1));
+        Assert.Empty(tracker.TakeSettledPhoneFiles(T0 + DownloadTracker.PhoneSettleTime + TimeSpan.FromSeconds(10)));
+
+        var later = T0 + DownloadTracker.PhoneSettleTime + DownloadTracker.PhoneSettleTime + TimeSpan.FromSeconds(1);
+        Assert.Equal([PhoneVideo], tracker.TakeSettledPhoneFiles(later));
+        Assert.Empty(tracker.Active);
+    }
+
+    [Fact]
+    public void AnEmptyPhoneFileHasNotArrivedAndIsDroppedWhenStalled()
+    {
+        var tracker = new DownloadTracker();
+        tracker.OnPhoneFile(PhoneVideo, 0, T0);
+        Assert.Empty(tracker.TakeSettledPhoneFiles(T0 + TimeSpan.FromMinutes(1)));
+        Assert.Single(tracker.Active);
+        Assert.True(tracker.Prune(T0 + DownloadTracker.StallTimeout + TimeSpan.FromSeconds(1)));
+        Assert.Empty(tracker.Active);
+    }
+
+    [Fact]
+    public void APhoneFileStoppedHalfwayHasNotArrivedAndCanResume()
+    {
+        var tracker = new DownloadTracker();
+        tracker.OnPhoneFile(PhoneVideo, 0, T0);
+        tracker.OnSize(PhoneVideo, 325_300_000, T0, TimeSpan.FromSeconds(1));
+
+        Assert.Empty(tracker.TakeSettledPhoneFiles(T0 + TimeSpan.FromMinutes(1)));
+        Assert.True(tracker.Prune(T0 + DownloadTracker.StallTimeout + TimeSpan.FromSeconds(1)));
+        Assert.Empty(tracker.Active);
+
+        // Riparte: lo stesso file torna in elenco, e ciò che aveva già non conta come velocità
+        Assert.True(tracker.OnPhoneFile(PhoneVideo, 325_400_000, T0 + TimeSpan.FromMinutes(5)));
+        Assert.Equal(0, Assert.Single(tracker.Active).BytesPerSecond);
+    }
+
+    [Fact]
+    public void ACancelledPhoneFileDoesNotArrive()
+    {
+        var tracker = new DownloadTracker();
+        tracker.OnPhoneFile(PhoneVideo, 1234, T0);
+        Assert.True(tracker.OnDeleted(PhoneVideo));
+        Assert.Empty(tracker.TakeSettledPhoneFiles(T0 + TimeSpan.FromMinutes(1)));
+    }
 
     [Fact]
     public void ChromeDownloadFromUnconfirmedToFinalFile()

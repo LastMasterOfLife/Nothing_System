@@ -237,6 +237,20 @@ public sealed partial class ShellController
                 error is null ? $"{manifest.Name}: {action.Label} FATTO" : $"{manifest.Name}: {action.Label} - {error}");
 
         _kde.Changed += RefreshPhonePage;
+        _downloads.Completed += path =>
+        {
+            if (!Core.Notch.DownloadTracker.IsPhoneFile(path))
+                return;
+            try
+            {
+                _phoneFiles.Add(new ReceivedFile(path, "Collegamento al telefono", new FileInfo(path).Length, DateTimeOffset.Now));
+                RefreshPhonePage();
+            }
+            catch (IOException)
+            {
+                // spostato o cancellato appena arrivato: non c'è niente da elencare
+            }
+        };
         _kde.FileReceived += path =>
         {
             long size = 0;
@@ -296,7 +310,10 @@ public sealed partial class ShellController
 
     private void RefreshPhonePage() =>
         _notch.SetPhone(new PhonePageData(_settings.PhoneDirect, _kde.Current ?? (_settings.PhoneDirect ? _kde.Devices.FirstOrDefault(d => d.Paired) : null),
-            _kde.Status, _kde.Incoming, _phoneFiles.Files, [.. _phoneNotifications]));
+            _kde.Status, _kde.Incoming, _phoneFiles.Files, [.. _phoneNotifications])
+        {
+            Arriving = _downloads.Active.Where(d => d.FromPhone).ToArray(),
+        });
 
     /// <summary>Dalla pagina Telefono: sceglie un file e lo manda; l'esito arriva come avviso nel notch.</summary>
     private async Task SendFileToPhoneAsync()

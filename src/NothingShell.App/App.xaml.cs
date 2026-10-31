@@ -91,6 +91,10 @@ public partial class App : Application
                 await DevCheck(report);
                 Shutdown();
                 return;
+            case ["--phone-files-check", var report, var seconds]:
+                await PhoneFilesCheck(report, double.Parse(seconds, System.Globalization.CultureInfo.InvariantCulture));
+                Shutdown();
+                return;
             case ["--brain", var model]:
                 await BrainWorker.RunAsync(model);
                 Shutdown();
@@ -351,7 +355,10 @@ public partial class App : Application
             [new NothingShell.Core.Phone.ReceivedFile(@"C:\Users\Download\scontrino.pdf", "Nothing Phone (2)", 182_000, now.AddMinutes(-4)),
              new NothingShell.Core.Phone.ReceivedFile(@"C:\Users\Download\IMG_2041.jpg", "Nothing Phone (2)", 3_400_000, now.AddHours(-2))],
             [new PhoneEvent(PhoneEventKind.Message, "Laura", "Arrivo tra 10 minuti", now.AddMinutes(-2)) { App = "WhatsApp" },
-             new PhoneEvent(PhoneEventKind.MissedCall, "Mamma", string.Empty, now.AddMinutes(-30))]));
+             new PhoneEvent(PhoneEventKind.MissedCall, "Mamma", string.Empty, now.AddMinutes(-30))])
+        {
+            Arriving = [new ActiveDownload(@"C:\D\Mobile Devices\Ponyo sulla scogliera.mp4", "Ponyo sulla scogliera.mp4", 214_000_000, 1_200_000, TimeSpan.Zero) { FromPhone = true }],
+        });
         var opus = new NothingShell.Core.Agents.TokenUsage(12_400, 3_100, 2_000, 8_000, 240_000);
         notch.SetAgents(
         [
@@ -540,6 +547,23 @@ public partial class App : Application
             lines.Add("appunti: occupati");
         }
         await File.WriteAllLinesAsync(file, lines);
+    }
+
+    /// <summary>Cosa vede il controllo dei download per il tempo indicato, una riga ogni 10 s (docs/10-live-activities.md).</summary>
+    private static async Task PhoneFilesCheck(string report, double seconds)
+    {
+        void Log(string line) => File.AppendAllText(report, $"{DateTime.Now:HH:mm:ss} {line}{Environment.NewLine}");
+        using var downloads = new DownloadWatcher();
+        downloads.PhoneFileStarted += path => Log($"inizio: {path}");
+        downloads.Completed += path => Log($"arrivato: {path} {new FileInfo(path).Length} byte");
+        downloads.Start();
+        var end = DateTime.Now.AddSeconds(seconds);
+        while (DateTime.Now < end)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(10));
+            foreach (var d in downloads.Active)
+                Log($"in corso: {d.Name} {d.Bytes} byte, {d.BytesPerSecond:0} byte/s, telefono={d.FromPhone}");
+        }
     }
 
     /// <summary>

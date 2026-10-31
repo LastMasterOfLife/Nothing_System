@@ -41,6 +41,9 @@ public sealed record PhonePageData(
     IReadOnlyList<PhoneEvent> Notifications)
 {
     public static PhonePageData Empty { get; } = new(false, null, string.Empty, null, [], []);
+
+    /// <summary>File in arrivo da Collegamento al telefono (docs/10-live-activities.md): senza totale, quindi senza percentuale.</summary>
+    public IReadOnlyList<ActiveDownload> Arriving { get; init; } = [];
 }
 
 /// <summary>Righe e titoletti in comune fra le pagine alte.</summary>
@@ -154,8 +157,14 @@ public sealed class PhonePage : NotchPageView
             _list.Children.Add(hint);
         }
 
-        if (_data.Incoming is not null || _data.Files.Count > 0)
+        if (_data.Incoming is not null || _data.Arriving.Count > 0 || _data.Files.Count > 0)
             _list.Children.Add(TallRows.Caption("FILE RICEVUTI"));
+        foreach (var arriving in _data.Arriving)
+        {
+            var speed = arriving.BytesPerSecond >= 1024 ? $"{DownloadTracker.FormatBytes((long)arriving.BytesPerSecond)}/s" : "fermo";
+            _list.Children.Add(TallRows.Item(DevRows.Icon(DotIcons.Download, Theme.Red), arriving.Name, speed,
+                $"In arrivo · {DownloadTracker.FormatBytes(arriving.Bytes)} · Collegamento al telefono"));
+        }
         if (_data.Incoming is { } incoming)
         {
             _list.Children.Add(TallRows.Item(DevRows.Icon(DotIcons.Download, Theme.Red), incoming.Name,
@@ -171,7 +180,7 @@ public sealed class PhonePage : NotchPageView
                 DevRows.Buttons(DevRows.Button("APRI", () => _actions.OpenFile(path)), DevRows.Button("CARTELLA", () => _actions.ShowFile(path)))));
         }
 
-        if (device is { Connected: true } && _data.Incoming is null && _data.Files.Count == 0 && _data.Notifications.Count == 0)
+        if (device is { Connected: true } && _data.Incoming is null && _data.Arriving.Count == 0 && _data.Files.Count == 0 && _data.Notifications.Count == 0)
         {
             _list.Children.Add(TallRows.Caption("FILE E NOTIFICHE"));
             var empty = NotchUi.Text(12, Theme.GreyBrush,

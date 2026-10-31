@@ -123,7 +123,11 @@ public static class PrivacyUsage
 }
 
 /// <summary>Un download in corso, riconosciuto dal file temporaneo del browser.</summary>
-public sealed record ActiveDownload(string PartialPath, string Name, long Bytes, double BytesPerSecond, TimeSpan LastGrowth);
+public sealed record ActiveDownload(string PartialPath, string Name, long Bytes, double BytesPerSecond, TimeSpan LastGrowth)
+{
+    /// <summary>File in arrivo da Collegamento al telefono: ha già il nome vero e nessuna rinomina ne segna la fine.</summary>
+    public bool FromPhone { get; init; }
+}
 
 /// <summary>
 /// Download dei browser nella cartella Download (docs/10-live-activities.md): Chrome, Edge, Brave, Opera e
@@ -133,6 +137,12 @@ public sealed record ActiveDownload(string PartialPath, string Name, long Bytes,
 public sealed class DownloadTracker
 {
     public static readonly TimeSpan StallTimeout = TimeSpan.FromMinutes(2);
+
+    /// <summary>Sottocartella di Download in cui Collegamento al telefono scrive i file condivisi dal telefono.</summary>
+    public const string PhoneFolder = "Mobile Devices";
+
+    /// <summary>Quanto un file dal telefono deve restare fermo per dirsi arrivato. Scrive a raffiche, con pause di alcuni secondi.</summary>
+    public static readonly TimeSpan PhoneSettleTime = TimeSpan.FromSeconds(15);
 
     private static readonly string[] PartialExtensions = [".crdownload", ".part", ".partial", ".opdownload", ".download"];
 
@@ -144,6 +154,44 @@ public sealed class DownloadTracker
     {
         ArgumentNullException.ThrowIfNull(path);
         return PartialExtensions.Any(e => path.EndsWith(e, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static bool IsPhoneFile(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        return string.Equals(Path.GetFileName(Path.GetDirectoryName(path)), PhoneFolder, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// File comparso nella cartella del telefono, che nasce già col nome definitivo. <paramref name="bytes"/> è ciò che
+    /// c'è già se la shell è partita a trasferimento iniziato: non va contato come velocità.
+    /// </summary>
+    /// <returns>True se è iniziato un trasferimento.</returns>
+    public bool OnPhoneFile(string path, long bytes, TimeSpan now)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        if (_active.ContainsKey(path))
+            return false;
+        _active[path] = new ActiveDownload(path, Path.GetFileName(path), bytes, 0, now) { FromPhone = true };
+        return true;
+    }
+
+    /// <summary>Collegamento al telefono scrive a multipli esatti di questa misura; solo l'ultimo pezzo è più corto.</summary>
+    public const long PhoneChunk = 100_000;
+
+    /// <summary>
+    /// Toglie i file dal telefono fermi da <see cref="PhoneSettleTime"/>, e li restituisce come arrivati. È una stima: dal
+    /// file non si sa quanto dovrebbe essere grande. Fermo a un multiplo esatto di <see cref="PhoneChunk"/> è un
+    /// trasferimento interrotto a metà, non arrivato: lì, come per un file vuoto, decide <see cref="Prune"/>.
+    /// </summary>
+    public IReadOnlyList<string> TakeSettledPhoneFiles(TimeSpan now)
+    {
+        var settled = _active.Values
+            .Where(d => d.FromPhone && d.Bytes % PhoneChunk != 0 && now - d.LastGrowth > PhoneSettleTime)
+            .Select(d => d.PartialPath).ToArray();
+        foreach (var path in settled)
+            _active.Remove(path);
+        return settled;
     }
 
     /// <summary>Nome da mostrare: senza l'estensione temporanea; i nomi provvisori di Chrome diventano "Download".</summary>

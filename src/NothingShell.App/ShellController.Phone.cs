@@ -72,6 +72,13 @@ public sealed partial class ShellController
             if (CanShow(LiveActivity.Phone))
                 _notch.ShowCard(NotchCards.Download(path, _notch.DismissCard), CardDuration);
         };
+        _downloads.Changed += _ => RefreshPhonePage();
+        _downloads.PhoneFileStarted += path =>
+        {
+            // la pillola cede il posto a comandi e agenti: l'avviso e la pagina Telefono si vedono comunque
+            if (CanShow(LiveActivity.Downloads))
+                _notch.ShowHint(DotIcons.Download, Rendering.Theme.White, $"DAL TELEFONO: {System.IO.Path.GetFileName(path)}", NotchPage.Phone);
+        };
         _kde.UrlReceived += uri =>
         {
             Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true })?.Dispose();

@@ -43,6 +43,22 @@ Il totale non è noto dal file, quindi niente percentuale: freccia e MB scaricat
 dimensione e velocità nella pagina Sistema. Fermo da 2 minuti (pausa) → tolto. Finito → scheda *Scaricato*
 con *Apri* e *Cartella*.
 
+### File da Collegamento al telefono
+Un file condiviso dal telefono nasce subito col nome vero in `Download\Mobile Devices` e cresce a raffiche, senza
+rinomina alla fine e senza notifiche di Windows da leggere. Quindi:
+- all'inizio un avviso `DAL TELEFONO: <nome>`, che col mouse sopra apre la pagina Telefono;
+- durante il trasferimento una riga *In arrivo* nella pagina Telefono con dimensione e velocità, più la pillola e la
+  pagina Sistema come per i browser. La riga serve perché la pillola cede il posto a comandi e agenti in corso;
+- **fine stimata**: scrive a multipli esatti di 100.000 byte e solo l'ultimo pezzo è più corto. Fermo da 15 s su una
+  misura non tonda → scheda *Scaricato*. Fermo su una misura tonda è un trasferimento interrotto: la riga dice *fermo* e
+  sparisce dopo 2 minuti, senza scheda. La regola viene dall'osservazione di pochi file, non da una specifica;
+- **ripresa**: un file di quella cartella che cresce senza essere in elenco ci torna, sia se il trasferimento riparte sia
+  se la shell è stata avviata a metà;
+- **niente percentuale**: la dimensione totale la conosce solo il telefono. La percentuale c'è col collegamento diretto
+  KDE Connect, dove il telefono la dichiara.
+
+Prova sul vivo: `NothingShell.exe --phone-files-check <file> <secondi>` scrive cosa vede, senza toccare i file.
+
 ## Screenshot
 - Win+Maiusc+S e Stamp: lo Strumento di cattura mette la cattura negli appunti. Con
   `AddClipboardFormatListener` si guarda chi ha scritto gli appunti: contano solo `ScreenClippingHost` e
