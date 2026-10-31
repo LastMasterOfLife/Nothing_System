@@ -29,6 +29,8 @@ public sealed record BrainDecision(string Command, DecisionSource Source, Comman
 /// Le scorciatoie imparate (docs/15-comandi-cervello.md): frase → comando, senza passare dal modello. Una risposta
 /// esatta costa una ricerca in un dizionario. Il modello propone, ma si impara solo ciò che qualcuno ha confermato con
 /// Invio e che è riuscito; quando due scorciatoie differiscono per una parola, diventano un modello con un valore.
+/// Un comando critico può diventare una scorciatoia, ma resta da confermare ogni volta: il rischio si ricalcola a ogni
+/// decisione, non si generalizza e non vale come frase simile.
 /// </summary>
 public sealed partial class ShortcutMemory
 {
@@ -43,6 +45,7 @@ public sealed partial class ShortcutMemory
     public const int MaxEntries = 2000;
 
     private const double SimilarThreshold = 0.75;
+    private const int MaxExampleCandidates = 50;
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -83,6 +86,16 @@ public sealed partial class ShortcutMemory
         }
     }
 
+    /// <summary>Le scorciatoie con una frase fissa, senza i modelli con un valore: per confrontarle con una richiesta.</summary>
+    public IReadOnlyList<Shortcut> Phrases
+    {
+        get
+        {
+            lock (_gate)
+                return _exact.Values.ToArray();
+        }
+    }
+
     /// <summary>Decisione senza modello, oppure null. Non scrive nulla ed è pensata per stare sotto il millisecondo.</summary>
     public BrainDecision? Decide(string input)
     {
@@ -96,7 +109,8 @@ public sealed partial class ShortcutMemory
                 return Decision(exact.Command, DecisionSource.Exact, exact);
             if (MatchTemplate(tokens) is { } filled)
                 return filled;
-            return Nearest(tokens, 1).FirstOrDefault() is { Score: >= SimilarThreshold } near
+            // Una frase che somiglia non basta per proporre un comando critico.
+            return Nearest(tokens, 1).FirstOrDefault() is { Score: >= SimilarThreshold } near && CommandSafety.Classify(near.Shortcut.Command) != CommandRisk.Dangerous
                 ? Decision(near.Shortcut.Command, DecisionSource.Similar, near.Shortcut)
                 : null;
         }
@@ -107,7 +121,8 @@ public sealed partial class ShortcutMemory
     {
         ArgumentNullException.ThrowIfNull(input);
         lock (_gate)
-            return Nearest(IntentText.Tokens(input), count).Where(n => n.Score > 0).Select(n => n.Shortcut).ToArray();
+            return Nearest(IntentText.Tokens(input), MaxExampleCandidates).Where(n => n.Score > 0 && CommandSafety.Classify(n.Shortcut.Command) != CommandRisk.Dangerous)
+                .Select(n => n.Shortcut).Take(count).ToArray();
     }
 
     /// <summary>
@@ -142,7 +157,7 @@ public sealed partial class ShortcutMemory
         }
     }
 
-    /// <summary>Scorciatoia chiesta a mano: vale come già confermata, tranne che per ciò che è pericoloso.</summary>
+    /// <summary>Scorciatoia chiesta a mano: vale come già confermata, ma un comando critico chiederà comunque conferma.</summary>
     public bool Remember(string input, string command, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(input);
@@ -189,9 +204,8 @@ public sealed partial class ShortcutMemory
         }
     }
 
-    /// <summary>Non si impara ciò che è pericoloso né ciò che contiene chiavi o password: il file è in chiaro.</summary>
-    private static bool CanLearn(string input, string command) =>
-        CommandSafety.Classify(command) != CommandRisk.Dangerous &&
+    /// <summary>Non si impara ciò che contiene chiavi o password: il file è in chiaro.</summary>
+    public static bool CanLearn(string input, string command) =>
         ClipClassifier.SecretName(input) is null && ClipClassifier.SecretName(command) is null &&
         !SecretWord().IsMatch(input) && !SecretWord().IsMatch(command);
 
@@ -246,8 +260,8 @@ public sealed partial class ShortcutMemory
     /// </summary>
     private void Generalize(Shortcut learned)
     {
-        if (learned.Successes < 1)
-            return;
+        if (learned.Successes < 1 || CommandSafety.Classify(learned.Command) == CommandRisk.Dangerous)
+            return; // "cancella {0}" non deve poter nascere
         foreach (var other in _exact.Values.ToArray())
         {
             if (ReferenceEquals(other, learned) || other.Seed || other.Tokens.Count != learned.Tokens.Count)

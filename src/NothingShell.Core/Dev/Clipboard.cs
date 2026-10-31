@@ -107,6 +107,16 @@ public static partial class ClipClassifier
     public static string Mask(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
+        var masked = MaskSecrets(text);
+        if (Jwt(text.Trim()) is not null)
+            masked = text.Trim()[..Math.Min(6, text.Trim().Length)] + "••••";
+        return Preview(masked);
+    }
+
+    /// <summary>Il testo com'è, righe comprese, con i segreti mascherati.</summary>
+    public static string MaskSecrets(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
         var masked = text;
         foreach (var (name, pattern) in Secrets)
         {
@@ -120,9 +130,7 @@ public static partial class ClipClassifier
                 return m.Value[..(secret.Index - m.Index)] + hidden + m.Value[(secret.Index - m.Index + secret.Length)..];
             });
         }
-        if (Jwt(text.Trim()) is not null)
-            masked = text.Trim()[..Math.Min(6, text.Trim().Length)] + "••••";
-        return Preview(masked);
+        return masked;
     }
 
     /// <summary>Una riga, spazi compressi, al massimo <paramref name="max"/> caratteri.</summary>

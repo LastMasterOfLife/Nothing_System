@@ -21,7 +21,8 @@ public sealed record ShellSettings(
     bool PhoneDirect = false,
     IReadOnlyDictionary<string, string>? ConnectorGrants = null,
     IReadOnlyList<string>? ConnectorWidgets = null,
-    MailReaderLayout? MailReader = null)
+    MailReaderLayout? MailReader = null,
+    string? AssistantModel = null)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
 

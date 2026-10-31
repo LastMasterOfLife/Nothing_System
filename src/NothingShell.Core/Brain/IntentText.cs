@@ -35,6 +35,8 @@ public static class IntentText
         return kept.Length > 0 ? kept : words;
     }
 
+    public static bool IsFiller(string word) => Filler.Contains(word);
+
     /// <summary>Chiave senza ordine: "ram libera" e "libera ram" sono la stessa richiesta.</summary>
     public static string Key(IEnumerable<string> tokens) => string.Join(' ', tokens.Select(Stem).Order(StringComparer.Ordinal));
 

@@ -55,7 +55,16 @@ public partial class App : Application
                 await RenderBarSnapshots(folder);
                 await RenderPluginAndSettingsSnapshots(folder);
                 RenderNotchSnapshots(folder);
+                RenderRemoteSnapshots(folder);
                 await RenderAccessSnapshots(folder);
+                Shutdown();
+                return;
+            case ["--ask-demo", var report]:
+                await AskDemo(report);
+                Shutdown();
+                return;
+            case ["--remote-demo", var address, var image]:
+                await RemoteDemo(address, image);
                 Shutdown();
                 return;
             case ["--dump-windows", var file]:
@@ -110,6 +119,10 @@ public partial class App : Application
                     brain.Start();
                     await Task.Delay(TimeSpan.FromSeconds(double.Parse(seconds, System.Globalization.CultureInfo.InvariantCulture)));
                 }
+                Shutdown();
+                return;
+            case ["--assistant-check", var report, .. var questions]:
+                await AssistantCheck(report, questions);
                 Shutdown();
                 return;
             case ["--brain-install"]:
@@ -406,6 +419,8 @@ public partial class App : Application
             "Collegato", null, [], []));
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Phone), Path.Combine(folder, "notch-phone-only.png"));
 
+        RenderAssistantSnapshots(folder);
+
         var reader = new MailReaderWindow(new SnapshotMail(demo));
         reader.Select(demo[0]);
         var readerRoot = (FrameworkElement)reader.Content;
@@ -599,6 +614,56 @@ public partial class App : Application
             }
         }
         await File.WriteAllLinesAsync(file, lines);
+    }
+
+    /// <summary>
+    /// L'assistente vero, con Ollama e l'esecutore limitato, senza interfaccia. Non conferma mai nulla e non impara: ogni
+    /// richiesta di conferma risponde no, così quello che non è sola lettura non parte.
+    /// </summary>
+    private static async Task AssistantCheck(string file, string[] questions)
+    {
+        var lines = new List<string>();
+        var models = await OllamaAssistantModel.InstalledAsync(CancellationToken.None);
+        using var model = models.Count > 0 ? new OllamaAssistantModel(models[0]) : null;
+        lines.Add(model is null ? "Ollama non trovato" : $"modello: {model.Name}");
+        foreach (var question in questions)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var assistant = new CommandAssistant(new ShortcutMemory(null), new AssistantRunner(), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)) { Model = model };
+            lines.Add(string.Empty);
+            lines.Add($"### {question}");
+            await assistant.AskAsync(question, new CheckView(lines), CancellationToken.None);
+            lines.Add($"    {clock.Elapsed.TotalSeconds:0.0} s");
+        }
+        await File.WriteAllLinesAsync(file, lines);
+    }
+
+    private sealed class CheckView(List<string> lines) : IAssistantView
+    {
+        public void Thinking()
+        {
+        }
+
+        public void Running(string command)
+        {
+        }
+
+        public void Finished(AssistantStep result) =>
+            lines.Add($"  [{result.Run.Status}] {result.Command}{(result.Run.Reason is { Length: > 0 } reason ? $"  ({reason})" : string.Empty)}\n{result.Run.Output}{result.Run.Error}".TrimEnd());
+
+        public Task<bool> ConfirmAsync(AssistantConfirm request, CancellationToken token)
+        {
+            lines.Add($"  CONFERMA {request.Level}: {request.Command}  ({request.Reason})  -> no");
+            return Task.FromResult(false);
+        }
+
+        public void Answer(string text, bool verified) => lines.Add($"  RISPOSTA{(verified ? string.Empty : " NON VERIFICATA")}: {text}");
+
+        public void Choices(IReadOnlyList<string> choices) => lines.Add($"  SCELTE: {string.Join(" | ", choices)}");
+
+        public void Note(string text) => lines.Add($"  nota: {text}");
+
+        public void OfferShortcut(string phrase, string command) => lines.Add($"  si può ricordare: {phrase} -> {command}");
     }
 
     /// <summary>Widget dei plugin installati (dati veri dalle loro sorgenti) e finestra delle impostazioni, in PNG.</summary>
@@ -977,7 +1042,36 @@ public partial class App : Application
         {
         }
 
+        public string AssistantStatus => "Risponde qwen3:8b, con Ollama su questo PC";
+
+        public IReadOnlyList<string> AssistantModels => ["qwen3:8b"];
+
+        public Task NextAssistantModelAsync() => Task.CompletedTask;
+
+        public void OpenAssistant()
+        {
+        }
+
+        public void OpenCriticalCommands()
+        {
+        }
+
         public void OpenTerminal()
+        {
+        }
+
+        public IReadOnlyList<NothingShell.Core.RemoteAccess.RemoteComputer> RemoteComputers { get; } =
+            [new("Computer di Luca", "192.168.1.50", UserName: "luca"), new("Server dell'ufficio", "server.local", 3390, "admin")];
+
+        public void AddRemoteComputer()
+        {
+        }
+
+        public void EditRemoteComputer(NothingShell.Core.RemoteAccess.RemoteComputer computer)
+        {
+        }
+
+        public void RemoveRemoteComputer(NothingShell.Core.RemoteAccess.RemoteComputer computer)
         {
         }
 
@@ -1128,6 +1222,63 @@ public partial class App : Application
         }
     }
 
+    /// <summary>Pannello dell'assistente con una risposta, una richiesta di conferma critica e le scelte.</summary>
+    private static void RenderAssistantSnapshots(string folder)
+    {
+        var panel = new NothingShell.App.Notch.AssistantWindow(new SnapshotAssistant());
+        var pending = default(Task<bool>);
+        panel.PrepareSnapshot(p =>
+        {
+            p.ShowQuestion("quanto spazio libero ho sul disco C e quanta ram?");
+            p.Finished(new AssistantStep("Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{n='LiberoGB';e={$_.Free/1GB}}",
+                new AssistantRun(AssistantRunStatus.Ok, "Name LiberoGB\n---- --------\nC    110,09\nE    839,24"), ShowOutput: true));
+            p.Finished(new AssistantStep("Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory",
+                new AssistantRun(AssistantRunStatus.Ok, "dati"), ShowOutput: false));
+            p.Answer("Sul disco C hai 110 GB liberi su 475 GB. La RAM totale è 15,7 GB e ne hai 2 GB liberi.", verified: true);
+            p.OfferShortcut("spazio e ram", "Get-PSDrive");
+            p.Choices(["Controlla le cartelle più grandi", "Mostra chi usa più memoria"]);
+        });
+        SaveAssistantSnapshot(panel, Path.Combine(folder, "assistant-answer.png"));
+        panel.PrepareSnapshot(p =>
+        {
+            p.ShowQuestion("cancella i file temporanei");
+            pending = p.ConfirmAsync(new AssistantConfirm(@"Get-ChildItem -Path $env:TEMP\* -Recurse | Remove-Item -Force -Recurse", ConfirmLevel.Critical,
+                CommandSafety.Reason("Remove-Item x")!), CancellationToken.None);
+        });
+        SaveAssistantSnapshot(panel, Path.Combine(folder, "assistant-critical.png"));
+        panel.PrepareSnapshot(p =>
+        {
+            p.ShowQuestion("crea una cartella prova");
+            pending = p.ConfirmAsync(new AssistantConfirm("New-Item -ItemType Directory prova", ConfirmLevel.Change, "Può cambiare qualcosa: New-Item non è in elenco"), CancellationToken.None);
+        });
+        SaveAssistantSnapshot(panel, Path.Combine(folder, "assistant-change.png"));
+        panel.PrepareSnapshot(p =>
+        {
+            p.ShowQuestion("sistemalo");
+            p.Answer("Ci sono 0 file nella cartella.", verified: false);
+        });
+        SaveAssistantSnapshot(panel, Path.Combine(folder, "assistant-unverified.png"));
+        _ = pending;
+    }
+
+    private static void SaveAssistantSnapshot(NothingShell.App.Notch.AssistantWindow panel, string path) =>
+        SaveSnapshot((FrameworkElement)panel.Content, path);
+
+    private sealed class SnapshotAssistant : NothingShell.App.Notch.IAssistantPanelActions
+    {
+        public CommandAssistant Assistant { get; } = new(new ShortcutMemory(null, []), new AssistantRunner(), string.Empty);
+
+        public Task<string> PrepareAsync(CancellationToken token) => Task.FromResult("qwen3:8b · su questo PC");
+
+        public void OpenTerminal()
+        {
+        }
+
+        public void OpenInTerminal(string? phrase, string command, string? criticalReason)
+        {
+        }
+    }
+
     /// <summary>Launcher con il catalogo reale e le preferenze reali (sola lettura), in PNG.</summary>
     private static async Task RenderLauncherSnapshot(string folder)
     {
@@ -1191,6 +1342,120 @@ public partial class App : Application
             var widget = new ConnectorWidget(manifest);
             widget.Update(new ConnectorState(manifest, ConnectorStatus.Ok, readings, null, at));
             SaveSnapshot(widget, Path.Combine(folder, $"connector-{readings.Length}.png"));
+        }
+    }
+
+    /// <summary>Il campo sotto la data e le tre facce della finestra dei collegamenti (docs/16-assistente-notch.md), in PNG.</summary>
+    private static void RenderRemoteSnapshots(string folder)
+    {
+        var luca = new NothingShell.Core.RemoteAccess.RemoteComputer("Computer di Luca", "192.168.1.50", UserName: "luca");
+        var marta = new NothingShell.Core.RemoteAccess.RemoteComputer("Computer di Marta", "192.168.1.51", UserName: "marta");
+        var memory = new ShortcutMemory();
+        NothingShell.Core.RemoteAccess.RequestRoute Route(string text) => NothingShell.Core.RemoteAccess.RequestRouter.Route(text, [luca, marta], memory);
+
+        using var media = new MediaService();
+        var notch = new NotchWindow(media, DevPageActions.None, ConnectedPageActions.None) { AskPreview = text => Route(text).Preview };
+        notch.SetTime(DateTime.Now);
+        var pill = notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Home);
+        SaveSnapshot(pill, Path.Combine(folder, "notch-ask-empty.png"));
+        foreach (var (name, text) in new[] { ("sure", "collegati al computer di luca"), ("many", "collegati al computer"), ("new", "collegati al computer di marco") })
+        {
+            notch.SetAskForSnapshot(text);
+            SaveSnapshot(pill, Path.Combine(folder, $"notch-ask-{name}.png"));
+        }
+
+        var actions = new DemoRemoteActions();
+        var choice = new RemoteConnectWindow(actions);
+        choice.ShowChoice(Route("collegati al compiuter"));
+        SaveSnapshot(choice.PrepareSnapshot(), Path.Combine(folder, "remote-choice.png"));
+        var different = new RemoteConnectWindow(actions);
+        different.ShowChoice(Route("collegati al computer di marco"));
+        SaveSnapshot(different.PrepareSnapshot(), Path.Combine(folder, "remote-different.png"));
+        var form = new RemoteConnectWindow(actions);
+        form.ShowForm(NothingShell.Core.RemoteAccess.RequestRouter.Route("collegati al computer di marco", [], memory));
+        SaveSnapshot(form.PrepareSnapshot(), Path.Combine(folder, "remote-form.png"));
+        var log = new RemoteConnectWindow(actions);
+        log.ShowSampleLog(luca);
+        SaveSnapshot(log.PrepareSnapshot(), Path.Combine(folder, "remote-log.png"));
+    }
+
+    /// <summary>
+    /// Prova che il notch, che non prende mai il focus da solo, riceva la tastiera dopo il clic sul campo. I tasti partono
+    /// solo se il notch è davvero in primo piano: non possono finire in un'altra finestra.
+    /// </summary>
+    private static async Task AskDemo(string report)
+    {
+        var lines = new List<string>();
+        using var media = new MediaService();
+        var notch = new NotchWindow(media, DevPageActions.None, ConnectedPageActions.None)
+        {
+            AskPreview = text =>
+            {
+                lines.Add($"anteprima: {text}");
+                return text;
+            },
+        };
+        var submitted = new TaskCompletionSource<string>();
+        notch.AskSubmitted += (text, choose) => submitted.TrySetResult($"{text} (ctrl={choose})");
+        notch.SetTime(DateTime.Now);
+        var before = Interop.WindowNative.GetForegroundWindow();
+        notch.Show();
+        notch.OpenPage(NotchPage.Home);
+        await Task.Delay(400);
+        var focused = notch.BeginAskForDemo();
+        lines.Add($"tastiera al campo: {focused}");
+        if (focused)
+        {
+            var hwnd = new WindowInteropHelper(notch).Handle;
+            foreach (var key in new byte[] { 0x41, 0x42, 0x43, 0x0D }) // A B C Invio
+            {
+                if (Interop.WindowNative.GetForegroundWindow() != hwnd)
+                {
+                    lines.Add("primo piano perso: mi fermo");
+                    break;
+                }
+                Interop.WindowNative.PressKeys(key);
+                await Task.Delay(60);
+            }
+            lines.Add(await Task.WhenAny(submitted.Task, Task.Delay(1500)) == submitted.Task ? $"inviato: {submitted.Task.Result}" : "Invio non arrivato");
+        }
+        notch.Close();
+        if (before != 0)
+            Interop.WindowNative.SetForegroundWindow(before);
+        File.WriteAllLines(report, lines);
+    }
+
+    /// <summary>Una connessione vera (con <c>mstsc</c> vero) a un indirizzo di prova, con registro in PNG. Non salva nulla.</summary>
+    private static async Task RemoteDemo(string address, string image)
+    {
+        var (computer, problem) = NothingShell.Core.RemoteAccess.RemoteDesktop.Build("Prova", address, null, false);
+        if (computer is null)
+        {
+            File.WriteAllText(image + ".txt", problem);
+            return;
+        }
+        var window = new RemoteConnectWindow(new DemoRemoteActions());
+        window.Connect(computer, null);
+        window.Present();
+        while (window.IsBusy)
+            await Task.Delay(200);
+        await Task.Delay(300);
+        SaveSnapshot(window.PrepareSnapshot(), image);
+        window.Close();
+    }
+
+    private sealed class DemoRemoteActions : IRemoteConnectActions
+    {
+        public string? SaveComputer(NothingShell.Core.RemoteAccess.RemoteComputer computer, NothingShell.Core.RemoteAccess.RemoteComputer? replacing, string password) => null;
+
+        public void ComputerConnected(NothingShell.Core.RemoteAccess.RemoteComputer computer, string? phrase)
+        {
+        }
+
+        public NothingShell.Core.RemoteAccess.RemoteComputer? Current(NothingShell.Core.RemoteAccess.RemoteComputer computer) => computer;
+
+        public void AskAssistant(string text)
+        {
         }
     }
 

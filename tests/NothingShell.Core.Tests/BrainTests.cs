@@ -25,7 +25,6 @@ public class BrainTests
     [InlineData("Get-Process > out.txt")]
     [InlineData("Get-Process; New-Item x")]
     [InlineData("Get-Process | Export-Csv a.csv")]
-    [InlineData("Get-ChildItem | ForEach-Object { $_.Delete() }")]
     [InlineData("[IO.File]::WriteAllText('a','b')")]
     [InlineData("git commit -m x")]
     [InlineData("git push")]
@@ -49,8 +48,91 @@ public class BrainTests
     [InlineData("git push origin master --force")]
     [InlineData("powershell -EncodedCommand AAAA")]
     [InlineData("Stop-Process -Name chrome")]
+    [InlineData("Get-ChildItem | ForEach-Object { $_.Delete() }")]
+    [InlineData("Clear-Disk -Number 1")]
+    [InlineData("Reset-PhysicalDisk x")]
+    [InlineData("Clear-Tpm")]
+    [InlineData("systemreset -factoryreset")]
+    [InlineData("bcdedit /delete {current}")]
+    [InlineData("vssadmin delete shadows /all")]
+    [InlineData("wsl --unregister Ubuntu")]
+    [InlineData("reg delete HKCU\\Software\\x")]
+    [InlineData("net user admin nuova")]
+    [InlineData("sc delete servizio")]
+    [InlineData("robocopy a b /MIR")]
+    [InlineData("git branch -D lavoro")]
+    [InlineData("git checkout -- .")]
+    [InlineData("docker system prune -a")]
     public void DestructiveCommandsAreDangerous(string command) =>
         Assert.Equal(CommandRisk.Dangerous, CommandSafety.Classify(command));
+
+    [Theory]
+    [InlineData("r''m x")]
+    [InlineData("R`emove-Item x")]
+    [InlineData("Remove–Item x")]
+    [InlineData("cmd /c \"del x\"")]
+    [InlineData("cmd /c d^el x")]
+    [InlineData("powershell -Command \"Remove-Item x\"")]
+    [InlineData("powershell -c rm x")]
+    [InlineData("C:\\Windows\\System32\\format.com D:")]
+    [InlineData("& ('Remove'+'-Item') x")]
+    [InlineData("$c = 'rm'; & $c x")]
+    [InlineData("Get-Process\nrm x")]
+    [InlineData("[System.IO.File]::Delete('a')")]
+    [InlineData("[Diagnostics.Process]::Start('calc')")]
+    public void DisguisedCommandsAreStillDangerous(string command) =>
+        Assert.Equal(CommandRisk.Dangerous, CommandSafety.Classify(command));
+
+    [Theory]
+    [InlineData("Set-Content C:\\Windows\\win.ini x")]
+    [InlineData("Move-Item a $env:windir\\b")]
+    [InlineData("Copy-Item a 'C:\\Program Files\\b'")]
+    [InlineData("Set-ItemProperty HKLM:\\Software\\x a 1")]
+    [InlineData("New-Item C:\\Users\\me\\.nothing-shell\\x")]
+    public void ChangingSystemFoldersIsDangerousButReadingThemIsNot(string command) =>
+        Assert.Equal(CommandRisk.Dangerous, CommandSafety.Classify(command));
+
+    [Theory]
+    [InlineData("Get-ChildItem C:\\Windows")]
+    [InlineData("Get-Date -Format HH:mm")]
+    [InlineData("Select-String -Pattern 'del' a.txt")]
+    [InlineData("Get-Process | Where-Object Name -eq 'kill'")]
+    [InlineData("Get-ChildItem C:\\dev\\rm")]
+    [InlineData("Get-Content format.txt")]
+    public void AWordThatOnlyLooksLikeACommandIsNotDangerous(string command) =>
+        Assert.NotEqual(CommandRisk.Dangerous, CommandSafety.Classify(command));
+
+    [Fact]
+    public void EveryDangerousCommandSaysWhy()
+    {
+        foreach (var group in CriticalCommands.All)
+        {
+            foreach (var command in group.Commands)
+            {
+                var example = command.Replace("*", "Thing", StringComparison.Ordinal);
+                Assert.Equal(CommandRisk.Dangerous, CommandSafety.Classify(example));
+                Assert.NotNull(CommandSafety.Reason(example));
+            }
+        }
+    }
+
+    [Fact]
+    public void TheUserCanAddToTheListButNotRemoveFromIt()
+    {
+        Assert.NotEqual(CommandRisk.Dangerous, CommandSafety.Classify("kubectl delete pod x"));
+        try
+        {
+            CriticalCommands.SetUserCommands(["# commento", "", "kubectl delete", "terraform *"]);
+            Assert.Equal(CriticalCommands.UserReason, CommandSafety.Reason("kubectl delete pod x"));
+            Assert.Equal(CommandRisk.Dangerous, CommandSafety.Classify("terraform destroy"));
+            Assert.NotEqual(CommandRisk.Dangerous, CommandSafety.Classify("kubectl get pods"));
+            Assert.Equal(CommandRisk.Dangerous, CommandSafety.Classify("rm x")); // quelli di serie restano
+        }
+        finally
+        {
+            CriticalCommands.SetUserCommands([]);
+        }
+    }
 
     [Fact]
     public void PhrasesReduceToTheSameKey()
@@ -87,7 +169,7 @@ public class BrainTests
     }
 
     [Fact]
-    public void ChangesNeverRunByThemselvesAndDangerNeverLearns()
+    public void ChangesNeverRunByThemselves()
     {
         var memory = Empty();
         for (var i = 0; i < 10; i++)
@@ -95,9 +177,53 @@ public class BrainTests
         var decision = memory.Decide("nuova cartella prova")!;
         Assert.Equal(CommandRisk.Changes, decision.Risk);
         Assert.False(decision.RunNow);
+    }
 
-        Assert.False(memory.Record("pulisci", "Remove-Item * -Recurse", true, Now));
-        Assert.Null(memory.Decide("pulisci"));
+    [Fact]
+    public void ACriticalShortcutIsRememberedButNeverRunsByItself()
+    {
+        var memory = Empty();
+        for (var i = 0; i < 10; i++)
+            memory.Record("svuota cestino", "Clear-RecycleBin -Force", true, Now);
+        Assert.True(memory.Remember("pulisci temporanei", "Remove-Item $env:TEMP\\* -Recurse", Now));
+
+        foreach (var phrase in new[] { "svuota cestino", "pulisci temporanei" })
+        {
+            var decision = memory.Decide(phrase)!;
+            Assert.Equal(CommandRisk.Dangerous, decision.Risk);
+            Assert.False(decision.RunNow);
+            Assert.NotNull(BrainProtocol.Reply(decision, 1).Reason);
+        }
+    }
+
+    [Fact]
+    public void AnOldShortcutThatBecameCriticalStopsRunningByItself()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():n}.json");
+        File.WriteAllText(path, $$"""{"shortcuts":[{"tokens":["pulisci"],"command":"sfc /scannow","successes":50,"failures":0,"lastUsed":"{{Now:O}}"}]}""");
+        try
+        {
+            var decision = new ShortcutMemory(path, []).Decide("pulisci")!;
+            Assert.Equal(CommandRisk.Dangerous, decision.Risk);
+            Assert.False(decision.RunNow);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void ACriticalCommandDoesNotGeneralizeNorSpreadToSimilarPhrases()
+    {
+        var memory = Empty();
+        memory.Record("cancella prova", "Remove-Item prova", true, Now);
+        memory.Record("cancella bozza", "Remove-Item bozza", true, Now);
+        Assert.Null(memory.Decide("cancella documenti")); // niente "cancella {0}"
+
+        memory.Record("rimuovi vecchi log applicazione server", "Remove-Item C:\\log -Recurse", true, Now);
+        Assert.Null(memory.Decide("vecchi log applicazione server ieri"));
+        Assert.Empty(memory.Examples("vecchi log applicazione server ieri", 3));
     }
 
     [Fact]

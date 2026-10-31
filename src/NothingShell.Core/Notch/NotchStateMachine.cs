@@ -28,6 +28,9 @@ public sealed class NotchStateMachine
 
     public NotchState State { get; private set; } = NotchState.Idle;
 
+    /// <summary>Si sta scrivendo nel campo della Home: il notch resta aperto anche col mouse altrove.</summary>
+    public bool Held { get; private set; }
+
     /// <summary>Istante in cui il notch espanso si richiuderà se non arrivano altri eventi.</summary>
     public TimeSpan? CollapseDeadline { get; private set; }
 
@@ -94,10 +97,33 @@ public sealed class NotchStateMachine
     public bool OnPointerLeave(TimeSpan now)
     {
         if (State == NotchState.Expanded)
-            CollapseDeadline = now + LeaveDelay;
+        {
+            if (!Held)
+                CollapseDeadline = now + LeaveDelay;
+        }
         else if (State == NotchState.Card)
+        {
             AlertDeadline = now + CardLeaveDelay;
+        }
         return false;
+    }
+
+    /// <summary>Tiene aperto il notch mentre si scrive. Lasciandolo col mouse altrove si richiude come al solito.</summary>
+    public void Hold(bool held, bool pointerOver, TimeSpan now)
+    {
+        Held = held;
+        if (held)
+            CollapseDeadline = null;
+        else if (State == NotchState.Expanded && !pointerOver)
+            CollapseDeadline = now + LeaveDelay;
+    }
+
+    /// <summary>Richiude subito il notch, anche col mouse sopra: la richiesta passa alla finestra dell'assistente.</summary>
+    public bool Collapse()
+    {
+        Held = false;
+        CollapseDeadline = null;
+        return State == NotchState.Expanded && SetState(CollapsedState);
     }
 
     public bool Tick(TimeSpan now)

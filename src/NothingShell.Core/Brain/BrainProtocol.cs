@@ -7,7 +7,7 @@ namespace NothingShell.Core.Brain;
 /// <summary>Una richiesta sulla pipe <c>NothingShell.Brain</c>: una riga JSON per connessione, una riga di risposta.</summary>
 public sealed record BrainRequest(string Op, string? Input = null, string? Command = null, bool Ok = false, bool Forced = false, string? Cwd = null);
 
-public sealed record BrainReply(string? Command = null, string? Source = null, string? Risk = null, bool RunNow = false, double Ms = 0, string? Note = null);
+public sealed record BrainReply(string? Command = null, string? Source = null, string? Risk = null, bool RunNow = false, double Ms = 0, string? Note = null, string? Reason = null);
 
 /// <summary>Formato della pipe e del dialogo col processo del modello, e testo mandato al modello.</summary>
 public static class BrainProtocol
@@ -55,7 +55,8 @@ public static class BrainProtocol
     }
 
     public static BrainReply Reply(BrainDecision decision, double milliseconds) =>
-        new(decision.Command, decision.Source.ToString().ToLowerInvariant(), decision.Risk.ToString().ToLowerInvariant(), decision.RunNow, milliseconds);
+        new(decision.Command, decision.Source.ToString().ToLowerInvariant(), decision.Risk.ToString().ToLowerInvariant(), decision.RunNow, milliseconds,
+            Reason: decision.Risk == CommandRisk.Dangerous ? CommandSafety.Reason(decision.Command) : null);
 
     /// <summary>Il prompt per il modello: istruzioni, le scorciatoie più vicine alla frase come esempi, la frase.</summary>
     public static string ModelPrompt(string input, IReadOnlyList<Shortcut> examples, string? cwd)

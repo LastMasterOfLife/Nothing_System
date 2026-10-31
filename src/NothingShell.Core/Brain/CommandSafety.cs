@@ -11,14 +11,15 @@ public enum CommandRisk
     /// <summary>Tutto il resto, compreso ciò che non si riesce a capire: serve Invio.</summary>
     Changes,
 
-    /// <summary>Cancella, spegne, scarica ed esegue: serve Invio e il comando non si impara.</summary>
+    /// <summary>È nell'elenco dei comandi critici (<see cref="CriticalCommands"/>): serve sempre una conferma esplicita.</summary>
     Dangerous,
 }
 
 /// <summary>
 /// Classificazione prudente del testo di un comando (docs/15-comandi-cervello.md). La sola lettura è un elenco di ciò
-/// che è permesso: quello che non è riconosciuto conta come modifica. Non è una difesa contro chi vuole ingannarla:
-/// serve a decidere cosa può partire senza conferma, e lì passano solo comandi già confermati in passato.
+/// che è permesso: quello che non è riconosciuto conta come modifica, quello critico è nell'elenco a parte. Non è una
+/// difesa contro chi vuole ingannarla: a far partire da solo ciò che propone il modello ci pensa l'esecutore limitato
+/// (tools/NothingShell.Agent.ps1), che guarda l'albero sintattico vero.
 /// </summary>
 public static partial class CommandSafety
 {
@@ -40,23 +41,6 @@ public static partial class CommandSafety
         "status", "log", "diff", "show", "blame", "shortlog", "describe", "rev-parse",
     };
 
-    /// <summary>
-    /// Anche dentro un blocco di script o come parametro di un altro comando. Il confine di parola esclude i casi come
-    /// <c>Get-Format</c>; il rischio è solo chiedere una conferma in più.
-    /// </summary>
-    [GeneratedRegex("""
-        (?:^|[\s;|&({])(?:
-            Remove-\w+|rm|rmdir|rd|del|erase|ri|Clear-(?:Content|RecycleBin|Disk|EventLog)|Format-Volume|format|diskpart|
-            bcdedit|cipher|vssadmin|wbadmin|Stop-Computer|Restart-Computer|shutdown|Invoke-Expression|iex|Invoke-Command|icm|
-            Start-Process|saps|Set-ExecutionPolicy|Add-MpPreference|Set-MpPreference|Disable-\w+|Unregister-\w+|Uninstall-\w+|
-            Stop-Process|kill|taskkill|Stop-Service|takeown|icacls|net\s+(?:user|localgroup)|reg\s+(?:delete|add)|
-            git\s+(?:clean|reset\s+--hard)|git\s+push\s+[^|;]*--force
-        )(?=$|[\s;|&)}])
-        |https?://[^\s|]+\s*\|\s*(?:iex|Invoke-Expression|sh|bash|cmd|powershell|pwsh)\b
-        |DownloadString|FromBase64String|-EncodedCommand\b
-        """, RegexOptions.IgnoreCase | RegexOptions.IgnorePatternWhitespace | RegexOptions.CultureInvariant)]
-    private static partial Regex DangerousPattern();
-
     /// <summary>Separatori di comandi, reindirizzamenti, sottoespressioni, assegnazioni e chiamate a .NET.</summary>
     [GeneratedRegex(@"[;&<>`]|\$\(|::|\.\w+\(|\$[\w:]+\s*=|@\{", RegexOptions.CultureInvariant)]
     private static partial Regex CompoundPattern();
@@ -68,11 +52,20 @@ public static partial class CommandSafety
     {
         ArgumentNullException.ThrowIfNull(command);
         var text = command.Trim();
-        if (text.Length == 0 || text.Contains('\n', StringComparison.Ordinal))
-            return text.Length == 0 ? CommandRisk.Changes : Classify(text.ReplaceLineEndings(" ")) == CommandRisk.Dangerous ? CommandRisk.Dangerous : CommandRisk.Changes;
-        if (DangerousPattern().IsMatch(text))
+        if (text.Length == 0)
+            return CommandRisk.Changes;
+        if (Reason(text) is not null)
             return CommandRisk.Dangerous;
-        return IsReadOnly(text) ? CommandRisk.ReadOnly : CommandRisk.Changes;
+        return !text.Contains('\n', StringComparison.Ordinal) && IsReadOnly(text) ? CommandRisk.ReadOnly : CommandRisk.Changes;
+    }
+
+    /// <summary>Perché il comando è critico, da mostrare a chi deve confermare; null se non lo è.</summary>
+    public static string? Reason(string command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var text = command.Trim();
+        var readOnly = !text.Contains('\n', StringComparison.Ordinal) && IsReadOnly(text);
+        return CriticalCommands.Reason(CriticalCommands.Normalize(text), readOnly);
     }
 
     private static bool IsReadOnly(string text)

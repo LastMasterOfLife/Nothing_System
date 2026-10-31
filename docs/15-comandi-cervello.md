@@ -3,6 +3,67 @@
 Nothing Shell esegue tutto ciò che esegue PowerShell, e capisce anche le frasi. Un piccolo modello locale decide
 cosa fare quando serve; con l'uso le decisioni confermate diventano scorciatoie e il modello serve sempre meno.
 
+## L'assistente nel notch
+Il pulsante del terminale in basso a destra nel notch espanso, su ogni pagina (o *Chiedi o scrivi un comando…* nel menù
+col tasto destro), apre una casella: si scrive cosa serve e sotto compaiono i comandi eseguiti, la risposta e le scelte.
+*TERMINALE* apre la console vera, *NUOVA* dimentica la conversazione, Esc interrompe o chiude.
+
+```
+quanto spazio libero ho sul disco C e quanta ram?
+  ✓ Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{n='LiberoGB';e={$_.Free/1GB}}…
+  ✓ Get-CimInstance Win32_OperatingSystem | Select-Object @{n='LiberaGB';e={$_.FreePhysicalMemory/1MB}}…
+  Sul disco C hai 109,75 GB liberi. La RAM totale è 15,7 GB e ne hai 2,16 GB liberi.
+```
+
+Il modello lavora a turni con tre forme: `COMANDO:` (si esegue e il risultato torna al modello), `RISPOSTA:` e `SCELTE:`
+(pulsanti che mandano la scelta come nuova domanda). Al massimo 6 comandi per domanda. Le frasi già note leggono subito,
+senza aspettare il modello, che poi scrive la risposta. *RICORDA COME SCORCIATOIA* insegna una frase risolta da un solo
+comando: quello che il modello esegue da solo non si impara se non lo si chiede. `>` davanti rende il testo sempre un
+comando, `?` sempre una frase.
+
+Una risposta senza alcun comando riuscito è segnata *Non verificata*: nelle prove un modello, dopo due comandi rifiutati,
+ha risposto "ci sono 0 file". Il modello riceve i risultati come dati, tra delimitatori, e con l'istruzione di non obbedire
+a ciò che c'è scritto; i segreti riconosciuti sono mascherati prima di arrivare allo schermo e al modello.
+
+### Chi risponde
+| Modello | Tempo | Esito nelle prove |
+|---|---|---|
+| Ollama, `qwen3:8b` (i7-1255U, senza GPU) | 35–115 s a domanda, 8–30 s a turno | legge i dati veri e risponde con i numeri giusti |
+| Qwen2.5 0.5B incorporato | 2–3 s a turno | si inventa le risposte ("il sistema è stato configurato correttamente") |
+
+Per questo il modello piccolo non scrive mai risposte: senza Ollama propone un solo comando, che passa dallo stesso
+cancello e di cui si vede il risultato, e quando non sa decidere offre le scorciatoie più vicine. Ollama si cerca su
+`127.0.0.1:11434`; il modello si cambia in Impostazioni › Sviluppo. Nulla esce dal PC. `qwen3:8b` occupa 5,5 GB mentre è
+carico e si libera dopo 3 minuti; con poca RAM libera i tempi peggiorano.
+
+### Il cancello
+Ogni comando dell'assistente, da chiunque arrivi, passa da qui nell'ordine:
+
+1. **Critico** (elenco qui sotto): due clic distinti su *ESEGUI*, entro 4 s. Non si conferma con Invio, e un doppio clic
+   vale uno solo. Vale anche per le scorciatoie e per i comandi scritti a mano nel pannello.
+2. **Scritto a mano nel pannello**: parte com'è.
+3. **Sola lettura verificata** dall'esecutore limitato: parte da solo.
+4. **Tutto il resto**: un clic su *ESEGUI*. L'elenco critico non può essere completo, quindi ciò che non è riconosciuto
+   come lettura non parte da solo anche se non è nell'elenco.
+
+*NEL TERMINALE* passa il comando alla console vera, per i programmi interattivi; se è critico lì si deve scrivere SI.
+
+### L'esecutore limitato
+`tools/NothingShell.Agent.ps1` è ciò che rende possibile far partire da solo un comando del modello. Tre barriere:
+
+- **Albero sintattico**: solo comandi di un elenco chiuso e con il nome scritto per esteso, niente metodi, assegnazioni,
+  cicli, reindirizzamenti, stringhe composte, percorsi di rete, parametri come `-ComputerName` (anche abbreviati).
+- **Sessione a parte**: tutto il resto è nascosto e non ci sono programmi fuori elenco.
+- **Linguaggio limitato di PowerShell**: niente .NET, nemmeno con una conversione come `[System.IO.StreamWriter]'a'`.
+
+La prima è indispensabile: provato, un blocco dato a `Where-Object` vede anche i comandi nascosti. Il rifiuto di una forma
+riscrivibile torna al modello, al massimo 2 volte; poi decide l'utente. Limite di 20 s, 2 minuti per quelli confermati;
+nessuno standard input, così chi chiede qualcosa fallisce invece di restare appeso.
+
+Non c'è nessun comando di rete, quindi ciò che si legge non può uscire dal PC. La lettura invece non ha confini: i file di
+credenziali noti (`.ssh`, `.env`…) sono rifiutati, ma con caratteri jolly si può aggirare il controllo del nome. Git legge
+la configurazione del repository: `core.fsmonitor` è spento, ma un repository ostile resta un rischio.
+
 ## Il terminale
 *Terminale Nothing* nel launcher, *Apri terminale* in Impostazioni › Sviluppo, oppure `>` nel launcher.
 
@@ -36,22 +97,55 @@ può correggere, e una nota dice da dove viene:
 Get-Service | Where-Object Status -eq Running  # nothing: modello 1540 ms, Invio per eseguire
 ```
 
-Nel launcher: `> frase` mostra la decisione. Invio esegue quello che si vede (due volte se è pericoloso), Ctrl+Invio
-il testo così com'è scritto.
+Nel launcher: `> frase` mostra la decisione. Invio esegue quello che si vede, Ctrl+Invio il testo così com'è scritto; se
+è critico, il terminale che si apre chiede di scrivere SI.
 
 ## Chi può far partire cosa
-| Origine | Sola lettura | Modifica | Pericoloso |
+| Origine, nel terminale | Sola lettura | Modifica | Critico |
 |---|---|---|---|
-| Modello, frase simile | Invio | Invio | Invio, segnalato |
-| Scorciatoia con meno di 3 riuscite, o appena fallita | Invio | Invio | non si impara |
-| Scorciatoia con almeno 3 riuscite | **parte da sola** | Invio | non si impara |
+| Modello | Invio | Invio | scrivere SI |
+| Frase simile | Invio | Invio | non si propone |
+| Scorciatoia con meno di 3 riuscite, o appena fallita | Invio | Invio | scrivere SI |
+| Scorciatoia con almeno 3 riuscite | **parte da sola** | Invio | scrivere SI |
+| Comando scritto a mano | parte com'è | parte com'è | parte com'è |
 
 Il modello non è affidabile e il modello di rischio lo presume: nelle prove, a "elenca i file" ha risposto una volta con
 `Get-ChildItem … | Remove-Item -Force`. Per questo una sua proposta non parte mai da sola.
 
 `CommandSafety` (Core, testato) lavora sul testo. La sola lettura è un elenco chiuso: tutto ciò che non riconosce conta
 come modifica. Non è una difesa contro chi vuole ingannarla: decide solo cosa può partire senza Invio, e lì arrivano solo
-comandi già confermati in passato.
+comandi già confermati in passato. Ciò che il modello fa partire da solo passa dall'esecutore limitato.
+
+## I comandi critici
+`CriticalCommands` (Core, testato) è l'elenco di ciò che cancella dati, azzera una memoria, resetta il sistema o può
+rendere inutilizzabile la macchina; si legge anche in Impostazioni › Sviluppo, con il motivo che compare nella conferma:
+
+| Motivo | Per esempio |
+|---|---|
+| Cancella file, cartelle o altri dati | `Remove-*`, `rm`, `del`, `Clear-RecycleBin`, `robocopy /mir` |
+| Cancella, formatta o ripartiziona un disco | `Format-Volume`, `diskpart`, `Clear-Disk`, `fsutil`, `chkdsk /f` |
+| Reimposta o ripristina il sistema, o azzera una memoria | `systemreset`, `Reset-*`, `Restore-*`, `bcdedit`, `sfc`, `dism`, `Clear-Tpm`, `Clear-History` |
+| Spegne, riavvia o chiude la sessione | `Stop-Computer`, `shutdown`, `logoff` |
+| Chiude processi o cambia i servizi di Windows | `Stop-Process`, `taskkill`, `sc delete`, `net stop` |
+| Cambia utenti, password o permessi | `icacls`, `net user`, `Set-ExecutionPolicy` |
+| Abbassa le protezioni del sistema | `Disable-*`, `Set-MpPreference`, `netsh advfirewall` |
+| Modifica il registro di sistema | `reg add`, `reg delete`, `regedit` |
+| Disinstalla programmi o cancella ambienti | `Uninstall-*`, `winget uninstall`, `wsl --unregister`, `docker system prune` |
+| Avvia codice che non si può controllare prima | `Invoke-Expression`, `Start-Process`, `curl … \| sh`, Base64 |
+| Può far perdere lavoro su git | `git reset --hard`, `git push --force`, `git clean`, `git branch -D` |
+
+Contano anche i metodi .NET (`$_.Delete()`, `[IO.File]::Delete`), le scritture travestite (`r''m`, un apice inverso dentro il nome, `cmd /c
+"del x"`, un nome calcolato con `& (...)`), e qualsiasi modifica a cartelle di sistema, `HKLM:` o `.nothing-shell`. Le parole
+corte contano solo dove comincia un comando: `Select-String 'del' a.txt` non è critico.
+
+**Una scorciatoia non aggira nulla.** Un comando critico si può imparare ("svuota cestino"), ma il rischio si ricalcola a ogni
+decisione, quindi non diventa mai fidato, nemmeno se è riuscito cento volte o se è entrato nell'elenco dopo essere stato
+imparato. Non genera modelli con un valore ("cancella {0}"), non vale come frase simile e non finisce negli esempi del modello.
+
+Nel terminale un comando scritto a mano parte com'è: l'ha scritto l'utente, e Invio è già la conferma.
+
+*AGGIUNGI I TUOI* apre `%USERPROFILE%\.nothing-shell\brain\comandi-critici.txt`: una voce per riga, scritta come al prompt
+(`kubectl delete`, `terraform *`), valida dal prossimo avvio. Si aggiungono a quelle di serie, che non si possono togliere.
 
 ## Come impara
 Si impara **solo** ciò che è stato eseguito dopo Invio, in `%USERPROFILE%\.nothing-shell\brain\shortcuts.json`:
@@ -64,8 +158,8 @@ Si impara **solo** ciò che è stato eseguito dopo Invio, in `%USERPROFILE%\.not
   lettere, cifre, `. _ -` e nessun trattino iniziale, così una frase non può iniettare comandi né parametri.
 - **Esempi per il modello**: più scorciatoie ci sono, migliori sono gli esempi che riceve.
 
-Non si impara ciò che è pericoloso, né ciò che contiene chiavi, token o password: il file è in chiaro. Si tengono al
-massimo 2000 scorciatoie, togliendo le meno recenti.
+Non si impara ciò che contiene chiavi, token o password: il file è in chiaro. Si tengono al massimo 2000 scorciatoie,
+togliendo le meno recenti.
 
 `ricorda "frase" "comando"` ne insegna una a mano, `dimentica "frase"` la toglie; *Dimentica le scorciatoie* nelle
 impostazioni azzera tutto. Le scorciatoie di serie coprono RAM, disco, IP, processi, servizi, porte, versione di
@@ -107,6 +201,8 @@ Se Nothing Shell non è aperta, PowerShell funziona come sempre: i comandi veri 
 
 ## Diagnostica
 - `NothingShell.exe --brain-check <file>`: tempi, ogni scorciatoia di serie provata, risposte del modello. Non impara nulla.
+- `NothingShell.exe --assistant-check <file> <domanda>…`: l'assistente vero, senza interfaccia e con le sole scorciatoie
+  di serie. Risponde no a ogni conferma e non impara nulla.
 - `NothingShell.exe --brain-install`: scarica il modello senza interfaccia.
 - `NothingShell.exe --brain-serve <file> <pipe> <secondi>`: solo il cervello, con scorciatoie e pipe proprie, accanto alla
   shell aperta; il terminale di prova la usa con `NOTHINGSHELL_BRAIN_PIPE`.
@@ -114,5 +210,7 @@ Se Nothing Shell non è aperta, PowerShell funziona come sempre: i comandi veri 
 ## Limiti
 - Una frase che comincia con un comando esistente è quel comando ("sort i file" lancia `sort`): si usa `?`.
 - Durante l'attesa del modello il terminale non accetta tasti, fino a 30 s al primo avvio.
+- Nel pannello ogni comando parte in un PowerShell nuovo, dalla cartella dell'utente e senza profilo: `cd` non resta, e gli
+  alias del profilo non ci sono.
 - Una riga completamente riscritta dopo una proposta conta come correzione di quella frase.
 - La scelta del comando non dipende dalla cartella: una scorciatoia vale ovunque.

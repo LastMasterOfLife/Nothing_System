@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using NothingShell.App.Rendering;
+using NothingShell.Core.Brain;
 using NothingShell.Core.Connectors;
 using NothingShell.Core.Widgets;
 using NothingShell.Core.DotMatrix;
@@ -170,6 +171,27 @@ public interface IShellSettingsActions
     void ClearBrainMemory();
 
     void OpenTerminal();
+
+    /// <summary>Scorciatoie dei computer con Desktop remoto (docs/16-assistente-notch.md).</summary>
+    IReadOnlyList<NothingShell.Core.RemoteAccess.RemoteComputer> RemoteComputers { get; }
+
+    void AddRemoteComputer();
+
+    void EditRemoteComputer(NothingShell.Core.RemoteAccess.RemoteComputer computer);
+
+    void RemoveRemoteComputer(NothingShell.Core.RemoteAccess.RemoteComputer computer);
+
+    /// <summary>Pannello che si apre dal notch: chi risponde.</summary>
+    string AssistantStatus { get; }
+
+    IReadOnlyList<string> AssistantModels { get; }
+
+    Task NextAssistantModelAsync();
+
+    void OpenAssistant();
+
+    /// <summary>Apre il file dei comandi critici aggiunti dall'utente, creandolo se manca.</summary>
+    void OpenCriticalCommands();
 }
 
 /// <summary>Pagine del menù laterale, nell'ordine in cui compaiono.</summary>
@@ -451,11 +473,49 @@ public sealed class SettingsWindow : Window
             _shell.BrainInstalling ? ("ANNULLA DOWNLOAD", _shell.CancelBrainInstall)
             : _shell.BrainModelInstalled ? ("DIMENTICA LE SCORCIATOIE", _shell.ClearBrainMemory)
             : ("SCARICA IL MODELLO", _shell.InstallBrainModel));
+
+        Section("ASSISTENTE NEL NOTCH");
+        Note("Il pulsante in basso a destra nel notch apre una casella: scrivi cosa ti serve e i comandi di sola lettura partono da " +
+             "soli, fino alla risposta. Tutto resta su questo PC.", Theme.GreyBrush);
+        Note(_shell.AssistantStatus, Theme.WhiteBrush);
+        if (_shell.AssistantModels.Count > 1)
+            ButtonRow(("APRI", () =>
+            {
+                _shell.OpenAssistant();
+                return Task.CompletedTask;
+            }), ("CAMBIA MODELLO", _shell.NextAssistantModelAsync));
+        else
+            ButtonRow(("APRI", _shell.OpenAssistant));
+
+        Section("COMANDI CRITICI");
+        Note("Partono solo dopo una conferma esplicita, anche se sono scorciatoie imparate: nel notch due clic, nel terminale bisogna scrivere SI. " +
+             "Un comando scritto a mano nel terminale resta tuo e parte com'è. Quello che non è sola lettura verificata chiede comunque un clic.", Theme.GreyBrush);
+        foreach (var group in CriticalCommands.All)
+        {
+            Note(group.Reason, Theme.WhiteBrush);
+            Note(string.Join("  ·  ", group.Commands), Theme.GreyBrush);
+        }
+        ButtonRow(("AGGIUNGI I TUOI", _shell.OpenCriticalCommands));
+    }
+
+    /// <summary>Le scorciatoie del campo sotto la data nel notch (docs/16-assistente-notch.md).</summary>
+    private void RemoteComputersSection()
+    {
+        Section("COMPUTER REMOTI");
+        Note("Nel notch, sotto la data: \"collegati al computer di Luca\". Nel file ci sono solo nome, indirizzo e utente; le " +
+             "password restano nel Gestore credenziali di Windows, dove le salva anche Desktop remoto.", Theme.GreyBrush);
+        foreach (var computer in _shell.RemoteComputers)
+        {
+            Note($"{computer.Name} · {computer.Address}{(computer.UserName is { } user ? $" · {user}" : string.Empty)}", Theme.WhiteBrush);
+            ButtonRow(("MODIFICA", () => _shell.EditRemoteComputer(computer)), ("RIMUOVI", () => _shell.RemoveRemoteComputer(computer)));
+        }
+        ButtonRow(("AGGIUNGI COMPUTER", _shell.AddRemoteComputer));
     }
 
     private void DevPage()
     {
         BrainSection();
+        RemoteComputersSection();
 
         Section("NEL NOTCH");
         ActivityRow(LiveActivity.Tasks, "Comandi e build", "Tempo nella pillola, scheda alla fine con il primo errore, pagina Lavoro");

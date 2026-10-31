@@ -1,4 +1,4 @@
-# Nothing Shell: comandi, build e git push nel notch (docs/12-sviluppo.md).
+﻿# Nothing Shell: comandi, build e git push nel notch (docs/12-sviluppo.md).
 #
 #   Import-Module '<cartella di NothingShell.exe>\tools\NothingShell.psm1'
 #   Enable-NothingShellPrompt          # facoltativo: comandi lunghi e git push anche senza ns
@@ -184,10 +184,15 @@ function Test-NothingShellPhrase {
     return -not (Get-Command -Name $word -ErrorAction Ignore)
 }
 
+function Format-NothingShellQuote {
+    param([string]$Text)
+    "'" + ($Text -replace "['’‘]", '$0$0') + "'"
+}
+
 function Format-NothingShellNote {
     param($Reply)
     $origin = switch ($Reply.source) { 'model' { 'modello' } 'similar' { 'simile' } default { 'scorciatoia' } }
-    $state = if ($Reply.runNow) { 'eseguo' } elseif ($Reply.risk -eq 'dangerous') { 'PERICOLOSO, Invio per eseguire' } else { 'Invio per eseguire' }
+    $state = if ($Reply.runNow) { 'eseguo' } else { 'Invio per eseguire' }
     "  # nothing: $origin $([int][math]::Ceiling($Reply.ms)) ms, $state"
 }
 
@@ -229,6 +234,14 @@ function Invoke-NothingShellEnter {
         return
     }
 
+    # Un comando critico, anche da una scorciatoia, non resta nella riga dove basta Invio: si chiede di scrivere SI.
+    if ($reply.risk -eq 'dangerous') {
+        $question = 'Invoke-NothingShellProposal -Command ' + (Format-NothingShellQuote $reply.command) + ' -Phrase ' + (Format-NothingShellQuote $phrase) + ' -Critical ' + (Format-NothingShellQuote $(if ($reply.reason) { $reply.reason } else { 'Comando critico' }))
+        [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $working.Length, $question)
+        [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+        return
+    }
+
     $script:PendingPhrase = $phrase
     [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $working.Length, $reply.command + (Format-NothingShellNote $reply))
     if ($reply.runNow) { [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine() }
@@ -255,10 +268,21 @@ function Disable-NothingShellBrain {
 
 <#
 .SYNOPSIS
-Esegue un comando già confermato (dal launcher) e impara dall'esito.
+Esegue un comando già confermato (dal launcher) e impara dall'esito. Con -Critical chiede prima di scrivere SI.
 #>
 function Invoke-NothingShellProposal {
-    param([string]$Phrase, [Parameter(Mandatory)][string]$Command)
+    param([string]$Phrase, [Parameter(Mandatory)][string]$Command, [string]$Critical)
+    if ($Critical) {
+        Write-Host ''
+        Write-Host '  COMANDO CRITICO' -ForegroundColor Red
+        Write-Host "  $Critical" -ForegroundColor Red
+        Write-Host "  $Command"
+        Write-Host ''
+        if ((Read-Host '  Scrivi SI per eseguirlo, qualsiasi altra cosa per annullare') -cne 'SI') {
+            Write-Host '  Non eseguito.'
+            return
+        }
+    }
     $global:LASTEXITCODE = 0
     $failed = $false
     try {

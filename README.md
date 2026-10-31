@@ -103,6 +103,11 @@ locale. Ciò che propone il modello aspetta Invio; ciò che viene confermato e r
 millisecondo, e dopo 3 riuscite un comando di sola lettura parte da solo. Il modello (469 MB) si scarica solo su richiesta da
 Impostazioni › Sviluppo. Dettagli in [docs/15-comandi-cervello.md](docs/15-comandi-cervello.md).
 
+**Il campo nel notch**: subito sotto la data si scrive cosa serve, per esempio "collegati al computer di Luca". La riga sotto il
+campo dice quale scorciatoia userà Invio prima di premerlo; se ne corrispondono più di una, o una solo simile, si sceglie.
+Invio apre una finestra con i comandi veri dal vivo, fino all'apertura di Desktop remoto. Le password restano nel Gestore
+credenziali di Windows. Dettagli in [docs/16-assistente-notch.md](docs/16-assistente-notch.md).
+
 Le impostazioni (tasto destro su barra, notch o widget → *Impostazioni…*, oppure "Impostazioni
 Nothing Shell" nel launcher) hanno un menù laterale con una pagina per funzione (Generale, Notch, Telefono, Posta,
 Agenda, Sviluppo, Agenti, Connettori, Accesso, Widget, Plugin, Info) e applicano subito ogni modifica.

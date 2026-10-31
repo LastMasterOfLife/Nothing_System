@@ -11,11 +11,19 @@ public static class NotchLayout
     /// <summary>Altezza del notch espanso sulle pagine con un elenco che scorre (Posta, Telefono, Agenti, Dispositivi).</summary>
     public const double TallHeight = 340;
 
+    /// <summary>Altezza della Home con l'ora: subito sotto la data c'è il campo per chiedere, con la sua riga.</summary>
+    public const double HomeHeight = 190;
+
+    /// <summary>Altezza della Home con la musica, che ha i controlli sopra il campo.</summary>
+    public const double HomeMediaHeight = 232;
+
     public static bool IsTall(NotchPage page) => page is NotchPage.Mail or NotchPage.Phone or NotchPage.Agents or NotchPage.Devices;
 
     /// <summary>Notch espanso su <paramref name="page"/>: le pagine con un elenco si allungano in verticale.</summary>
-    public static Size2 Expanded(NotchPage page) =>
-        IsTall(page) ? new(For(NotchState.Expanded).Width, TallHeight) : For(NotchState.Expanded);
+    public static Size2 Expanded(NotchPage page, bool media = false) =>
+        IsTall(page) ? new(For(NotchState.Expanded).Width, TallHeight)
+        : page == NotchPage.Home ? new(For(NotchState.Expanded).Width, media ? HomeMediaHeight : HomeHeight)
+        : For(NotchState.Expanded);
 
     public static Size2 For(NotchState state) => state switch
     {

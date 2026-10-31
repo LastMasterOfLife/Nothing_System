@@ -309,7 +309,8 @@ public sealed partial class LauncherWindow : Window
 
     /// <summary>
     /// Riga <c>&gt;</c>: un comando PowerShell o una frase (docs/15-comandi-cervello.md). Invio esegue ciò che si vede;
-    /// Ctrl+Invio il testo così com'è scritto. Si apre sempre il terminale: i programmi interattivi funzionano.
+    /// Ctrl+Invio il testo così com'è scritto. Si apre sempre il terminale: i programmi interattivi funzionano, e un
+    /// comando critico lì chiede di scrivere SI.
     /// </summary>
     private void ShowCommand(string text)
     {
@@ -345,21 +346,11 @@ public sealed partial class LauncherWindow : Window
 
         var dangerous = reply.Risk == "dangerous";
         var origin = reply.Source == "model" ? "MODELLO" : reply.Source == "similar" ? "SIMILE" : "SCORCIATOIA";
-        var tag = $"{origin} · {reply.Ms:0.#} MS{(dangerous ? " · PERICOLOSO, INVIO DUE VOLTE" : string.Empty)}";
+        var tag = $"{origin} · {reply.Ms:0.#} MS{(dangerous ? $" · CRITICO: {reply.Reason?.ToUpperInvariant()}. IL TERMINALE CHIEDE DI SCRIVERE SI" : string.Empty)}";
         var row = CommandRow(command, tag, dangerous ? Theme.RedBrush : Theme.WhiteBrush);
         row.Background = Theme.SurfaceBrush;
         _content.Children.Insert(0, row);
-        var armed = !dangerous;
-        _commandRun = () =>
-        {
-            if (armed)
-            {
-                RunCommandLine(text, command);
-                return;
-            }
-            armed = true;
-            row.Background = Theme.RedBrush;
-        };
+        _commandRun = () => RunCommandLine(text, command);
     }
 
     /// <summary>Comando scritto per esteso (Verbo-Nome, simboli della shell, percorsi): non serve chiedere al modello.</summary>

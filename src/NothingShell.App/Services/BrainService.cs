@@ -30,6 +30,7 @@ public sealed class BrainService : IDisposable
     /// <param name="pipeName">Nome della pipe; altro da quello vero solo per <c>--brain-serve</c>, accanto alla shell aperta.</param>
     public BrainService(string? memoryPath = null, string pipeName = BrainProtocol.PipeName)
     {
+        CriticalCommands.LoadUserFile(CriticalCommands.DefaultUserPath);
         Memory = new ShortcutMemory(memoryPath ?? ShortcutMemory.DefaultPath);
         _pipeName = pipeName;
     }
@@ -92,6 +93,17 @@ public sealed class BrainService : IDisposable
         // Quello che propone il modello non parte mai da solo: lo decide chi preme Invio.
         var decision = new BrainDecision(command, DecisionSource.Model, CommandSafety.Classify(command), false, 0);
         return BrainProtocol.Reply(decision, clock.Elapsed.TotalMilliseconds);
+    }
+
+    /// <summary>Un comando dal modello piccolo per l'assistente, se non c'è Ollama: solo se esiste, non una frase.</summary>
+    public async Task<string?> ProposeAsync(string input, CancellationToken token)
+    {
+        if (!ModelInstalled)
+            return null;
+        var prompt = BrainProtocol.ModelPrompt(input, Memory.Examples(input, ExampleCount), null);
+        var limit = _worker.IsLoaded ? WarmLimit : ColdLimit;
+        var answer = await _worker.AskAsync(_model.LocalPath, prompt, limit, token);
+        return answer is null ? null : BrainProtocol.CleanModelOutput(answer);
     }
 
     public void Record(string input, string command, bool succeeded)
@@ -250,7 +262,7 @@ public sealed class BrainService : IDisposable
                 var remembered = Memory.Remember(request.Input, request.Command, DateTimeOffset.Now);
                 if (remembered)
                     Changed?.Invoke();
-                return new BrainReply(Note: remembered ? null : "non si impara: comando pericoloso o con un segreto");
+                return new BrainReply(Note: remembered ? null : "non si impara: contiene un segreto");
             case "forget" when request.Input is { Length: > 0 }:
                 var forgotten = Memory.Forget(request.Input);
                 if (forgotten)

@@ -1,5 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using NothingShell.App.Rendering;
 using NothingShell.Core.Design;
@@ -10,8 +12,9 @@ using NothingShell.Core.Notch;
 namespace NothingShell.App.Notch;
 
 /// <summary>
-/// Pagina Home: musica in corso (titolo che scorre, controlli) oppure ora grande, data e prossimo appuntamento
-/// (docs/11-agenda-pannello-rapido.md).
+/// Pagina Home: musica in corso (titolo che scorre, controlli) oppure ora grande e data, poi il campo per chiedere
+/// (docs/16-assistente-notch.md) e sotto il prossimo appuntamento (docs/11-agenda-pannello-rapido.md) o, mentre si scrive,
+/// quale scorciatoia userebbe Invio.
 /// </summary>
 public sealed class HomePage : NotchPageView
 {
@@ -30,6 +33,28 @@ public sealed class HomePage : NotchPageView
     private readonly DotMatrixView _bigClock = new() { Pitch = 6, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly DotMatrixView _date = new() { Pitch = 2, DotColor = Theme.Grey, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly TextBlock _next = NotchUi.Text(12, Theme.GreyBrush);
+
+    private readonly Border _askBox = new()
+    {
+        Background = Theme.SurfaceBrush,
+        CornerRadius = new CornerRadius(16),
+        Height = 32,
+        Padding = new Thickness(14, 0, 14, 0),
+        Margin = new Thickness(0, 10, 0, 0),
+    };
+    private readonly TextBox _ask = new()
+    {
+        Background = Brushes.Transparent,
+        BorderThickness = new Thickness(0),
+        Foreground = Theme.WhiteBrush,
+        CaretBrush = Theme.WhiteBrush,
+        FontFamily = Theme.BodyFont,
+        FontSize = 13,
+        VerticalContentAlignment = VerticalAlignment.Center,
+    };
+    private readonly TextBlock _askPlaceholder = NotchUi.Text(13, Theme.GreyBrush, "Chiedi qualcosa, es. collegati al computer di Luca");
+    private readonly TextBlock _preview = NotchUi.Text(12, Theme.WhiteBrush);
+    private bool _hasNext;
 
     private readonly DispatcherTimer _marqueeTimer = new() { Interval = TimeSpan.FromMilliseconds(45) };
     private MediaSnapshot? _snapshot;
@@ -62,23 +87,68 @@ public sealed class HomePage : NotchPageView
         _mediaPanel.Children.Add(_artist);
         _mediaPanel.Children.Add(controls);
 
-        _idlePanel.Margin = new Thickness(0, 22, 0, 0);
+        _idlePanel.Margin = new Thickness(0, 8, 0, 0);
         _date.Margin = new Thickness(0, 14, 0, 0);
-        _next.HorizontalAlignment = HorizontalAlignment.Center;
-        _next.MaxWidth = NotchUi.PageWidth;
-        _next.Margin = new Thickness(0, 12, 0, 0);
-        _next.Visibility = Visibility.Collapsed;
         _idlePanel.Children.Add(_bigClock);
         _idlePanel.Children.Add(_date);
-        _idlePanel.Children.Add(_next);
 
+        RowDefinitions.Add(new RowDefinition());
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        RowDefinitions.Add(new RowDefinition { Height = new GridLength(26) });
         Children.Add(_mediaPanel);
         Children.Add(_idlePanel);
+
+        _askPlaceholder.VerticalAlignment = VerticalAlignment.Center;
+        _askPlaceholder.IsHitTestVisible = false;
+        _askPlaceholder.Margin = new Thickness(2, 0, 0, 0); // dove comincia il testo nella casella
+        var askContent = new Grid();
+        askContent.Children.Add(_ask);
+        askContent.Children.Add(_askPlaceholder);
+        _askBox.Child = askContent;
+        Grid.SetRow(_askBox, 1);
+        Children.Add(_askBox);
+
+        foreach (var line in new[] { _next, _preview })
+        {
+            line.HorizontalAlignment = HorizontalAlignment.Center;
+            line.VerticalAlignment = VerticalAlignment.Center;
+            line.MaxWidth = NotchUi.PageWidth;
+            line.Visibility = Visibility.Collapsed;
+            Grid.SetRow(line, 2);
+            Children.Add(line);
+        }
+
+        _ask.PreviewMouseLeftButtonDown += (_, _) => AskClicked?.Invoke();
+        _ask.TextChanged += (_, _) => OnAskChanged();
+        _ask.PreviewKeyDown += OnAskKey;
         ShowMedia(null);
         _marqueeTimer.Tick += (_, _) => RenderTitle(++_marqueeOffset);
     }
 
     public override NotchPage Page => NotchPage.Home;
+
+    /// <summary>Clic sul campo: il notch non prende il focus da solo, va chiesto prima che si possa scrivere.</summary>
+    public event Action? AskClicked;
+
+    /// <summary>Invio nel campo: il testo e se si è premuto Ctrl per scegliere fra le scorciatoie.</summary>
+    public event Action<string, bool>? AskSubmitted;
+
+    public event Action? AskCancelled;
+
+    /// <summary>La riga sotto il campo, per il testo scritto finora.</summary>
+    public Func<string, string>? AskPreview { get; set; }
+
+    /// <summary>Il mouse è sul campo: trascinando si seleziona il testo, non si cambia pagina.</summary>
+    public bool IsMouseOverAsk => _askBox.IsMouseOver;
+
+    /// <summary>Scrive nel campo senza dargli il focus (per <c>--snapshot</c>).</summary>
+    public void SetAskText(string text) => _ask.Text = text;
+
+    public void FocusAsk() => Keyboard.Focus(_ask);
+
+    public bool IsAskFocused => _ask.IsKeyboardFocused;
+
+    public void ClearAsk() => _ask.Clear();
 
     public void SetTime(DateTime now)
     {
@@ -91,13 +161,10 @@ public sealed class HomePage : NotchPageView
     /// <summary>Sotto la data: "14:30 Riunione · tra 25 min", in rosso quando manca poco o è in corso.</summary>
     public void SetNext(CalendarEvent? next, DateTimeOffset now)
     {
-        _next.Visibility = next is null ? Visibility.Collapsed : Visibility.Visible;
+        _hasNext = next is not null;
+        UpdateLine();
         if (next is null)
-        {
-            _idlePanel.Margin = new Thickness(0, 22, 0, 0);
             return;
-        }
-        _idlePanel.Margin = new Thickness(0, 10, 0, 0);
         _next.Text = $"{Agenda.When(next, now)}  {next.Title} · {Agenda.Relative(next, now)}";
         _next.Foreground = next.Start - now <= Agenda.ReminderLead ? Theme.RedBrush : Theme.GreyBrush;
     }
@@ -116,6 +183,7 @@ public sealed class HomePage : NotchPageView
             _artist.Text = snapshot.Artist;
             _playPauseIcon.Dots = DotGrid.From(snapshot.IsPlaying ? DotIcons.Pause : DotIcons.Play);
         }
+        UpdateLine();
         UpdateMarquee();
     }
 
@@ -129,6 +197,36 @@ public sealed class HomePage : NotchPageView
     {
         _shown = false;
         UpdateMarquee();
+    }
+
+    private void OnAskChanged()
+    {
+        var text = _ask.Text.Trim();
+        _askPlaceholder.Visibility = _ask.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        _preview.Text = text.Length == 0 ? string.Empty : AskPreview?.Invoke(text) ?? string.Empty;
+        UpdateLine();
+    }
+
+    private void OnAskKey(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            AskCancelled?.Invoke();
+        }
+        else if (e.Key == Key.Enter && _ask.Text.Trim() is { Length: > 0 } text)
+        {
+            e.Handled = true;
+            AskSubmitted?.Invoke(text, Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
+        }
+    }
+
+    /// <summary>Una riga sola sotto il campo: mentre si scrive conta la scorciatoia, altrimenti l'appuntamento.</summary>
+    private void UpdateLine()
+    {
+        var asking = _preview.Text.Length > 0;
+        _preview.Visibility = asking ? Visibility.Visible : Visibility.Collapsed;
+        _next.Visibility = !asking && _hasNext && _snapshot is null ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void UpdateMarquee()

@@ -132,6 +132,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         WireDev();
         WireConnected();
         WireBrain();
+        WireRemoteAccess();
         _network.Changed += _bars.SetNetwork;
         _bars.SetNetwork(_network.Current);
         _tracker.FullscreenChanged += monitor =>
@@ -464,6 +465,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         _taskbar.Show();
         _quickPanel?.Close();
         _brain.Dispose();
+        _assistantModel?.Dispose();
         _calendar.Dispose();
         _access.Dispose();
         _plugins.Dispose();

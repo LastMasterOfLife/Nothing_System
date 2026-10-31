@@ -115,6 +115,7 @@ public sealed class NotchWindow : Window
     private int _alertOffset;
     private TimeSpan _lastFrame;
     private bool _animating;
+    private nint _beforeAsk;
 
     public NotchWindow(IMediaService media, DevPageActions dev, ConnectedPageActions connected)
     {
@@ -130,6 +131,9 @@ public sealed class NotchWindow : Window
         _agenda = new AgendaPage(e => AppointmentOpened?.Invoke(e));
         _timerPage = new TimerPage(StartTimer, StopTimer);
         _mail.Opened += mail => MailOpened?.Invoke(mail);
+        _home.AskClicked += BeginAsk;
+        _home.AskSubmitted += OnAskSubmitted;
+        _home.AskCancelled += CancelAsk;
 
         var idle = NotchLayout.For(NotchState.Idle);
         _width = new Spring(idle.Width);
@@ -164,6 +168,7 @@ public sealed class NotchWindow : Window
             NativeMethods.MakeNonActivatingToolWindow(hwnd);
             HwndSource.FromHwnd(hwnd)?.AddHook(OnWindowMessage);
         };
+        Deactivated += (_, _) => ReleaseAsk();
         Loaded += (_, _) => PositionOnPrimaryScreen();
         SystemParameters.StaticPropertyChanged += (_, e) =>
         {
@@ -173,6 +178,19 @@ public sealed class NotchWindow : Window
     }
 
     public event Action? SettingsRequested;
+
+    /// <summary>Invio nel campo della Home: la richiesta e se si è premuto Ctrl per scegliere (docs/16-assistente-notch.md).</summary>
+    public event Action<string, bool>? AskSubmitted;
+
+    /// <summary>La riga sotto il campo della Home: quale scorciatoia userebbe Invio.</summary>
+    public Func<string, string>? AskPreview
+    {
+        get => _home.AskPreview;
+        set => _home.AskPreview = value;
+    }
+
+    /// <summary>Il pulsante del terminale nel notch espanso: si apre il pannello dell'assistente.</summary>
+    public event Action? AssistantRequested;
 
     /// <summary>Clic su una mail della pagina Posta.</summary>
     public event Action<MailItem>? MailOpened;
@@ -346,11 +364,21 @@ public sealed class NotchWindow : Window
 
     public void SetBattery(BatteryStatus battery) => _system.Update(battery);
 
+    /// <summary>Come il clic sul campo (per <c>--ask-demo</c>): true se ora la tastiera arriva davvero al campo.</summary>
+    public bool BeginAskForDemo()
+    {
+        BeginAsk();
+        return WindowNative.GetForegroundWindow() == new WindowInteropHelper(this).Handle && _home.IsAskFocused;
+    }
+
+    /// <summary>La Home con una richiesta scritta nel campo (per <c>--snapshot</c>).</summary>
+    public void SetAskForSnapshot(string text) => _home.SetAskText(text);
+
     /// <summary>Prepara la pillola in uno stato e una pagina senza animazioni (per <c>--snapshot</c>).</summary>
     public FrameworkElement PrepareSnapshot(NotchState state, NotchPage page)
     {
-        var size = state == NotchState.Expanded ? NotchLayout.Expanded(page) : NotchLayout.For(state);
-        _expanded.Height = NotchLayout.Expanded(page).Height;
+        var size = state == NotchState.Expanded ? ExpandedSize(page) : NotchLayout.For(state);
+        _expanded.Height = ExpandedSize(page).Height;
         _width.SnapTo(size.Width);
         _height.SnapTo(size.Height);
         ApplyPillSize();
@@ -483,6 +511,7 @@ public sealed class NotchWindow : Window
         Grid.SetRow(_indicators, 1);
         _expanded.Children.Add(_pageHost);
         _expanded.Children.Add(_indicators);
+        _expanded.Children.Add(BuildAssistantButton());
         _expanded.IsHitTestVisible = false;
 
         var content = new Grid();
@@ -501,7 +530,11 @@ public sealed class NotchWindow : Window
             e.Handled = true;
             ApplySwipe(_swipe.OnVerticalWheel(e.Delta, _clock.Elapsed));
         };
-        _pill.PreviewMouseLeftButtonDown += (_, e) => _swipe.OnDragStart(e.GetPosition(_pill).X);
+        _pill.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            if (!_home.IsMouseOverAsk) // lì si seleziona il testo
+                _swipe.OnDragStart(e.GetPosition(_pill).X);
+        };
         _pill.PreviewMouseMove += (_, e) =>
         {
             if (e.LeftButton == MouseButtonState.Pressed)
@@ -519,13 +552,30 @@ public sealed class NotchWindow : Window
         return root;
     }
 
+    /// <summary>In basso a destra su ogni pagina, sulla riga degli indicatori: abbastanza dentro da non finire nell'angolo tondo.</summary>
+    private Border BuildAssistantButton()
+    {
+        var button = NotchUi.Button(new DotMatrixView { Pitch = 2, Dots = DotGrid.From(DotIcons.Terminal) }, () => AssistantRequested?.Invoke(), width: 24);
+        button.Height = 22;
+        button.CornerRadius = new CornerRadius(11);
+        button.Margin = new Thickness(0, 0, 20, 3);
+        button.HorizontalAlignment = HorizontalAlignment.Right;
+        button.VerticalAlignment = VerticalAlignment.Bottom;
+        button.ToolTip = "Chiedi o scrivi un comando";
+        Grid.SetRowSpan(button, 2);
+        return button;
+    }
+
     private ContextMenu BuildContextMenu()
     {
+        var assistant = new MenuItem { Header = "Chiedi o scrivi un comando…" };
+        assistant.Click += (_, _) => AssistantRequested?.Invoke();
         var settings = new MenuItem { Header = "Impostazioni…" };
         settings.Click += (_, _) => SettingsRequested?.Invoke();
         var exit = new MenuItem { Header = "Esci da Nothing Shell" };
         exit.Click += (_, _) => Application.Current.Shutdown();
         var menu = new ContextMenu();
+        menu.Items.Add(assistant);
         menu.Items.Add(settings);
         menu.Items.Add(new Separator());
         menu.Items.Add(exit);
@@ -546,7 +596,7 @@ public sealed class NotchWindow : Window
 
     private void ApplySwipe(SwipeDirection direction)
     {
-        if (_machine.State != NotchState.Expanded || direction == SwipeDirection.None)
+        if (_machine.State != NotchState.Expanded || direction == SwipeDirection.None || _machine.Held)
             return;
         if (_pager.Apply(direction))
             ShowPage(_pager.Current, animate: true, fromRight: direction == SwipeDirection.Next);
@@ -583,16 +633,60 @@ public sealed class NotchWindow : Window
         shown.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, Slide));
     }
 
+    private Size2 ExpandedSize(NotchPage page) => NotchLayout.Expanded(page, _media is not null);
+
     /// <summary>Il notch espanso si allunga o si accorcia con la pagina: le pagine con un elenco sono più alte.</summary>
     private void ResizeExpanded(NotchPage page)
     {
-        var size = NotchLayout.Expanded(page);
+        var size = ExpandedSize(page);
         if (Math.Abs(_height.Target - size.Height) < 0.5)
             return;
         _expanded.Height = size.Height; // la pillola taglia mentre la sua altezza anima
         _width.Target = size.Width;
         _height.Target = size.Height;
         StartAnimation();
+    }
+
+    /// <summary>
+    /// Il notch non prende mai il focus da solo, così passarci sopra col mouse non toglie la tastiera a chi sta scrivendo
+    /// altrove. Lo chiede il clic sul campo, e finché si scrive il notch resta aperto.
+    /// </summary>
+    private void BeginAsk()
+    {
+        if (_machine.Held)
+            return;
+        _beforeAsk = WindowNative.GetForegroundWindow();
+        WindowNative.BringToFront(new WindowInteropHelper(this).Handle);
+        Activate();
+        _home.FocusAsk();
+        _machine.Hold(true, _pill.IsMouseOver, _clock.Elapsed);
+    }
+
+    private void ReleaseAsk()
+    {
+        if (!_machine.Held)
+            return;
+        Keyboard.ClearFocus();
+        _machine.Hold(false, _pill.IsMouseOver, _clock.Elapsed);
+        ScheduleDeadline();
+    }
+
+    /// <summary>Esc: si butta il testo e la tastiera torna alla finestra di prima.</summary>
+    private void CancelAsk()
+    {
+        _home.ClearAsk();
+        var before = _beforeAsk;
+        ReleaseAsk();
+        if (before != 0)
+            WindowNative.SetForegroundWindow(before);
+    }
+
+    private void OnAskSubmitted(string text, bool choose)
+    {
+        _home.ClearAsk();
+        Keyboard.ClearFocus();
+        Apply(_machine.Collapse()); // la finestra che si apre sta sotto la pillola compatta
+        AskSubmitted?.Invoke(text, choose);
     }
 
     private void OnPointerEnter()
@@ -642,7 +736,7 @@ public sealed class NotchWindow : Window
         RenderAlertText(0);
         if (_machine.State == NotchState.Expanded)
         {
-            if (page is { } p && _pager.IsAvailable(p)) // già aperto: si va direttamente alla pagina
+            if (page is { } p && _pager.IsAvailable(p) && !_machine.Held) // già aperto: si va alla pagina, ma non mentre si scrive
                 ShowPage(p, animate: true);
             return;
         }
@@ -680,6 +774,8 @@ public sealed class NotchWindow : Window
     {
         _media = snapshot;
         _home.ShowMedia(snapshot);
+        if (_machine.State == NotchState.Expanded)
+            ResizeExpanded(_pager.Current); // la Home con la musica è più alta
         Apply(_machine.OnActivityChanged(HasActivity));
         SetActivityVisible(_machine.State == NotchState.Activity); // musica in pausa con timer attivo: niente equalizzatore
     }
@@ -727,7 +823,7 @@ public sealed class NotchWindow : Window
             return;
 
         var state = _machine.State;
-        var size = state == NotchState.Expanded ? NotchLayout.Expanded(_pager.Current) : NotchLayout.For(state);
+        var size = state == NotchState.Expanded ? ExpandedSize(_pager.Current) : NotchLayout.For(state);
         if (state == NotchState.Expanded)
             _expanded.Height = size.Height;
         _width.Target = size.Width;
