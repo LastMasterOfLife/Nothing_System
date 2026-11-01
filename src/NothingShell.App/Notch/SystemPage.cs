@@ -23,8 +23,8 @@ public sealed class SystemPage : NotchPageView
     private readonly (DotMatrixView Bar, DotMatrixView Value) _ram;
     private readonly (DotMatrixView Bar, DotMatrixView Value) _battery;
     private readonly Grid _batteryRow;
-    private readonly TextBlock _privacy = NotchUi.Text(11, Theme.RedBrush);
-    private readonly TextBlock _download = NotchUi.Text(11, Theme.GreyBrush);
+    private readonly TextBlock _privacy = NotchUi.Text(11, Theme.CriticalBrush);
+    private readonly TextBlock _download = NotchUi.Text(11, Theme.MutedBrush);
 
     public SystemPage()
     {
@@ -83,7 +83,7 @@ public sealed class SystemPage : NotchPageView
     private static void Set((DotMatrixView Bar, DotMatrixView Value) row, double fraction, bool alert)
     {
         row.Bar.Dots = DotBar.Render(fraction, BarColumns);
-        row.Bar.DotColor = alert ? Theme.Red : Theme.White;
+        row.Bar.DotColor = alert ? Theme.Critical : Theme.Ink;
         row.Value.Dots = DotText.Render($"{Math.Round(fraction * 100):0}%");
     }
 
@@ -94,7 +94,7 @@ public sealed class SystemPage : NotchPageView
         row.ColumnDefinitions.Add(new ColumnDefinition());
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ValueWidth) });
 
-        var label = NotchUi.Text(11, Theme.GreyBrush, name);
+        var label = NotchUi.Text(11, Theme.MutedBrush, name);
         label.VerticalAlignment = VerticalAlignment.Center;
         var bar = new DotMatrixView
         {

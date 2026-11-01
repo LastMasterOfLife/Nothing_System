@@ -1,6 +1,6 @@
 # 05 — Barra al posto della taskbar (M3)
 
-Barra nera a tutta larghezza in basso su ogni monitor, nello stesso spazio della taskbar
+Barra a tutta larghezza (colori e vetro della pagina Aspetto, docs/02-design-system.md) in basso su ogni monitor, nello stesso spazio della taskbar
 di Windows, che viene **nascosta** (non disattivata: Explorer resta in funzione).
 
 ## Come sostituisce la taskbar
@@ -50,8 +50,8 @@ Una barra per ogni monitor che in Windows ha la taskbar (`BarHost`), con Start, 
 | Orologio e data | Centro notifiche (Win+N) | — |
 | Spazio vuoto | — | *Mostra taskbar di Windows* (per l'area di notifica), *Esci* |
 
-- Icone con i loro **colori originali** su sfondo nero; hover: cerchio `Surface`.
-- Indicatore sotto l'icona: punto **rosso** = app in primo piano, punto grigio = aperta, nessun punto =
+- Icone con i loro **colori originali**; hover: riquadro `Surface` ad angoli 4, l'app in primo piano ha il riquadro già riempito, come nella taskbar di Windows 11.
+- Indicatore sotto l'icona: trattino lungo nel colore d'accento = app in primo piano, trattino corto grigio = aperta, niente =
   appuntata ma chiusa.
 - Tooltip con il titolo della finestra.
 
@@ -94,7 +94,7 @@ finestra dell'app (le stesse di Windows: `DwmRegisterThumbnail`, un video contin
  │    miniatura      │        │    miniatura      │
  └───────────────────┘        └───────────────────┘
 ```
-- Punto rosso = finestra in primo piano, grigio le altre; clic sulla scheda: attiva la finestra;
+- Punto d'accento = finestra in primo piano, grigio le altre; clic sulla scheda: attiva la finestra;
   `×` (rosso al passaggio): la chiude, e il pannello si aggiorna.
 - Miniature con le proporzioni della finestra, al massimo 240 × 150 DIP; se non stanno nel monitor si
   rimpiccioliscono insieme fino a 120 DIP di larghezza (Core `WindowPreviews.Fit`, testato). Finestra
@@ -102,14 +102,14 @@ finestra dell'app (le stesse di Windows: `DwmRegisterThumbnail`, un video contin
 - Passando a un'altra icona il pannello cambia subito; uscendo, resta 300 ms per poterci entrare col mouse.
   Clic sull'icona, clic destro, schermo intero: il pannello si chiude. Per le app aperte niente suggerimento
   col titolo: c'è il pannello.
-- Il pannello è opaco (nero, angoli e bordo `Outline` disegnati da Windows 11): DWM non disegna miniature
+- Il pannello è opaco (`BaseSolid`, angoli e bordo `Outline` disegnati da Windows 11): DWM non disegna miniature
   su finestre a trasparenza per pixel. Non prende il focus.
 - Non c'è l'"anteprima del desktop" (Aero Peek) passando sopra una miniatura.
 - Diagnostica: `NothingShell.exe --preview-demo <file.png>` apre il pannello dell'app con più finestre e
   ne cattura l'immagine dallo schermo.
 
 ## Recenti (clic destro su un'app)
-Pannello nero con bordo `Outline`, angoli 24, sopra l'icona; si chiude cliccando altrove o con Esc.
+Pannello con bordo e vetro delle superfici, angoli 8, sopra l'icona; si chiude cliccando altrove o con Esc.
 ```
  R E C E N T I          (titolo a punti rossi; FREQUENTI se l'app tiene solo quelli)
  [▣] istruzioni_report.md

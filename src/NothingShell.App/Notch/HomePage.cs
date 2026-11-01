@@ -23,21 +23,21 @@ public sealed class HomePage : NotchPageView
 
     private readonly IMediaService _media;
     private readonly StackPanel _mediaPanel = new();
-    private readonly TextBlock _source = NotchUi.Text(11, Theme.GreyBrush);
+    private readonly TextBlock _source = NotchUi.Text(11, Theme.MutedBrush);
     private readonly DotMatrixView _headerClock = new() { Pitch = 2, HorizontalAlignment = HorizontalAlignment.Right };
     private readonly DotMatrixView _title = new() { Pitch = TitlePitch, HorizontalAlignment = HorizontalAlignment.Left };
-    private readonly TextBlock _artist = NotchUi.Text(13, Theme.GreyBrush);
+    private readonly TextBlock _artist = NotchUi.Text(13, Theme.MutedBrush);
     private readonly DotMatrixView _playPauseIcon = new() { Pitch = 3, Dots = DotGrid.From(DotIcons.Play) };
 
     private readonly StackPanel _idlePanel = new() { HorizontalAlignment = HorizontalAlignment.Center };
     private readonly DotMatrixView _bigClock = new() { Pitch = 6, HorizontalAlignment = HorizontalAlignment.Center };
-    private readonly DotMatrixView _date = new() { Pitch = 2, DotColor = Theme.Grey, HorizontalAlignment = HorizontalAlignment.Center };
-    private readonly TextBlock _next = NotchUi.Text(12, Theme.GreyBrush);
+    private readonly DotMatrixView _date = new() { Pitch = 2, DotColor = Theme.Muted, HorizontalAlignment = HorizontalAlignment.Center };
+    private readonly TextBlock _next = NotchUi.Text(12, Theme.MutedBrush);
 
     private readonly Border _askBox = new()
     {
         Background = Theme.SurfaceBrush,
-        CornerRadius = new CornerRadius(16),
+        CornerRadius = new CornerRadius(4),
         Height = 32,
         Padding = new Thickness(14, 0, 14, 0),
         Margin = new Thickness(0, 10, 0, 0),
@@ -46,14 +46,14 @@ public sealed class HomePage : NotchPageView
     {
         Background = Brushes.Transparent,
         BorderThickness = new Thickness(0),
-        Foreground = Theme.WhiteBrush,
-        CaretBrush = Theme.WhiteBrush,
+        Foreground = Theme.InkBrush,
+        CaretBrush = Theme.InkBrush,
         FontFamily = Theme.BodyFont,
         FontSize = 13,
         VerticalContentAlignment = VerticalAlignment.Center,
     };
-    private readonly TextBlock _askPlaceholder = NotchUi.Text(13, Theme.GreyBrush, "Chiedi qualcosa, es. collegati al computer di Luca");
-    private readonly TextBlock _preview = NotchUi.Text(12, Theme.WhiteBrush);
+    private readonly TextBlock _askPlaceholder = NotchUi.Text(13, Theme.MutedBrush, "Chiedi qualcosa, es. collegati al computer di Luca");
+    private readonly TextBlock _preview = NotchUi.Text(12, Theme.InkBrush);
     private bool _hasNext;
 
     private readonly DispatcherTimer _marqueeTimer = new() { Interval = TimeSpan.FromMilliseconds(45) };
@@ -166,7 +166,7 @@ public sealed class HomePage : NotchPageView
         if (next is null)
             return;
         _next.Text = $"{Agenda.When(next, now)}  {next.Title} · {Agenda.Relative(next, now)}";
-        _next.Foreground = next.Start - now <= Agenda.ReminderLead ? Theme.RedBrush : Theme.GreyBrush;
+        _next.Foreground = next.Start - now <= Agenda.ReminderLead ? Theme.AccentBrush : Theme.MutedBrush;
     }
 
     public void ShowMedia(MediaSnapshot? snapshot)
@@ -179,7 +179,7 @@ public sealed class HomePage : NotchPageView
         _idlePanel.Visibility = snapshot is null ? Visibility.Visible : Visibility.Collapsed;
         if (snapshot is not null)
         {
-            _source.Text = snapshot.SourceApp.ToUpperInvariant();
+            _source.Text = snapshot.SourceApp;
             _artist.Text = snapshot.Artist;
             _playPauseIcon.Dots = DotGrid.From(snapshot.IsPlaying ? DotIcons.Pause : DotIcons.Play);
         }

@@ -33,7 +33,7 @@ public static class Motion
     public static void FadeTo(Border border, Color color, Duration? duration = null)
     {
         ArgumentNullException.ThrowIfNull(border);
-        if (border.Background is not SolidColorBrush { IsFrozen: false } brush)
+        if (border.Background is not SolidColorBrush { IsFrozen: false } brush || Theme.IsShared(brush))
         {
             var from = border.Background is SolidColorBrush b ? b.Color : Colors.Transparent;
             border.Background = brush = new SolidColorBrush(from);
@@ -48,16 +48,29 @@ public static class Motion
     public static void StateLayer(Border border, Color idle, Color hover, Func<bool>? isActive = null)
     {
         ArgumentNullException.ThrowIfNull(border);
-        border.Background = new SolidColorBrush(idle);
+        var palette = Theme.Current; // i colori vanno seguiti se il tema cambia mentre il controllo è aperto
+        var brush = new SolidColorBrush(idle);
+        border.Background = brush;
+        void Rest(object? sender, EventArgs e)
+        {
+            if (!border.IsMouseOver)
+                brush.Color = Theme.Follow(idle, palette);
+        }
+        border.Loaded += (_, _) =>
+        {
+            Theme.Changed += Rest;
+            Rest(null, EventArgs.Empty);
+        };
+        border.Unloaded += (_, _) => Theme.Changed -= Rest;
         border.MouseEnter += (_, _) =>
         {
             if (isActive?.Invoke() != true)
-                FadeTo(border, hover);
+                FadeTo(border, Theme.Follow(hover, palette));
         };
         border.MouseLeave += (_, _) =>
         {
             if (isActive?.Invoke() != true)
-                FadeTo(border, idle, Normal);
+                FadeTo(border, Theme.Follow(idle, palette), Normal);
         };
     }
 

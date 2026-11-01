@@ -216,8 +216,10 @@ test controlla che nessuna frase di serie ne nasconda un'altra.
 
 Si imparano le decisioni, non i risultati: "ram libera" rilegge sempre il valore attuale.
 
-### Scorciatoie imparate
-Nelle impostazioni, con un clic su una riga si apre il dettaglio:
+### Nelle impostazioni
+Impostazioni › **Scorciatoie** ha due elenchi separati: **Imparate da te** e **Di serie**, per argomento e per comando, con tutte le
+frasi che lo chiedono. Non ci sono le frasi di serie dimenticate né quelle corrette con un altro comando: quelle ora sono
+dell'utente e stanno fra le imparate. Con un clic su una riga si apre il dettaglio:
 
 - **Descrizione**: `CommandExplainer` (Core, testato) la scrive con regole sui passaggi del comando, non col modello, che
   in questa pagina potrebbe rassicurare su un comando che non ha capito. Quello che non riconosce lo dice: "avvia `vmctl`,

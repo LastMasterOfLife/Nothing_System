@@ -51,7 +51,7 @@ public sealed partial class ShellController
         _ports.Started += added =>
         {
             if (CanShow(LiveActivity.Servers))
-                _notch.ShowHint(DotIcons.Plug, Theme.White,
+                _notch.ShowHint(DotIcons.Plug, Theme.Ink,
                     string.Join("   ", added.Select(s => $"{s.Address} - {s.Service ?? s.Process}".ToUpperInvariant())), NotchPage.Servers);
         };
     }
@@ -153,7 +153,7 @@ public sealed partial class ShellController
         }
         if (!ClipClassifier.IsSensitive(kind) && CanShow(LiveActivity.ClipboardHints) && ClipClassifier.Hint(kind, text, now) is { } hint)
         {
-            var color = kind == ClipKind.Color && ClipClassifier.Color(text.Trim()) is { } c ? Color.FromRgb(c.R, c.G, c.B) : Theme.White;
+            var color = kind == ClipKind.Color && ClipClassifier.Color(text.Trim()) is { } c ? Color.FromRgb(c.R, c.G, c.B) : Theme.Ink;
             _notch.ShowHint(kind == ClipKind.Color ? DotIcons.Start : DotIcons.Clip, color, hint, NotchPage.Clipboard);
         }
     }

@@ -55,17 +55,17 @@ public sealed partial class ShellController
         _kde.PhoneConnected += device =>
         {
             if (CanShow(LiveActivity.Phone))
-                _notch.ShowNotice(DotIcons.Phone, Rendering.Theme.White, $"{device.Name} COLLEGATO");
+                _notch.ShowNotice(DotIcons.Phone, Rendering.Theme.Ink, $"{device.Name} COLLEGATO");
         };
         _kde.BatteryLow += device =>
         {
             if (CanShow(LiveActivity.Phone) && device.Battery is { } battery)
-                _notch.ShowNotice(DotIcons.Phone, Rendering.Theme.Red, $"{device.Name}  {battery.Charge}%");
+                _notch.ShowNotice(DotIcons.Phone, Rendering.Theme.Critical, $"{device.Name}  {battery.Charge}%");
         };
         _kde.ClipboardReceived += text =>
         {
             if (_clipWatcher.SetText(text) && CanShow(LiveActivity.Phone))
-                _notch.ShowNotice(DotIcons.Clip, Rendering.Theme.White, "APPUNTI DAL TELEFONO");
+                _notch.ShowNotice(DotIcons.Clip, Rendering.Theme.Ink, "APPUNTI DAL TELEFONO");
         };
         _kde.FileReceived += path =>
         {
@@ -77,13 +77,13 @@ public sealed partial class ShellController
         {
             // la pillola cede il posto a comandi e agenti: l'avviso e la pagina Telefono si vedono comunque
             if (CanShow(LiveActivity.Downloads))
-                _notch.ShowHint(DotIcons.Download, Rendering.Theme.White, $"DAL TELEFONO: {System.IO.Path.GetFileName(path)}", NotchPage.Phone);
+                _notch.ShowHint(DotIcons.Download, Rendering.Theme.Ink, $"DAL TELEFONO: {System.IO.Path.GetFileName(path)}", NotchPage.Phone);
         };
         _kde.UrlReceived += uri =>
         {
             Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true })?.Dispose();
             if (CanShow(LiveActivity.Phone))
-                _notch.ShowNotice(DotIcons.Phone, Rendering.Theme.White, uri.Host);
+                _notch.ShowNotice(DotIcons.Phone, Rendering.Theme.Ink, uri.Host);
         };
     }
 
@@ -109,10 +109,10 @@ public sealed partial class ShellController
                 _callShownAt = DateTime.Now;
                 break;
             case PhoneEventKind.MissedCall:
-                _notch.ShowNotice(DotIcons.Phone, Rendering.Theme.Red, $"PERSA: {phone.Title}");
+                _notch.ShowNotice(DotIcons.Phone, Rendering.Theme.Critical, $"PERSA: {phone.Title}");
                 break;
             default:
-                _notch.ShowNotice(DotIcons.Phone, Rendering.Theme.White, PhoneLink.Summary(phone));
+                _notch.ShowNotice(DotIcons.Phone, Rendering.Theme.Ink, PhoneLink.Summary(phone));
                 break;
         }
     }

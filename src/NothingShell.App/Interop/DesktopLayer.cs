@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using NothingShell.App.Rendering;
 
 namespace NothingShell.App.Interop;
 
@@ -21,14 +22,21 @@ internal static class DesktopLayer
             OwnByDesktop(hwnd);
             HwndSource.FromHwnd(hwnd)?.AddHook(Hook);
         };
-        window.Loaded += (_, _) => NativeMethods.SendToBottom(new WindowInteropHelper(window).Handle);
+        window.Loaded += (_, _) => NativeMethods.SendToBottom(BottomOf(new WindowInteropHelper(window).Handle));
+    }
+
+    /// <summary>In fondo ci sta la compagna del vetro, se c'è; il widget le sta subito sopra.</summary>
+    private static nint BottomOf(nint hwnd)
+    {
+        var owner = NativeMethods.GetOwner(hwnd);
+        return owner != 0 && WindowNative.GetClassName(owner) == GlassBackdrop.ClassName ? owner : hwnd;
     }
 
     private static void OwnByDesktop(nint hwnd)
     {
         var progman = NativeMethods.FindWindow("Progman", null);
         if (progman != 0)
-            NativeMethods.SetOwner(hwnd, progman);
+            NativeMethods.SetOwner(BottomOf(hwnd), progman);
     }
 
     private static nint Hook(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled)
@@ -36,9 +44,22 @@ internal static class DesktopLayer
         if (msg == NativeMethods.WmWindowPosChanging)
         {
             var pos = Marshal.PtrToStructure<NativeMethods.WindowPos>(lParam);
-            if ((pos.Flags & NativeMethods.SwpNoZOrder) == 0 && pos.HwndInsertAfter != NativeMethods.HwndBottom)
+            if ((pos.Flags & NativeMethods.SwpNoZOrder) == 0)
             {
-                pos.HwndInsertAfter = NativeMethods.HwndBottom;
+                // Solo riscrivendo il messaggio: chiamare SetWindowPos da qui farebbe rimbalzare i widget all'infinito.
+                var bottom = BottomOf(hwnd);
+                if (bottom == hwnd)
+                {
+                    pos.HwndInsertAfter = NativeMethods.HwndBottom;
+                }
+                else if (NativeMethods.WindowAbove(bottom) is var above && above == hwnd)
+                {
+                    pos.Flags |= NativeMethods.SwpNoZOrder;
+                }
+                else
+                {
+                    pos.HwndInsertAfter = above;
+                }
                 Marshal.StructureToPtr(pos, lParam, fDeleteOld: false);
             }
         }
@@ -46,7 +67,7 @@ internal static class DesktopLayer
         {
             // Explorer riavviato: Progman è una finestra nuova
             OwnByDesktop(hwnd);
-            NativeMethods.SendToBottom(hwnd);
+            NativeMethods.SendToBottom(BottomOf(hwnd));
         }
         return 0;
     }

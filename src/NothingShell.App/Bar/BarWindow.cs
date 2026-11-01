@@ -46,13 +46,15 @@ public sealed class BarWindow : Window
         Orientation = Orientation.Horizontal,
         HorizontalAlignment = HorizontalAlignment.Center,
     };
-    private readonly Dictionary<string, Ellipse> _indicators = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Rectangle> _indicators = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Border> _appButtons = new(StringComparer.Ordinal);
     private readonly DotMatrixView _network = new() { Pitch = 2.5, VerticalAlignment = VerticalAlignment.Center };
-    private readonly DotMatrixView _battery = new() { Pitch = 2, VerticalAlignment = VerticalAlignment.Center };
-    private readonly DotMatrixView _time = new() { Pitch = 2.5, HorizontalAlignment = HorizontalAlignment.Right };
-    private readonly DotMatrixView _date = new() { Pitch = 2, DotColor = Theme.Grey, HorizontalAlignment = HorizontalAlignment.Right };
+    private readonly DotMatrixView _battery = new() { Pitch = 2, TextSize = 12, VerticalAlignment = VerticalAlignment.Center };
+    private readonly DotMatrixView _time = new() { Pitch = 2.5, TextSize = 12, HorizontalAlignment = HorizontalAlignment.Right };
+    private readonly DotMatrixView _date = new() { Pitch = 2, TextSize = 12, HorizontalAlignment = HorizontalAlignment.Right };
 
     private MultiMonitorMode _mode;
+    private DateTime _now = DateTime.Now;
 
     public BarWindow(WindowTracker tracker, AppIcons icons, ShellIcons shellIcons, AppCatalog catalog,
         WindowsTaskbar taskbar, LauncherWindow launcher, DisplayMonitor monitor, MultiMonitorMode mode)
@@ -74,16 +76,20 @@ public sealed class BarWindow : Window
         _taskbar = taskbar;
 
         WindowStyle = WindowStyle.None;
+        AllowsTransparency = true;
+        Background = Brushes.Transparent;
         ResizeMode = ResizeMode.NoResize;
         ShowInTaskbar = false;
         ShowActivated = false;
         Topmost = true;
-        Background = Theme.BlackBrush;
         Title = "Nothing Shell — Barra";
-        Content = BuildVisualTree();
+        var root = BuildVisualTree();
+        Content = root;
+        GlassBackdrop.Attach(this, root, radius: 0);
 
         _tracker.GroupsChanged += RebuildApps;
         _tracker.ForegroundChanged += OnForegroundChanged;
+        Theme.Changed += OnThemeChanged;
         SourceInitialized += (_, _) =>
         {
             NativeMethods.MakeNonActivatingToolWindow(new WindowInteropHelper(this).Handle);
@@ -94,6 +100,7 @@ public sealed class BarWindow : Window
             // Monitor scollegato: la barra sparisce e non deve più ricevere eventi.
             _tracker.GroupsChanged -= RebuildApps;
             _tracker.ForegroundChanged -= OnForegroundChanged;
+            Theme.Changed -= OnThemeChanged;
             _previewOpen.Stop();
             _previewHide.Stop();
             _jumpList.Close();
@@ -129,8 +136,9 @@ public sealed class BarWindow : Window
 
     public void SetTime(DateTime now)
     {
+        _now = now;
         _time.Dots = DotText.Render(now.ToString("HH:mm", Italian));
-        _date.Dots = DotText.Render(now.ToString("dd.MM", Italian));
+        _date.Dots = DotText.Render(now.ToString(Theme.IsWindowsStyle ? "dd/MM/yyyy" : "dd.MM", Italian));
     }
 
     public void SetBattery(BatteryStatus status)
@@ -138,18 +146,19 @@ public sealed class BarWindow : Window
         ArgumentNullException.ThrowIfNull(status);
         _battery.Visibility = status.HasBattery ? Visibility.Visible : Visibility.Collapsed;
         _battery.Dots = DotText.Render(status.Label);
-        _battery.DotColor = status.IsLow ? Theme.Red : Theme.White;
+        _battery.DotColor = status.IsLow ? Theme.Critical : Theme.Ink;
     }
 
     public void SetNetwork(NetworkKind kind)
     {
         _network.Dots = Glyph(kind == NetworkKind.Ethernet ? DotIcons.Ethernet : DotIcons.Wifi);
-        _network.DotColor = kind == NetworkKind.Offline ? Theme.Red : Theme.White;
+        _network.DotColor = kind == NetworkKind.Offline ? Theme.Critical : Theme.Ink;
     }
 
     private Grid BuildVisualTree()
     {
-        var root = new Grid { Background = Theme.BlackBrush };
+        var root = new Grid { Background = Theme.BaseBrush };
+        root.Children.Add(new Border { Height = 1, Background = Theme.OutlineBrush, VerticalAlignment = VerticalAlignment.Top, IsHitTestVisible = false });
 
         var start = Button(new DotMatrixView { Pitch = 3, Dots = Glyph(DotIcons.Start) }, 44);
         start.HorizontalAlignment = HorizontalAlignment.Left;
@@ -186,7 +195,7 @@ public sealed class BarWindow : Window
         };
 
         var clock = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 12, 0) };
-        _date.Margin = new Thickness(0, 4, 0, 0);
+        _date.Margin = new Thickness(0, 2, 0, 0);
         clock.Children.Add(_time);
         clock.Children.Add(_date);
         var clockButton = Button(clock, double.NaN);
@@ -240,6 +249,7 @@ public sealed class BarWindow : Window
     {
         _apps.Children.Clear();
         _indicators.Clear();
+        _appButtons.Clear();
         foreach (var group in VisibleGroups())
             _apps.Children.Add(AppButton(group));
         UpdateIndicators();
@@ -319,14 +329,16 @@ public sealed class BarWindow : Window
             fe.VerticalAlignment = VerticalAlignment.Center;
         }
 
-        var indicator = new Ellipse
+        var indicator = new Rectangle
         {
-            Width = 4,
-            Height = 4,
-            Fill = Theme.GreyBrush,
+            Width = 6,
+            Height = 3,
+            RadiusX = 1.5,
+            RadiusY = 1.5,
+            Fill = Theme.MutedBrush,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(0, 0, 0, 3),
+            Margin = new Thickness(0, 0, 0, 1),
             Visibility = group.IsRunning ? Visibility.Visible : Visibility.Hidden, // appuntata ma chiusa: nessun punto
         };
         _indicators[group.AppKey] = indicator;
@@ -339,6 +351,7 @@ public sealed class BarWindow : Window
         content.HorizontalAlignment = HorizontalAlignment.Stretch; // l'indicatore sta sul fondo del pulsante
         content.VerticalAlignment = VerticalAlignment.Stretch;
         button.Margin = new Thickness(2, 0, 2, 0);
+        _appButtons[group.AppKey] = button;
         // App aperta: al posto del suggerimento ci sono le anteprime delle finestre, come in Windows.
         if (!group.IsRunning)
             button.ToolTip = group.Title;
@@ -449,14 +462,20 @@ public sealed class BarWindow : Window
 
     private void OnForegroundChanged(nint foreground) => UpdateIndicators();
 
+    /// <summary>Il formato della data dipende dallo stile.</summary>
+    private void OnThemeChanged(object? sender, EventArgs e) => SetTime(_now);
+
     private void UpdateIndicators()
     {
         var active = VisibleGroups().FirstOrDefault(g => g.Contains(_tracker.Foreground))?.AppKey;
         foreach (var (key, dot) in _indicators)
         {
             var isActive = key == active;
-            dot.Fill = isActive ? Theme.RedBrush : Theme.GreyBrush;
-            dot.Width = isActive ? 6 : 4;
+            dot.Fill = isActive ? Theme.AccentBrush : Theme.MutedBrush;
+            dot.Width = isActive ? 16 : 6;
+            // l'app in primo piano ha la casella riempita, come nella taskbar di Windows 11
+            if (_appButtons.TryGetValue(key, out var button))
+                button.Background = isActive ? Theme.SurfaceBrush : Brushes.Transparent;
         }
     }
 
@@ -488,8 +507,8 @@ public sealed class BarWindow : Window
         var button = new Border
         {
             Width = width,
-            Height = 38,
-            CornerRadius = new CornerRadius(19),
+            Height = 40,
+            CornerRadius = new CornerRadius(4),
             Background = Brushes.Transparent,
             VerticalAlignment = VerticalAlignment.Center,
             Child = child,
@@ -499,8 +518,13 @@ public sealed class BarWindow : Window
             content.HorizontalAlignment = HorizontalAlignment.Center;
             content.VerticalAlignment = VerticalAlignment.Center;
         }
-        button.MouseEnter += (_, _) => button.Background = Theme.SurfaceBrush;
-        button.MouseLeave += (_, _) => button.Background = Brushes.Transparent;
+        var wasFilled = false;
+        button.MouseEnter += (_, _) =>
+        {
+            wasFilled = button.Background == Theme.SurfaceBrush;
+            button.Background = wasFilled ? Theme.SurfaceHoverBrush : Theme.SurfaceBrush;
+        };
+        button.MouseLeave += (_, _) => button.Background = wasFilled ? Theme.SurfaceBrush : Brushes.Transparent;
         return button;
     }
 }

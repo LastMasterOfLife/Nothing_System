@@ -43,19 +43,15 @@ public sealed class RemoteConnectWindow : Window
     private static readonly FontFamily Mono = new("Cascadia Mono, Consolas");
 
     private readonly IRemoteConnectActions _actions;
-    private readonly Border _frame = new()
+    private readonly Border _frame = Theme.Panel(new Border
     {
-        Background = Theme.BlackBrush,
-        BorderBrush = Theme.OutlineBrush,
-        BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(28),
         Padding = new Thickness(22, 18, 22, 18),
-    };
-    private readonly TextBlock _title = NotchUi.Text(16, Theme.WhiteBrush);
-    private readonly TextBlock _subtitle = NotchUi.Text(12, Theme.GreyBrush);
+    });
+    private readonly TextBlock _title = NotchUi.Text(16, Theme.InkBrush);
+    private readonly TextBlock _subtitle = NotchUi.Text(12, Theme.MutedBrush);
     private readonly Rendering.DotMatrixView _status = new() { Pitch = 2, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top };
     private readonly ContentControl _body = new() { Focusable = false, Margin = new Thickness(0, 14, 0, 12) };
-    private readonly TextBlock _hint = NotchUi.Text(11, Theme.GreyBrush);
+    private readonly TextBlock _hint = NotchUi.Text(11, Theme.MutedBrush);
     private readonly StackPanel _buttons = new() { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
     private readonly List<(Border Row, Action Pick)> _rows = [];
 
@@ -79,6 +75,7 @@ public sealed class RemoteConnectWindow : Window
         ResizeMode = ResizeMode.NoResize;
         Title = "Nothing Shell — Collegamento";
         Content = BuildVisualTree();
+        GlassBackdrop.Attach(this, _frame);
         PreviewKeyDown += OnKey;
         Closed += (_, _) =>
         {
@@ -105,7 +102,7 @@ public sealed class RemoteConnectWindow : Window
         AddRow(list, "Chiedi all'assistente", route.Input, "COMANDO", () => Hand(route.Input));
         if (route.Different.Count > 0)
         {
-            var heading = NotchUi.Text(11, Theme.GreyBrush, "SIMILI, MA NON UGUALI");
+            var heading = NotchUi.Text(11, Theme.MutedBrush, "SIMILI, MA NON UGUALI");
             heading.Margin = new Thickness(12, 10, 0, 6);
             list.Children.Add(heading);
             foreach (var option in route.Different)
@@ -162,7 +159,7 @@ public sealed class RemoteConnectWindow : Window
     public void ShowSampleLog(RemoteComputer computer)
     {
         ArgumentNullException.ThrowIfNull(computer);
-        SetHeader(computer.Name, $"{computer.Address} · desktop remoto", "COLLEGATO", Theme.White);
+        SetHeader(computer.Name, $"{computer.Address} · desktop remoto", "COLLEGATO", Theme.Ink);
         StartLog();
         Footer("Si chiude da sola");
         Comment($"{computer.Name} → {computer.Address}");
@@ -261,13 +258,13 @@ public sealed class RemoteConnectWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition());
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var text = new StackPanel();
-        text.Children.Add(NotchUi.Text(14, Theme.WhiteBrush, title));
-        var line = NotchUi.Text(11, Theme.GreyBrush, detail);
+        text.Children.Add(NotchUi.Text(14, Theme.InkBrush, title));
+        var line = NotchUi.Text(11, Theme.MutedBrush, detail);
         if (code)
             line.FontFamily = Mono;
         line.Margin = new Thickness(0, 3, 0, 0);
         text.Children.Add(line);
-        var label = NotchUi.Text(10, Theme.GreyBrush, tag);
+        var label = NotchUi.Text(10, Theme.MutedBrush, tag);
         label.VerticalAlignment = VerticalAlignment.Center;
         label.Margin = new Thickness(12, 0, 0, 0);
         Grid.SetColumn(label, 1);
@@ -277,7 +274,7 @@ public sealed class RemoteConnectWindow : Window
         var row = new Border
         {
             Child = grid,
-            CornerRadius = new CornerRadius(12),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(12, 8, 12, 8),
             Margin = new Thickness(0, 0, 0, 3),
             Background = Brushes.Transparent,
@@ -335,8 +332,8 @@ public sealed class RemoteConnectWindow : Window
         var nameBox = FormBox(name);
         var addressBox = FormBox(address);
         var userBox = FormBox(user);
-        var passwordBox = new PasswordBox { Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = Theme.WhiteBrush, CaretBrush = Theme.WhiteBrush, FontSize = 13, VerticalContentAlignment = VerticalAlignment.Center };
-        var problem = NotchUi.Text(12, Theme.RedBrush);
+        var passwordBox = new PasswordBox { Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = Theme.InkBrush, CaretBrush = Theme.InkBrush, FontSize = 13, VerticalContentAlignment = VerticalAlignment.Center };
+        var problem = NotchUi.Text(12, Theme.CriticalBrush);
         problem.TextWrapping = TextWrapping.Wrap;
         problem.TextTrimming = TextTrimming.None;
         problem.Margin = new Thickness(0, 10, 0, 0);
@@ -384,8 +381,8 @@ public sealed class RemoteConnectWindow : Window
         Text = text,
         Background = Brushes.Transparent,
         BorderThickness = new Thickness(0),
-        Foreground = Theme.WhiteBrush,
-        CaretBrush = Theme.WhiteBrush,
+        Foreground = Theme.InkBrush,
+        CaretBrush = Theme.InkBrush,
         FontFamily = Theme.BodyFont,
         FontSize = 13,
         VerticalContentAlignment = VerticalAlignment.Center,
@@ -394,14 +391,14 @@ public sealed class RemoteConnectWindow : Window
     private static StackPanel FormField(string label, Control input)
     {
         var field = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
-        var caption = NotchUi.Text(11, Theme.GreyBrush, label);
+        var caption = NotchUi.Text(11, Theme.MutedBrush, label);
         caption.Margin = new Thickness(0, 0, 0, 4);
         field.Children.Add(caption);
         field.Children.Add(new Border
         {
             BorderBrush = Theme.OutlineBrush,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(10, 0, 10, 0),
             Height = 32,
             Child = input,
@@ -431,7 +428,7 @@ public sealed class RemoteConnectWindow : Window
         _rows.Clear();
         _selected = -1;
         _enter = null;
-        SetHeader(computer.Name, $"{computer.Address} · desktop remoto", "IN CORSO", Theme.Grey);
+        SetHeader(computer.Name, $"{computer.Address} · desktop remoto", "IN CORSO", Theme.Muted);
         StartLog();
         Footer("Esc per fermare");
         using var cancel = new CancellationTokenSource();
@@ -482,21 +479,21 @@ public sealed class RemoteConnectWindow : Window
             if (code != 0)
             {
                 // mstsc è aperto e mostra il suo messaggio: non è un errore da ripetere, e non si impara nulla.
-                SetHeader(computer.Name, $"{computer.Address} · desktop remoto", "DA VEDERE", Theme.Grey);
+                SetHeader(computer.Name, $"{computer.Address} · desktop remoto", "DA VEDERE", Theme.Muted);
                 Comment("Desktop remoto è aperto ma non vedo ancora la connessione: guarda la sua finestra.");
                 Footer("Esc per chiudere");
                 return;
             }
 
             _actions.ComputerConnected(_actions.Current(computer) ?? computer, phrase);
-            SetHeader(computer.Name, $"{computer.Address} · desktop remoto", "COLLEGATO", Theme.White);
+            SetHeader(computer.Name, $"{computer.Address} · desktop remoto", "COLLEGATO", Theme.Ink);
             Comment("Il computer ha accettato il collegamento: il resto è nella finestra di Desktop remoto.");
             Footer("Si chiude da sola");
             CloseSoon();
         }
         catch (OperationCanceledException)
         {
-            SetHeader(computer.Name, $"{computer.Address} · desktop remoto", "FERMATO", Theme.Grey);
+            SetHeader(computer.Name, $"{computer.Address} · desktop remoto", "FERMATO", Theme.Muted);
             Comment("Fermato.");
             Footer("Esc per chiudere", ("RIPROVA", () => Connect(computer, phrase)));
             _enter = () => Connect(computer, phrase);
@@ -509,7 +506,7 @@ public sealed class RemoteConnectWindow : Window
 
     private void Failed(RemoteComputer computer, string? phrase, string reason)
     {
-        SetHeader(computer.Name, $"{computer.Address} · desktop remoto", "NON COLLEGATO", Theme.Red);
+        SetHeader(computer.Name, $"{computer.Address} · desktop remoto", "NON COLLEGATO", Theme.Critical);
         Output(reason, true);
         _enter = () => Connect(computer, phrase);
         Footer("Invio per riprovare · Esc per chiudere",
@@ -588,9 +585,9 @@ public sealed class RemoteConnectWindow : Window
             IsReadOnly = true,
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
-            Foreground = Theme.WhiteBrush,
+            Foreground = Theme.InkBrush,
             CaretBrush = Brushes.Transparent,
-            SelectionBrush = Theme.GreyBrush,
+            SelectionBrush = Theme.MutedBrush,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             IsDocumentEnabled = false,
         };
@@ -605,17 +602,17 @@ public sealed class RemoteConnectWindow : Window
         return run;
     }
 
-    private void Comment(string text) => AddLine($"# {text}", Theme.GreyBrush, 6);
+    private void Comment(string text) => AddLine($"# {text}", Theme.MutedBrush, 6);
 
-    private void Command(string text) => AddLine($"PS> {text}", Theme.WhiteBrush, 8);
+    private void Command(string text) => AddLine($"PS> {text}", Theme.InkBrush, 8);
 
-    private void Output(string text, bool error) => AddLine(text, error ? Theme.RedBrush : Theme.GreyBrush, 2);
+    private void Output(string text, bool error) => AddLine(text, error ? Theme.CriticalBrush : Theme.MutedBrush, 2);
 
     /// <summary>Il comando compare scrivendosi, in pochi istanti: si vede cosa sta per partire, senza far aspettare.</summary>
     private async Task TypeAsync(string text, CancellationToken token)
     {
         const int frames = 12;
-        var run = AddLine("PS> ", Theme.WhiteBrush, 8);
+        var run = AddLine("PS> ", Theme.InkBrush, 8);
         if (Motion.Enabled)
         {
             for (var frame = 1; frame < frames; frame++)

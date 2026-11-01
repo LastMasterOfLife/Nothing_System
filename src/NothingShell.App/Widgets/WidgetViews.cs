@@ -32,16 +32,13 @@ public abstract class WidgetView : Border
         Id = id;
         Width = size.Width;
         Height = size.Height;
-        Background = Theme.SurfaceBrush;
-        BorderBrush = Theme.OutlineBrush;
-        BorderThickness = new Thickness(1);
-        CornerRadius = new CornerRadius(24);
+        Theme.Panel(this);
         Padding = new Thickness(Padding16);
 
         var root = new DockPanel { LastChildFill = true };
         if (header is not null)
         {
-            HeaderText = Label(header, 11, Theme.GreyBrush);
+            HeaderText = Label(header, 12, Theme.MutedBrush);
             HeaderText.Margin = new Thickness(0, 0, 0, 12);
             DockPanel.SetDock(HeaderText, Dock.Top);
             root.Children.Add(HeaderText);
@@ -62,7 +59,7 @@ public abstract class WidgetView : Border
 
     protected static TextBlock Label(string text, double size, Brush foreground) => new()
     {
-        Text = text,
+        Text = DotText.Friendly(text),
         FontFamily = Theme.BodyFont,
         FontSize = size,
         Foreground = foreground,
@@ -82,8 +79,8 @@ public abstract class WidgetView : Border
 public sealed class ClockWidget : WidgetView
 {
     private readonly DotMatrixView _time = new() { Pitch = 9, HorizontalAlignment = HorizontalAlignment.Left };
-    private readonly DotMatrixView _weekday = new() { Pitch = 2.5, DotColor = Theme.Red };
-    private readonly DotMatrixView _date = new() { Pitch = 2.5, DotColor = Theme.Grey, Margin = new Thickness(10, 0, 0, 0) };
+    private readonly DotMatrixView _weekday = new() { Pitch = 2.5, DotColor = Theme.Accent };
+    private readonly DotMatrixView _date = new() { Pitch = 2.5, DotColor = Theme.Muted, Margin = new Thickness(10, 0, 0, 0) };
 
     public ClockWidget()
         : base(WidgetKind.Clock, header: null)
@@ -110,7 +107,7 @@ public sealed class BatteryWidget : WidgetView
 {
     private readonly DotMatrixView _value = new() { Pitch = 5, HorizontalAlignment = HorizontalAlignment.Left };
     private readonly DotMatrixView _bar = Bar(rows: 2);
-    private readonly TextBlock _state = Label(string.Empty, 11, Theme.GreyBrush);
+    private readonly TextBlock _state = Label(string.Empty, 11, Theme.MutedBrush);
 
     public BatteryWidget()
         : base(WidgetKind.Battery, "BATTERIA")
@@ -128,9 +125,9 @@ public sealed class BatteryWidget : WidgetView
         ArgumentNullException.ThrowIfNull(status);
         _value.Dots = DotText.Render(status.Label);
         _bar.Dots = DotBar.Render(status.BarFraction, BarColumns, rows: 2);
-        _bar.DotColor = status.IsLow ? Theme.Red : Theme.White;
-        _state.Text = status.StateText;
-        _state.Foreground = status.Charging ? Theme.RedBrush : Theme.GreyBrush;
+        _bar.DotColor = status.IsLow ? Theme.Critical : Theme.Ink;
+        _state.Text = DotText.Friendly(status.StateText);
+        _state.Foreground = status.Charging ? Theme.AccentBrush : Theme.MutedBrush;
     }
 }
 
@@ -166,7 +163,7 @@ public sealed class SystemWidget : WidgetView
     private static (DotMatrixView, DotMatrixView) AddMeter(Panel parent, string name)
     {
         var row = new Grid { Margin = new Thickness(0, parent.Children.Count == 0 ? 0 : 16, 0, 6) };
-        var label = Label(name, 11, Theme.GreyBrush);
+        var label = Label(name, 11, Theme.MutedBrush);
         label.VerticalAlignment = VerticalAlignment.Center;
         var value = new DotMatrixView { Pitch = 3, HorizontalAlignment = HorizontalAlignment.Right };
         row.Children.Add(label);
@@ -197,10 +194,10 @@ public sealed class CalendarWidget : WidgetView
             return;
         _shown = today;
 
-        HeaderText!.Text = now.ToString("MMMM yyyy", Italian).ToUpper(Italian);
+        HeaderText!.Text = DotText.Sentence(now.ToString("MMMM yyyy", Italian));
         _grid.Children.Clear();
         foreach (var initial in MonthCalendar.WeekdayInitials)
-            _grid.Children.Add(Cell(initial, Theme.GreyBrush, highlighted: false));
+            _grid.Children.Add(Cell(initial, Theme.MutedBrush, highlighted: false));
 
         var weeks = MonthCalendar.Weeks(today.Year, today.Month);
         _grid.Rows = weeks.Length + 1;
@@ -209,7 +206,7 @@ public sealed class CalendarWidget : WidgetView
             {
                 var day = week[c];
                 var isToday = day == today.Day;
-                var brush = c == 6 ? Theme.GreyBrush : Theme.WhiteBrush;
+                var brush = c == 6 ? Theme.MutedBrush : Theme.InkBrush;
                 _grid.Children.Add(Cell(day == 0 ? string.Empty : day.ToString(Italian), brush, isToday));
             }
     }
@@ -218,8 +215,8 @@ public sealed class CalendarWidget : WidgetView
     {
         var cell = new Grid();
         if (highlighted)
-            cell.Children.Add(new Ellipse { Width = 17, Height = 17, Fill = Theme.RedBrush });
-        var label = Label(text, 10, highlighted ? Theme.WhiteBrush : foreground);
+            cell.Children.Add(new Ellipse { Width = 17, Height = 17, Fill = Theme.AccentBrush });
+        var label = Label(text, 10, highlighted ? Theme.OnAccentBrush : foreground);
         label.HorizontalAlignment = HorizontalAlignment.Center;
         label.VerticalAlignment = VerticalAlignment.Center;
         if (highlighted)

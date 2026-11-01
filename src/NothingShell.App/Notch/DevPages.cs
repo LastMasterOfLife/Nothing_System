@@ -33,7 +33,7 @@ internal static class DevRows
     public static (Grid Header, DotMatrixView Title, TextBlock Count) Header(string title)
     {
         var dots = new DotMatrixView { Pitch = 2, Dots = DotText.Render(title), HorizontalAlignment = HorizontalAlignment.Left };
-        var count = NotchUi.Text(11, Theme.GreyBrush);
+        var count = NotchUi.Text(11, Theme.MutedBrush);
         count.HorizontalAlignment = HorizontalAlignment.Right;
         count.VerticalAlignment = VerticalAlignment.Center;
         var header = new Grid();
@@ -47,7 +47,7 @@ internal static class DevRows
     {
         if (mark is FrameworkElement fe)
             fe.VerticalAlignment = VerticalAlignment.Center;
-        var title = NotchUi.Text(13, textBrush ?? Theme.WhiteBrush, text);
+        var title = NotchUi.Text(13, textBrush ?? Theme.InkBrush, text);
         title.VerticalAlignment = VerticalAlignment.Center;
         title.Margin = new Thickness(12, 0, 8, 0);
 
@@ -67,7 +67,7 @@ internal static class DevRows
         var row = new Border
         {
             Height = 30,
-            CornerRadius = new CornerRadius(10),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(8, 0, 8, 0),
             Margin = new Thickness(-8, 0, -8, 0),
             Background = Brushes.Transparent,
@@ -89,7 +89,7 @@ internal static class DevRows
 
     public static TextBlock Detail(string text, Brush? brush = null)
     {
-        var detail = NotchUi.Text(11, brush ?? Theme.GreyBrush, text);
+        var detail = NotchUi.Text(11, brush ?? Theme.MutedBrush, text);
         detail.VerticalAlignment = VerticalAlignment.Center;
         return detail;
     }
@@ -97,19 +97,19 @@ internal static class DevRows
     /// <summary>Pulsante a pillola piccolo dentro una riga; il clic non arriva alla riga.</summary>
     public static Border Button(string label, Action click, Brush? foreground = null)
     {
-        var text = NotchUi.Text(10, foreground ?? Theme.WhiteBrush, label);
+        var text = NotchUi.Text(12, foreground ?? Theme.InkBrush, label);
         var button = new Border
         {
-            BorderBrush = Theme.GreyBrush,
+            BorderBrush = Theme.OutlineBrush,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(9, 2, 9, 2),
+            CornerRadius = new CornerRadius(Theme.RadiusSmall),
+            Padding = new Thickness(9, 2, 9, 3),
             Margin = new Thickness(6, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
             Cursor = Cursors.Hand,
             Child = text,
         };
-        Motion.StateLayer(button, Theme.Black, Theme.Surface);
+        Motion.StateLayer(button, Theme.Surface, Theme.SurfaceHover);
         Motion.Press(button);
         button.MouseLeftButtonUp += (_, e) =>
         {
@@ -135,7 +135,7 @@ internal static class DevRows
 
     public static TextBlock Empty()
     {
-        var empty = NotchUi.Text(13, Theme.GreyBrush);
+        var empty = NotchUi.Text(13, Theme.MutedBrush);
         empty.Margin = new Thickness(0, 18, 0, 0);
         empty.TextWrapping = TextWrapping.Wrap;
         return empty;
@@ -151,7 +151,7 @@ public sealed class WorkPage : NotchPageView
     private readonly Action<FinishedTask> _open;
     private readonly TextBlock _count;
     private readonly StackPanel _rows = new() { Margin = new Thickness(0, 8, 0, 0) };
-    private readonly TextBlock _ci = NotchUi.Text(11, Theme.GreyBrush);
+    private readonly TextBlock _ci = NotchUi.Text(11, Theme.MutedBrush);
     private readonly TextBlock _empty = DevRows.Empty();
     private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromSeconds(1) };
     private IReadOnlyList<RunningTask> _running = [];
@@ -208,7 +208,7 @@ public sealed class WorkPage : NotchPageView
             CiState.Success => $"CI OK · {status.Repository} · {status.Branch}",
             _ => $"CI FALLITA · {CiRuns.Summary(status.Runs)}",
         };
-        _ci.Foreground = status?.State == CiState.Failure ? Theme.RedBrush : Theme.GreyBrush;
+        _ci.Foreground = status?.State == CiState.Failure ? Theme.CriticalBrush : Theme.MutedBrush;
         _ci.Visibility = _ci.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         Render();
     }
@@ -220,15 +220,15 @@ public sealed class WorkPage : NotchPageView
         _count.Text = _running.Count > 0 ? $"{_running.Count} in corso" : _recent.Count > 0 ? $"{_recent.Count} recenti" : string.Empty;
         _rows.Children.Clear();
         foreach (var task in _running.Take(max))
-            _rows.Children.Add(DevRows.Row(DevRows.Dots(TaskTracker.FormatElapsed(now - task.StartedAt), Theme.White),
+            _rows.Children.Add(DevRows.Row(DevRows.Dots(TaskTracker.FormatElapsed(now - task.StartedAt), Theme.Ink),
                 task.Title, DevRows.Detail("in corso"), click: null, task.Cwd));
         foreach (var task in _recent.Take(max - _rows.Children.Count))
         {
-            var mark = task.Succeeded ? DevRows.Icon(DotIcons.Check, Theme.White) : DevRows.Icon(DotIcons.Close, Theme.Red, 1.5);
+            var mark = task.Succeeded ? DevRows.Icon(DotIcons.Check, Theme.Ink) : DevRows.Icon(DotIcons.Close, Theme.Critical, 1.5);
             var detail = $"{TaskTracker.FormatDuration(task.Duration)} · {TaskTracker.FormatAgo(task.FinishedAt, now)}";
             var open = task.Error is not null || task.Log is not null ? () => _open(task) : (Action?)null;
             var tooltip = task.Error is { } error ? $"{error.File}:{error.Line}\n{error.Message}" : task.Cwd;
-            _rows.Children.Add(DevRows.Row(mark, task.Title, DevRows.Detail(detail, task.Succeeded ? null : Theme.RedBrush), open, tooltip));
+            _rows.Children.Add(DevRows.Row(mark, task.Title, DevRows.Detail(detail, task.Succeeded ? null : Theme.CriticalBrush), open, tooltip));
         }
         _empty.Visibility = _rows.Children.Count == 0 && _ci.Visibility != Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -311,7 +311,7 @@ public sealed class ServersPage : NotchPageView
                 : $"{server.Service ?? server.Process} · PID {server.Pid}";
             var buttons = new List<UIElement>();
             if (server == _denied)
-                buttons.Add(DevRows.Detail("serve l'amministratore", Theme.RedBrush));
+                buttons.Add(DevRows.Detail("serve l'amministratore", Theme.CriticalBrush));
             else if (server.CanOpen)
                 buttons.Add(DevRows.Button("APRI", () => _open(server)));
             if (server.CanKill && server != _denied)
@@ -326,7 +326,7 @@ public sealed class ServersPage : NotchPageView
                             _confirmTimer.Start();
                         }
                         Render();
-                    }, Theme.RedBrush)
+                    }, Theme.CriticalBrush)
                     : DevRows.Button("✕", () =>
                     {
                         _confirming = server;
@@ -334,7 +334,7 @@ public sealed class ServersPage : NotchPageView
                         _confirmTimer.Start();
                         Render();
                     }));
-            _rows.Children.Add(DevRows.Row(DevRows.Dots(server.Port.ToString(NotchUi.Italian), Theme.White), name,
+            _rows.Children.Add(DevRows.Row(DevRows.Dots(server.Port.ToString(NotchUi.Italian), Theme.Ink), name,
                 DevRows.Buttons([.. buttons]), server.CanOpen ? () => _open(server) : null, $"{server.Address} · {server.Process} (PID {server.Pid})"));
         }
         _empty.Visibility = _servers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -384,7 +384,7 @@ public sealed class ClipboardPage : NotchPageView
         {
             var sensitive = ClipClassifier.IsSensitive(entry.Kind);
             var mark = new StackPanel { Orientation = Orientation.Horizontal };
-            mark.Children.Add(DevRows.Dots(ClipClassifier.Tag(entry.Kind), sensitive ? Theme.Red : entry.Kind == ClipKind.Text ? Theme.Grey : Theme.White, 1.5));
+            mark.Children.Add(DevRows.Dots(ClipClassifier.Tag(entry.Kind), sensitive ? Theme.Critical : entry.Kind == ClipKind.Text ? Theme.Muted : Theme.Ink, 1.5));
             if (entry.Kind == ClipKind.Color && entry.Text is { } text && ClipClassifier.Color(text.Trim()) is { } color)
                 mark.Children.Add(new Ellipse
                 {
@@ -400,7 +400,7 @@ public sealed class ClipboardPage : NotchPageView
                 action is null ? null : DevRows.Button(action.Label, action.Run),
                 entry.Text is null ? null : () => _copy(entry),
                 entry.Text is null ? "Segreto: non si conserva" : "Clic: di nuovo negli appunti",
-                sensitive ? Theme.GreyBrush : null));
+                sensitive ? Theme.MutedBrush : null));
         }
         _empty.Visibility = entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }

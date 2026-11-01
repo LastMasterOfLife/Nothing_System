@@ -38,15 +38,11 @@ public sealed class JumpListWindow : Window
     private const double ScreenMargin = 8;
     private static readonly Duration OpenDuration = new(TimeSpan.FromMilliseconds(150));
 
-    private readonly Border _panel = new()
+    private readonly Border _panel = Theme.Panel(new Border
     {
-        Background = Theme.BlackBrush,
-        BorderBrush = Theme.OutlineBrush,
-        BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(24),
         Padding = new Thickness(10, 14, 10, 10),
         Width = PanelWidth,
-    };
+    });
     private readonly TranslateTransform _slide = new();
     private bool _closing;
 
@@ -62,6 +58,7 @@ public sealed class JumpListWindow : Window
         Width = PanelWidth;
         _panel.RenderTransform = _slide;
         Content = _panel;
+        GlassBackdrop.Attach(this, _panel);
 
         SourceInitialized += (_, _) =>
             NativeMethods.AddExStyle(new WindowInteropHelper(this).Handle, WindowNative.WsExToolWindow);
@@ -132,7 +129,7 @@ public sealed class JumpListWindow : Window
         stack.Children.Add(new DotMatrixView
         {
             Pitch = 2,
-            DotColor = Theme.Red,
+            DotColor = Theme.Accent,
             Dots = DotText.Render(model.Frequent ? "FREQUENTI" : "RECENTI"),
             HorizontalAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(10, 0, 0, 10),
@@ -140,31 +137,31 @@ public sealed class JumpListWindow : Window
 
         if (model.Items.Count == 0)
         {
-            var none = Label("Nessun elemento recente", Theme.GreyBrush);
+            var none = Label("Nessun elemento recente", Theme.MutedBrush);
             none.Margin = new Thickness(10, 0, 0, 8);
             stack.Children.Add(none);
         }
         foreach (var item in model.Items)
         {
-            var row = Row(IconView(model.IconOf(item)), item.Title, Theme.WhiteBrush, () => model.OpenItem(item));
+            var row = Row(IconView(model.IconOf(item)), item.Title, Theme.InkBrush, () => model.OpenItem(item));
             row.ToolTip = item.IsLink && !string.IsNullOrEmpty(item.Arguments) ? $"{item.Path} {item.Arguments}" : item.Path;
             stack.Children.Add(row);
         }
 
         stack.Children.Add(new Rectangle { Height = 1, Fill = Theme.OutlineBrush, Margin = new Thickness(10, 8, 10, 8) });
-        stack.Children.Add(Row(IconView(model.AppIcon), model.AppName, Theme.WhiteBrush, model.LaunchApp));
+        stack.Children.Add(Row(IconView(model.AppIcon), model.AppName, Theme.InkBrush, model.LaunchApp));
         if (model.OpenWindows > 0)
         {
             var close = new DotMatrixView
             {
                 Pitch = 2,
                 Dots = DotGrid.From(DotIcons.Close),
-                DotColor = Theme.Red,
+                DotColor = Theme.Critical,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
             };
             var label = model.OpenWindows > 1 ? $"Chiudi {model.OpenWindows} finestre" : "Chiudi finestra";
-            stack.Children.Add(Row(close, label, Theme.WhiteBrush, model.CloseWindows));
+            stack.Children.Add(Row(close, label, Theme.InkBrush, model.CloseWindows));
         }
         _panel.Child = stack;
     }
@@ -185,7 +182,7 @@ public sealed class JumpListWindow : Window
         var row = new Border
         {
             Height = RowHeight,
-            CornerRadius = new CornerRadius(12),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(10, 0, 10, 0),
             Background = Brushes.Transparent,
             Child = grid,
@@ -204,7 +201,7 @@ public sealed class JumpListWindow : Window
     private static FrameworkElement IconView(ImageSource? source)
     {
         if (source is null)
-            return new Ellipse { Width = 6, Height = 6, Fill = Theme.GreyBrush };
+            return new Ellipse { Width = 6, Height = 6, Fill = Theme.MutedBrush };
         var image = new Image { Source = source, Width = 20, Height = 20 };
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
         return image;

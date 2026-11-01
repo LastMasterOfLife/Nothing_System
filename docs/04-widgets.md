@@ -1,15 +1,15 @@
 # 04 — Widget sul desktop (M2)
 
-Riquadri in stile Nothing appoggiati sul desktop: sopra lo sfondo, **sotto tutte le finestre**,
+Riquadri coi colori e il vetro della pagina Aspetto (docs/02-design-system.md) appoggiati sul desktop: sopra lo sfondo, **sotto tutte le finestre**,
 visibili anche con "Mostra desktop" (Win+D). Si spostano trascinandoli; la posizione è salvata.
 
 ## Catalogo
 | Widget | Taglia (DIP) | Contenuto | Aggiornamento |
 |--------|--------------|-----------|---------------|
-| `Clock` | 352 × 168 | HH:MM grande a punti, giorno della settimana in rosso, data in grigio | ogni minuto |
+| `Clock` | 352 × 168 | HH:MM grande, giorno della settimana nel colore d'accento, data in grigio | ogni minuto |
 | `Battery` | 168 × 168 | percentuale a punti + barra a punti; rossa sotto il 20%; "IN CARICA" | ogni 20 s |
 | `System` | 168 × 168 | CPU e RAM: percentuale + barra a punti | ogni 2 s |
-| `Calendar` | 168 × 168 | mese corrente, settimana da lunedì, oggi cerchiato in rosso | ogni minuto (ridisegna al cambio giorno) |
+| `Calendar` | 168 × 168 | mese corrente, settimana da lunedì, oggi cerchiato nel colore d'accento | ogni minuto (ridisegna al cambio giorno) |
 
 Senza batteria (desktop fisso) il widget batteria mostra "AC" e la barra piena.
 

@@ -49,16 +49,18 @@ public sealed class NotchWindow : Window
     private readonly Spring _height;
     private readonly DotEqualizer _equalizer = new();
 
-    private readonly Border _pill = new() { Background = Theme.BlackBrush, ClipToBounds = true };
+    private readonly Border _pill = Theme.Panel(new Border { ClipToBounds = true });
+    private readonly GlassBackdrop _glass;
+    private bool _quiet;
 
     // Compatto: [punto rosso | microfono e webcam]  HH:MM o timer  [equalizzatore | download]
     private readonly Grid _compact = new() { VerticalAlignment = VerticalAlignment.Top };
-    private readonly DotMatrixView _compactClock = new() { Pitch = 3 };
-    private readonly Ellipse _liveDot = new() { Width = 8, Height = 8, Fill = Theme.RedBrush };
+    private readonly DotMatrixView _compactClock = new() { Pitch = 3, TextSize = 13 };
+    private readonly Ellipse _liveDot = new() { Width = 8, Height = 8, Fill = Theme.AccentBrush };
     private readonly DotMatrixView _equalizerView = new() { Pitch = 3 };
     private readonly StackPanel _privacyIcons = new() { Orientation = Orientation.Horizontal };
-    private readonly DotMatrixView _micIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Microphone), DotColor = Theme.Red };
-    private readonly DotMatrixView _camIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Camera), DotColor = Theme.Red };
+    private readonly DotMatrixView _micIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Microphone), DotColor = Theme.Critical };
+    private readonly DotMatrixView _camIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Camera), DotColor = Theme.Critical };
     private readonly StackPanel _downloadView = new() { Orientation = Orientation.Horizontal };
     private readonly DotMatrixView _downloadIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Download) };
     private readonly DotMatrixView _downloadText = new() { Pitch = 2 };
@@ -71,7 +73,7 @@ public sealed class NotchWindow : Window
 
     // Avviso: [icona] testo che scorre, oppure [icona] livello a punti e valore (volume, luminosità)
     private readonly Grid _alert = new() { VerticalAlignment = VerticalAlignment.Top, Opacity = 0 };
-    private readonly DotMatrixView _alertIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Mail), DotColor = Theme.Red };
+    private readonly DotMatrixView _alertIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Mail), DotColor = Theme.Accent };
     private readonly DotMatrixView _alertText = new() { Pitch = AlertTextPitch };
     private readonly DotMatrixView _alertLevel = new() { Pitch = LevelPitch, OffColor = Theme.DotOff };
     private readonly DotMatrixView _alertValue = new() { Pitch = AlertTextPitch };
@@ -152,6 +154,10 @@ public sealed class NotchWindow : Window
         Title = "Nothing Shell — Notch";
 
         Content = BuildVisualTree();
+        _glass = GlassBackdrop.Attach(this, _pill);
+        _quiet = Theme.Settings.QuietNotch;
+        Theme.Changed += (_, _) => OnAppearanceChanged();
+        ApplyQuiet();
         ApplyPillSize();
         ShowPage(NotchPage.Home, animate: false);
 
@@ -169,7 +175,11 @@ public sealed class NotchWindow : Window
             HwndSource.FromHwnd(hwnd)?.AddHook(OnWindowMessage);
         };
         Deactivated += (_, _) => ReleaseAsk();
-        Loaded += (_, _) => PositionOnPrimaryScreen();
+        Loaded += (_, _) =>
+        {
+            PositionOnPrimaryScreen();
+            ApplyPillSize();
+        };
         SystemParameters.StaticPropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(SystemParameters.WorkArea))
@@ -209,7 +219,7 @@ public sealed class NotchWindow : Window
     public void ShowMailAlert(MailItem mail)
     {
         ArgumentNullException.ThrowIfNull(mail);
-        ShowBanner(mail.Subject, DotIcons.Mail, Theme.Red, Theme.White, NotchPage.Mail, duration: null);
+        ShowBanner(mail.Subject, DotIcons.Mail, Theme.Accent, Theme.Ink, NotchPage.Mail, duration: null);
     }
 
     /// <summary>Volume o luminosità: icona, barra a punti e valore per 1,5 s; ogni tasto rinnova la durata.</summary>
@@ -218,13 +228,13 @@ public sealed class NotchWindow : Window
         ArgumentNullException.ThrowIfNull(icon);
         _alertMessage = string.Empty;
         _alertPage = null;
-        SetAlertIcon(icon, muted ? Theme.Red : Theme.White);
+        SetAlertIcon(icon, muted ? Theme.Critical : Theme.Ink);
         _alertText.Visibility = Visibility.Collapsed;
         _alertLevel.Visibility = Visibility.Visible;
         _alertValue.Visibility = Visibility.Visible;
         _alertLevel.Dots = DotBar.Render(muted ? 0 : level, LevelColumns);
         _alertValue.Dots = DotText.Render(muted ? "MUTO" : $"{Math.Round(level * 100):0}");
-        _alertValue.DotColor = muted ? Theme.Red : Theme.White;
+        _alertValue.DotColor = muted ? Theme.Critical : Theme.Ink;
         RaiseAlert(LevelDuration);
     }
 
@@ -232,7 +242,7 @@ public sealed class NotchWindow : Window
     public void ShowNotice(DotGlyph icon, Color iconColor, string text)
     {
         ArgumentNullException.ThrowIfNull(icon);
-        ShowBanner(text, icon, iconColor, Theme.White, page: null, NoticeDuration);
+        ShowBanner(text, icon, iconColor, Theme.Ink, page: null, NoticeDuration);
     }
 
     /// <summary>Scheda con contenuto e pulsanti; col mouse sopra resta aperta.</summary>
@@ -324,7 +334,7 @@ public sealed class NotchWindow : Window
     public void ShowHint(DotGlyph icon, Color iconColor, string text, NotchPage page)
     {
         ArgumentNullException.ThrowIfNull(icon);
-        ShowBanner(text, icon, iconColor, Theme.White, page, NoticeDuration);
+        ShowBanner(text, icon, iconColor, Theme.Ink, page, NoticeDuration);
     }
 
     /// <summary>Le pagine delle funzioni accese; le altre spariscono dallo swipe e dagli indicatori.</summary>
@@ -377,7 +387,7 @@ public sealed class NotchWindow : Window
     /// <summary>Prepara la pillola in uno stato e una pagina senza animazioni (per <c>--snapshot</c>).</summary>
     public FrameworkElement PrepareSnapshot(NotchState state, NotchPage page)
     {
-        var size = state == NotchState.Expanded ? ExpandedSize(page) : NotchLayout.For(state);
+        var size = SizeFor(state, page);
         _expanded.Height = ExpandedSize(page).Height;
         _width.SnapTo(size.Width);
         _height.SnapTo(size.Height);
@@ -385,7 +395,7 @@ public sealed class NotchWindow : Window
         ShowPage(page, animate: false);
         foreach (var (layer, visible) in new (UIElement, bool)[]
                  {
-                     (_compact, state is NotchState.Idle or NotchState.Activity),
+                     (_compact, CompactOpacity(state) > 0),
                      (_alert, state == NotchState.Alert),
                      (_expanded, state == NotchState.Expanded),
                      (_card, state == NotchState.Card),
@@ -522,7 +532,6 @@ public sealed class NotchWindow : Window
         _pill.Child = content;
         _pill.HorizontalAlignment = HorizontalAlignment.Center;
         _pill.VerticalAlignment = VerticalAlignment.Top;
-        _pill.Margin = new Thickness(0, NotchLayout.TopMargin, 0, 0);
         _pill.MouseEnter += (_, _) => OnPointerEnter();
         _pill.MouseLeave += (_, _) => OnPointerLeave();
         _pill.MouseWheel += (_, e) =>
@@ -557,7 +566,7 @@ public sealed class NotchWindow : Window
     {
         var button = NotchUi.Button(new DotMatrixView { Pitch = 2, Dots = DotGrid.From(DotIcons.Terminal) }, () => AssistantRequested?.Invoke(), width: 24);
         button.Height = 22;
-        button.CornerRadius = new CornerRadius(11);
+        button.CornerRadius = new CornerRadius(4);
         button.Margin = new Thickness(0, 0, 20, 3);
         button.HorizontalAlignment = HorizontalAlignment.Right;
         button.VerticalAlignment = VerticalAlignment.Bottom;
@@ -618,7 +627,7 @@ public sealed class NotchWindow : Window
 
         foreach (var (kind, dot) in _indicatorDots)
         {
-            dot.Fill = kind == page ? Theme.WhiteBrush : Theme.GreyBrush;
+            dot.Fill = kind == page ? Theme.AccentBrush : Theme.DotOffBrush;
             dot.Width = dot.Height = kind == page ? 6 : 5;
         }
         if (_machine.State == NotchState.Expanded)
@@ -634,6 +643,31 @@ public sealed class NotchWindow : Window
     }
 
     private Size2 ExpandedSize(NotchPage page) => NotchLayout.Expanded(page, _media is not null);
+
+    private Size2 SizeFor(NotchState state, NotchPage page) =>
+        state == NotchState.Expanded ? ExpandedSize(page)
+        : state == NotchState.Idle && _quiet ? NotchLayout.Quiet
+        : NotchLayout.For(state);
+
+    /// <summary>Notch discreto acceso o spento dalla pagina Aspetto: la pillola cambia subito misura.</summary>
+    private void OnAppearanceChanged()
+    {
+        if (_quiet == Theme.Settings.QuietNotch)
+            return;
+        _quiet = Theme.Settings.QuietNotch;
+        ApplyQuiet();
+        var size = SizeFor(_machine.State, _pager.Current);
+        _width.Target = size.Width;
+        _height.Target = size.Height;
+        StartAnimation();
+        FadeTo(_compact, CompactOpacity(_machine.State));
+    }
+
+    /// <summary>Contro il bordo alto, così basta spingere il mouse in su per trovarla.</summary>
+    private void ApplyQuiet() => _pill.Margin = new Thickness(0, _quiet ? 0 : NotchLayout.TopMargin, 0, 0);
+
+    private double CompactOpacity(NotchState state) =>
+        state is NotchState.Expanded or NotchState.Alert or NotchState.Card || (state == NotchState.Idle && _quiet) ? 0 : 1;
 
     /// <summary>Il notch espanso si allunga o si accorcia con la pagina: le pagine con un elenco sono più alte.</summary>
     private void ResizeExpanded(NotchPage page)
@@ -795,7 +829,7 @@ public sealed class NotchWindow : Window
         {
             _countdownTimer.Stop();
             Apply(_machine.OnActivityChanged(HasActivity));
-            ShowBanner("TEMPO SCADUTO", icon: null, Theme.Red, Theme.Red, NotchPage.Timer, duration: null);
+            ShowBanner("TEMPO SCADUTO", icon: null, Theme.Critical, Theme.Critical, NotchPage.Timer, duration: null);
         }
         _timerPage.Update(_countdown.IsRunning, _countdown.Remaining(now));
         UpdateCompactClock();
@@ -823,7 +857,7 @@ public sealed class NotchWindow : Window
             return;
 
         var state = _machine.State;
-        var size = state == NotchState.Expanded ? ExpandedSize(_pager.Current) : NotchLayout.For(state);
+        var size = SizeFor(state, _pager.Current);
         if (state == NotchState.Expanded)
             _expanded.Height = size.Height;
         _width.Target = size.Width;
@@ -836,7 +870,7 @@ public sealed class NotchWindow : Window
         FadeTo(_expanded, expanded ? 1 : 0);
         FadeTo(_alert, alert ? 1 : 0);
         FadeTo(_card, card ? 1 : 0);
-        FadeTo(_compact, expanded || alert || card ? 0 : 1);
+        FadeTo(_compact, CompactOpacity(state));
         _expanded.IsHitTestVisible = expanded;
         _card.IsHitTestVisible = card;
         SetActivityVisible(state == NotchState.Activity);
@@ -918,7 +952,9 @@ public sealed class NotchWindow : Window
         var size = new Size2(Math.Max(1, _width.Value), Math.Max(1, _height.Value));
         _pill.Width = size.Width;
         _pill.Height = size.Height;
-        _pill.CornerRadius = new CornerRadius(NotchLayout.CornerRadius(size));
+        var radius = NotchLayout.CornerRadius(size);
+        _pill.CornerRadius = new CornerRadius(radius);
+        _glass.SetShape(new Rect((Width - size.Width) / 2, _pill.Margin.Top, size.Width, size.Height), radius);
     }
 
     private void PositionOnPrimaryScreen()

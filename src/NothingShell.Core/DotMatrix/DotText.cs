@@ -20,7 +20,7 @@ public static class DotText
 
     public static DotGrid Render(string text)
     {
-        var grid = new DotGrid(Measure(text), DotFont.Height);
+        var grid = new DotGrid(Measure(text), DotFont.Height) { Text = text };
         var x = 0;
         foreach (var c in text)
         {
@@ -38,7 +38,7 @@ public static class DotText
     public static DotGrid RenderMarquee(string text, int viewportWidth, int offset)
     {
         var source = Render(text);
-        var view = new DotGrid(viewportWidth, DotFont.Height);
+        var view = new DotGrid(viewportWidth, DotFont.Height) { Text = text };
         if (source.Width <= viewportWidth)
         {
             view.Draw(source, 0, 0);
@@ -53,4 +53,25 @@ public static class DotText
     }
 
     public static bool NeedsMarquee(string text, int viewportWidth) => Measure(text) > viewportWidth;
+
+    /// <summary>
+    /// Il testo com'è scritto in Windows: le etichette tutte maiuscole, comode a punti, diventano con la sola iniziale
+    /// maiuscola. Sigle brevi (CPU, CI, OK) e testi già misti (nomi di file, comandi, indirizzi) restano come sono.
+    /// </summary>
+    public static string Friendly(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        if (text.Any(char.IsLower) || !text.Split(' ').Any(word => word.Count(char.IsLetter) > 3))
+            return text;
+        var lower = text.ToLowerInvariant();
+        var first = lower.ToList().FindIndex(char.IsLetter);
+        return first < 0 ? text : lower[..first] + char.ToUpperInvariant(lower[first]) + lower[(first + 1)..];
+    }
+
+    /// <summary>Come <see cref="Friendly"/>, con l'iniziale sempre maiuscola: per date e titoli ("domenica" → "Domenica").</summary>
+    public static string Sentence(string text)
+    {
+        var friendly = Friendly(text);
+        return friendly.Length > 0 && char.IsLower(friendly[0]) ? char.ToUpperInvariant(friendly[0]) + friendly[1..] : friendly;
+    }
 }

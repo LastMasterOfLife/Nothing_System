@@ -49,7 +49,7 @@ public sealed class MailPage : NotchPageView
         _count.Text = mails.Count == 0 ? string.Empty : unread > 0 ? $"{unread} da leggere" : $"{Math.Min(Shown, mails.Count)} recenti";
         if (mails.Count == 0)
         {
-            var empty = NotchUi.Text(13, Theme.GreyBrush, emptyMessage);
+            var empty = NotchUi.Text(13, Theme.MutedBrush, emptyMessage);
             empty.TextWrapping = TextWrapping.Wrap;
             empty.Margin = new Thickness(0, 30, 0, 0);
             empty.TextAlignment = TextAlignment.Center;
@@ -66,21 +66,21 @@ public sealed class MailPage : NotchPageView
         var header = new DockPanel();
         if (mail.IsUnread)
         {
-            var dot = new Ellipse { Width = 6, Height = 6, Fill = Theme.RedBrush, Margin = new Thickness(0, 0, 6, 0) };
+            var dot = new Ellipse { Width = 6, Height = 6, Fill = Theme.AccentBrush, Margin = new Thickness(0, 0, 6, 0) };
             DockPanel.SetDock(dot, Dock.Left);
             header.Children.Add(dot);
         }
         var received = mail.Received.ToLocalTime();
-        var time = NotchUi.Text(11, Theme.GreyBrush,
+        var time = NotchUi.Text(11, Theme.MutedBrush,
             received.ToString(received.Date == DateTime.Today ? "HH:mm" : "d MMM", NotchUi.Italian));
         time.Margin = new Thickness(8, 0, 0, 0);
         DockPanel.SetDock(time, Dock.Right);
         header.Children.Add(time);
-        header.Children.Add(NotchUi.Text(11, Theme.GreyBrush, mail.Sender.Length > 0 ? mail.Sender : mail.App));
+        header.Children.Add(NotchUi.Text(11, Theme.MutedBrush, mail.Sender.Length > 0 ? mail.Sender : mail.App));
 
         var content = new StackPanel();
         content.Children.Add(header);
-        content.Children.Add(NotchUi.Text(13, Theme.WhiteBrush, mail.Subject));
+        content.Children.Add(NotchUi.Text(13, Theme.InkBrush, mail.Subject));
         var row = new Border
         {
             Child = content,

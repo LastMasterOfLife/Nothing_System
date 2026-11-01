@@ -66,6 +66,8 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
     public ShellController()
     {
         _settings = _settingsStore.Load();
+        Rendering.Theme.Apply(_settings.Appearance ?? NothingShell.Core.Design.AppearanceSettings.Default);
+        Rendering.Theme.FollowSystem();
         _tracker = new WindowTracker(_appIds);
         var shellIcons = new ShellIcons();
 
@@ -146,6 +148,16 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
 
     /// <summary>Ctrl+Win: l'app spegne la shell e resta in attesa (docs/06-launcher.md).</summary>
     public event Action? ToggleRequested;
+
+    public NothingShell.Core.Design.AppearanceSettings Appearance
+    {
+        get => _settings.Appearance ?? NothingShell.Core.Design.AppearanceSettings.Default;
+        set
+        {
+            Update(_settings with { Appearance = value });
+            Rendering.Theme.Apply(value);
+        }
+    }
 
     public bool NotchEnabled
     {
@@ -533,13 +545,13 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         _bluetooth.Connected += (name, battery) =>
         {
             if (CanShow(LiveActivity.Bluetooth))
-                _notch.ShowNotice(DotIcons.Headphones, battery is < 20 ? Rendering.Theme.Red : Rendering.Theme.White,
+                _notch.ShowNotice(DotIcons.Headphones, battery is < 20 ? Rendering.Theme.Critical : Rendering.Theme.Ink,
                     battery is { } level ? $"{name}  {level}%" : $"{name} COLLEGATO");
         };
         _bluetooth.Disconnected += name =>
         {
             if (CanShow(LiveActivity.Bluetooth))
-                _notch.ShowNotice(DotIcons.Headphones, Rendering.Theme.Grey, $"{name} SCOLLEGATO");
+                _notch.ShowNotice(DotIcons.Headphones, Rendering.Theme.Muted, $"{name} SCOLLEGATO");
         };
     }
 

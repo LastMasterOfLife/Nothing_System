@@ -28,7 +28,7 @@ internal static class NotchCards
         {
             Width = Math.Clamp(ContentHeight * aspect, 60, 150),
             Height = ContentHeight,
-            CornerRadius = new CornerRadius(10),
+            CornerRadius = new CornerRadius(4),
             BorderBrush = Theme.OutlineBrush,
             BorderThickness = new Thickness(1),
             Background = new ImageBrush(capture.Image) { Stretch = Stretch.UniformToFill },
@@ -81,13 +81,13 @@ internal static class NotchCards
         {
             Width = 60,
             Height = ContentHeight,
-            CornerRadius = new CornerRadius(10),
+            CornerRadius = new CornerRadius(4),
             Background = Theme.SurfaceBrush,
             Child = new DotMatrixView
             {
                 Pitch = 4,
                 Dots = DotGrid.From(DotIcons.Download),
-                DotColor = Theme.Red,
+                DotColor = Theme.Accent,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
             },
@@ -129,7 +129,7 @@ internal static class NotchCards
         {
             Pitch = 4,
             Dots = DotGrid.From(DotIcons.Phone),
-            DotColor = Theme.Red,
+            DotColor = Theme.Accent,
             HorizontalAlignment = HorizontalAlignment.Center,
         });
         var actions = Actions(
@@ -139,7 +139,7 @@ internal static class NotchCards
                 dismiss();
             }),
             ("CHIUDI", dismiss));
-        return Layout(tile, "CHIAMATA", [call.Title.Length > 0 ? call.Title : "Numero sconosciuto"], actions, Theme.Red);
+        return Layout(tile, "CHIAMATA", [call.Title.Length > 0 ? call.Title : "Numero sconosciuto"], actions, Theme.Accent);
     }
 
     /// <summary>Il telefono chiede l'associazione: il codice deve essere uguale a quello sul telefono.</summary>
@@ -150,7 +150,7 @@ internal static class NotchCards
         ArgumentNullException.ThrowIfNull(reject);
         ArgumentNullException.ThrowIfNull(dismiss);
         var tile = Tile(
-            new DotMatrixView { Pitch = 3, Dots = DotGrid.From(DotIcons.Phone), DotColor = Theme.Red, HorizontalAlignment = HorizontalAlignment.Center },
+            new DotMatrixView { Pitch = 3, Dots = DotGrid.From(DotIcons.Phone), DotColor = Theme.Accent, HorizontalAlignment = HorizontalAlignment.Center },
             new DotMatrixView
             {
                 Pitch = 1.5,
@@ -170,7 +170,7 @@ internal static class NotchCards
                 dismiss();
             }));
         var key = device.VerificationKey is { } k ? $"Codice {k}: uguale sul telefono?" : "Conferma sul telefono";
-        return Layout(tile, "ASSOCIA", [device.Name, key], actions, Theme.Red);
+        return Layout(tile, "ASSOCIA", [device.Name, key], actions, Theme.Accent);
     }
 
     /// <summary>
@@ -185,7 +185,7 @@ internal static class NotchCards
         ArgumentNullException.ThrowIfNull(openCalendar);
         ArgumentNullException.ThrowIfNull(dismiss);
         var tile = Tile(
-            new DotMatrixView { Pitch = 3, Dots = DotGrid.From(DotIcons.Calendar), DotColor = Theme.Red, HorizontalAlignment = HorizontalAlignment.Center },
+            new DotMatrixView { Pitch = 3, Dots = DotGrid.From(DotIcons.Calendar), DotColor = Theme.Accent, HorizontalAlignment = HorizontalAlignment.Center },
             new DotMatrixView
             {
                 Pitch = 1.5,
@@ -210,7 +210,7 @@ internal static class NotchCards
         var lines = appointment.Location is { } where && appointment.MeetingLink is null
             ? new[] { appointment.Title, where }
             : [appointment.Title];
-        return Layout(tile, title, lines, Actions([.. buttons]), Theme.Red);
+        return Layout(tile, title, lines, Actions([.. buttons]), Theme.Accent);
     }
 
     /// <summary>Riepilogo del mattino: giorno a punti, appuntamenti di oggi e mail da leggere; Agenda e Posta aprono il notch.</summary>
@@ -224,8 +224,8 @@ internal static class NotchCards
             new DotMatrixView
             {
                 Pitch = 1.5,
-                Dots = DotText.Render(now.ToString("MMM", NotchUi.Italian).ToUpperInvariant()),
-                DotColor = Theme.Red,
+                Dots = DotText.Render(now.ToString("MMM", NotchUi.Italian)),
+                DotColor = Theme.Accent,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = new Thickness(0, 8, 0, 0),
             });
@@ -244,7 +244,7 @@ internal static class NotchCards
                 showMail();
             }));
         var lines = brief.MailLine is { } mail ? new[] { brief.AgendaLine, mail } : [brief.AgendaLine];
-        return Layout(tile, brief.Greeting, lines, Actions([.. buttons]), Theme.White);
+        return Layout(tile, brief.Greeting, lines, Actions([.. buttons]), Theme.Ink);
     }
 
     /// <summary>
@@ -255,7 +255,7 @@ internal static class NotchCards
     {
         ArgumentNullException.ThrowIfNull(task);
         ArgumentNullException.ThrowIfNull(dismiss);
-        var color = task.Succeeded ? Theme.White : Theme.Red;
+        var color = task.Succeeded ? Theme.Ink : Theme.Critical;
         var tile = Tile(
             new DotMatrixView { Pitch = 3, Dots = DotGrid.From(DotIcons.Terminal), DotColor = color, HorizontalAlignment = HorizontalAlignment.Center },
             new DotMatrixView
@@ -295,7 +295,7 @@ internal static class NotchCards
         ArgumentNullException.ThrowIfNull(showAgents);
         ArgumentNullException.ThrowIfNull(dismiss);
         var tile = Tile(
-            new DotMatrixView { Pitch = 3, Dots = DotGrid.From(DotIcons.Agent), DotColor = Theme.White, HorizontalAlignment = HorizontalAlignment.Center },
+            new DotMatrixView { Pitch = 3, Dots = DotGrid.From(DotIcons.Agent), DotColor = Theme.Ink, HorizontalAlignment = HorizontalAlignment.Center },
             new DotMatrixView
             {
                 Pitch = 1.5,
@@ -320,7 +320,7 @@ internal static class NotchCards
         var model = Core.Agents.AgentPricing.ShortName(turn.Model);
         var tokens = $"IN {Core.Agents.AgentFormat.Tokens(turn.Usage.AllInput)} · OUT {Core.Agents.AgentFormat.Tokens(turn.Usage.Output)} · " +
                      Core.Dev.TaskTracker.FormatDuration(turn.Duration);
-        return Layout(tile, "HA FINITO", [model.Length > 0 ? $"{turn.Title} · {model}" : turn.Title, tokens], Actions([.. buttons]), Theme.White);
+        return Layout(tile, "HA FINITO", [model.Length > 0 ? $"{turn.Title} · {model}" : turn.Title, tokens], Actions([.. buttons]), Theme.Ink);
     }
 
     /// <summary>CI conclusa: CI OK o CI FALLITA con i workflow falliti; Apri la pagina dell'esecuzione, Rilancia i job falliti.</summary>
@@ -330,7 +330,7 @@ internal static class NotchCards
         ArgumentNullException.ThrowIfNull(open);
         ArgumentNullException.ThrowIfNull(dismiss);
         var failed = status.State == Core.Dev.CiState.Failure;
-        var tile = Tile(new DotMatrixView { Pitch = 4, Dots = DotText.Render("CI"), DotColor = failed ? Theme.Red : Theme.White, HorizontalAlignment = HorizontalAlignment.Center });
+        var tile = Tile(new DotMatrixView { Pitch = 4, Dots = DotText.Render("CI"), DotColor = failed ? Theme.Critical : Theme.Ink, HorizontalAlignment = HorizontalAlignment.Center });
         var buttons = new List<(string, Action)>
         {
             ("APRI", () =>
@@ -346,7 +346,7 @@ internal static class NotchCards
                 dismiss();
             }));
         return Layout(tile, failed ? "CI FALLITA" : "CI OK", [$"{status.Repository} · {status.Branch}", Core.Dev.CiRuns.Summary(status.Runs)],
-            Actions([.. buttons]), failed ? Theme.Red : Theme.White);
+            Actions([.. buttons]), failed ? Theme.Critical : Theme.Ink);
     }
 
     /// <summary>Segreto o token appena copiato: nome in rosso, scadenza del JWT, Cancella e Tieni (o Copia payload).</summary>
@@ -356,7 +356,7 @@ internal static class NotchCards
         ArgumentNullException.ThrowIfNull(clearNow);
         ArgumentNullException.ThrowIfNull(keep);
         ArgumentNullException.ThrowIfNull(dismiss);
-        var tile = Tile(new DotMatrixView { Pitch = 4, Dots = DotGrid.From(DotIcons.Lock), DotColor = Theme.Red, HorizontalAlignment = HorizontalAlignment.Center });
+        var tile = Tile(new DotMatrixView { Pitch = 4, Dots = DotGrid.From(DotIcons.Lock), DotColor = Theme.Critical, HorizontalAlignment = HorizontalAlignment.Center });
         var buttons = new List<(string, Action)>
         {
             ("CANCELLA", () =>
@@ -379,7 +379,7 @@ internal static class NotchCards
         var lines = detail is null
             ? new[] { "Si cancella dagli appunti tra 30 s" }
             : [detail, "Si cancella dagli appunti tra 30 s"];
-        return Layout(tile, name, lines, Actions([.. buttons]), Theme.Red);
+        return Layout(tile, name, lines, Actions([.. buttons]), Theme.Critical);
     }
 
     private static Border Tile(params UIElement[] content)
@@ -391,14 +391,14 @@ internal static class NotchCards
         {
             Width = 72,
             Height = ContentHeight,
-            CornerRadius = new CornerRadius(10),
+            CornerRadius = new CornerRadius(4),
             Background = Theme.SurfaceBrush,
             Child = stack,
         };
     }
 
     private static Grid Layout(FrameworkElement preview, string title, string detail, UIElement actions) =>
-        Layout(preview, title, [detail], actions, Theme.White, emphasizeFirst: false);
+        Layout(preview, title, [detail], actions, Theme.Ink, emphasizeFirst: false);
 
     /// <summary>
     /// Anteprima a sinistra; a destra titolo a punti, una o due righe di testo e i pulsanti. Con
@@ -410,7 +410,7 @@ internal static class NotchCards
         text.Children.Add(new DotMatrixView { Pitch = 2, Dots = DotText.Render(title), DotColor = titleColor, HorizontalAlignment = HorizontalAlignment.Left });
         for (var i = 0; i < lines.Length; i++)
         {
-            var line = NotchUi.Text(12, i == 0 && emphasizeFirst ? Theme.WhiteBrush : Theme.GreyBrush, lines[i]);
+            var line = NotchUi.Text(12, i == 0 && emphasizeFirst ? Theme.InkBrush : Theme.MutedBrush, lines[i]);
             line.Margin = new Thickness(0, i == 0 ? (lines.Length > 1 ? 4 : 6) : 0, 0, i == lines.Length - 1 ? (lines.Length > 1 ? 5 : 8) : 0);
             text.Children.Add(line);
         }
@@ -432,17 +432,17 @@ internal static class NotchCards
         {
             var button = new Border
             {
-                BorderBrush = Theme.GreyBrush,
+                BorderBrush = Theme.OutlineBrush,
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(13),
-                Padding = new Thickness(12, 4, 12, 4),
+                CornerRadius = new CornerRadius(Theme.RadiusSmall),
+                Padding = new Thickness(12, 4, 12, 5),
                 Margin = new Thickness(0, 0, 8, 0),
-                Background = Brushes.Transparent,
+                Background = Theme.SurfaceBrush,
                 Cursor = Cursors.Hand,
-                Child = NotchUi.Text(11, Theme.WhiteBrush, label),
+                Child = NotchUi.Text(12, Theme.InkBrush, label),
             };
-            button.MouseEnter += (_, _) => button.Background = Theme.SurfaceBrush;
-            button.MouseLeave += (_, _) => button.Background = Brushes.Transparent;
+            button.MouseEnter += (_, _) => button.Background = Theme.SurfaceHoverBrush;
+            button.MouseLeave += (_, _) => button.Background = Theme.SurfaceBrush;
             button.MouseLeftButtonUp += (_, e) =>
             {
                 e.Handled = true;

@@ -20,7 +20,7 @@ namespace NothingShell.App.Bar;
 
 /// <summary>
 /// Pannello rapido in stile Nothing (docs/11-agenda-pannello-rapido.md): si apre dal pulsante rete e batteria
-/// della barra al posto di Win+A. Riquadri grandi (acceso = bianco), cursori a pillola per volume e luminosità.
+/// della barra al posto di Win+A. Riquadri (acceso = colore d'accento), cursori sottili per volume e luminosità.
 /// Si chiude cliccando fuori o con Esc; i servizi audio girano solo mentre è aperto.
 /// </summary>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001",
@@ -34,7 +34,6 @@ public sealed class QuickPanelWindow : Window
     private const byte VkP = 0x50;
     private const byte VkSnapshot = 0x2C;
     private static readonly CultureInfo Italian = CultureInfo.GetCultureInfo("it-IT");
-    private static readonly Brush DarkText = Frozen(Color.FromRgb(0x55, 0x55, 0x55));
 
     private readonly Action _lock;
     private readonly Action _openSettings;
@@ -42,9 +41,9 @@ public sealed class QuickPanelWindow : Window
     private readonly AudioService _microphone = new(capture: true);
     private readonly DispatcherTimer _brightnessApply = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly Border _root;
-    private readonly DotMatrixView _clock = new() { Pitch = 4, HorizontalAlignment = HorizontalAlignment.Left };
-    private readonly DotMatrixView _date = new() { Pitch = 2, DotColor = Theme.Grey, HorizontalAlignment = HorizontalAlignment.Left };
-    private readonly DotMatrixView _battery = new() { Pitch = 2, VerticalAlignment = VerticalAlignment.Center };
+    private readonly DotMatrixView _clock = new() { Pitch = 4, TextSize = 22, HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly DotMatrixView _date = new() { Pitch = 2, TextSize = 12, DotColor = Theme.Muted, HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly DotMatrixView _battery = new() { Pitch = 2, TextSize = 12, VerticalAlignment = VerticalAlignment.Center };
     private readonly QuickTile _wifi;
     private readonly QuickTile _bluetooth;
     private readonly QuickTile _mic;
@@ -103,6 +102,7 @@ public sealed class QuickPanelWindow : Window
 
         _root = BuildVisualTree([_wifi, _bluetooth, _mic, screenshot, project, lockTile, _phone, _phoneFile, _phoneClip]);
         Content = _root;
+        GlassBackdrop.Attach(this, _root);
 
         _speaker.Changed += (level, muted) => ShowVolume(level, muted);
         _microphone.Changed += (_, muted) => ShowMicrophone(muted);
@@ -158,7 +158,7 @@ public sealed class QuickPanelWindow : Window
     public FrameworkElement PrepareSnapshot()
     {
         _clock.Dots = DotText.Render(DateTime.Now.ToString("HH:mm", Italian));
-        _date.Dots = DotText.Render(DateTime.Now.ToString("ddd d MMM", Italian).ToUpperInvariant());
+        _date.Dots = DotText.Render(DateTime.Now.ToString("ddd d MMM", Italian));
         _battery.Dots = DotText.Render("BATTERIA 82%");
         _wifi.Set(true, "Casa-5G");
         _bluetooth.Set(false, "Spento");
@@ -178,7 +178,7 @@ public sealed class QuickPanelWindow : Window
         settings.VerticalAlignment = VerticalAlignment.Top;
         var header = new Grid { Margin = new Thickness(4, 0, 0, 16) };
         var time = new StackPanel();
-        _date.Margin = new Thickness(0, 8, 0, 0);
+        _date.Margin = new Thickness(0, 6, 0, 0);
         time.Children.Add(_clock);
         time.Children.Add(_date);
         header.Children.Add(time);
@@ -189,7 +189,7 @@ public sealed class QuickPanelWindow : Window
             grid.Children.Add(tile);
 
         _volume.Margin = new Thickness(0, 0, 0, 8);
-        var windows = TextButton("IMPOSTAZIONI RAPIDE DI WINDOWS", () => AfterHide(() => WindowNative.PressKeys(VkLeftWin, VkA)));
+        var windows = TextButton("Impostazioni rapide di Windows", () => AfterHide(() => WindowNative.PressKeys(VkLeftWin, VkA)));
         windows.HorizontalAlignment = HorizontalAlignment.Right;
         var footer = new Grid { Margin = new Thickness(4, 10, 0, 0) };
         footer.Children.Add(_battery);
@@ -202,26 +202,22 @@ public sealed class QuickPanelWindow : Window
         stack.Children.Add(_brightness);
         stack.Children.Add(footer);
 
-        return new Border
+        return Theme.Panel(new Border
         {
-            Background = Theme.BlackBrush,
-            BorderBrush = Theme.OutlineBrush,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(28),
             Padding = new Thickness(18, 18, 18, 14),
             Child = stack,
-        };
+        });
     }
 
     private void Refresh()
     {
         var now = DateTime.Now;
         _clock.Dots = DotText.Render(now.ToString("HH:mm", Italian));
-        _date.Dots = DotText.Render(now.ToString("ddd d MMM", Italian).ToUpperInvariant());
+        _date.Dots = DotText.Render(now.ToString("ddd d MMM", Italian));
         var battery = SystemMonitor.ReadBattery();
         _battery.Visibility = battery.HasBattery ? Visibility.Visible : Visibility.Collapsed;
         _battery.Dots = DotText.Render($"BATTERIA {battery.Label}");
-        _battery.DotColor = battery.IsLow ? Theme.Red : Theme.Grey;
+        _battery.DotColor = battery.IsLow ? Theme.Critical : Theme.Muted;
 
         _speaker.Start();
         _microphone.Start();
@@ -405,10 +401,10 @@ public sealed class QuickPanelWindow : Window
     {
         var button = new Border
         {
-            Width = 40,
-            Height = 40,
-            CornerRadius = new CornerRadius(20),
-            Background = Theme.SurfaceBrush,
+            Width = 36,
+            Height = 36,
+            CornerRadius = new CornerRadius(4),
+            Background = Brushes.Transparent,
             Cursor = Cursors.Hand,
             ToolTip = tooltip,
             Child = new DotMatrixView
@@ -419,8 +415,8 @@ public sealed class QuickPanelWindow : Window
                 VerticalAlignment = VerticalAlignment.Center,
             },
         };
-        button.MouseEnter += (_, _) => button.Background = Theme.OutlineBrush;
-        button.MouseLeave += (_, _) => button.Background = Theme.SurfaceBrush;
+        button.MouseEnter += (_, _) => button.Background = Theme.SurfaceBrush;
+        button.MouseLeave += (_, _) => button.Background = Brushes.Transparent;
         button.MouseLeftButtonUp += (_, e) =>
         {
             e.Handled = true;
@@ -433,11 +429,11 @@ public sealed class QuickPanelWindow : Window
     {
         var button = new Border
         {
-            CornerRadius = new CornerRadius(12),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(10, 5, 10, 5),
             Background = Brushes.Transparent,
             Cursor = Cursors.Hand,
-            Child = new TextBlock { Text = text, FontFamily = Theme.BodyFont, FontSize = 10, Foreground = Theme.GreyBrush },
+            Child = new TextBlock { Text = text, FontFamily = Theme.BodyFont, FontSize = 12, Foreground = Theme.MutedBrush },
         };
         button.MouseEnter += (_, _) => button.Background = Theme.SurfaceBrush;
         button.MouseLeave += (_, _) => button.Background = Brushes.Transparent;
@@ -461,14 +457,7 @@ public sealed class QuickPanelWindow : Window
         }
     }
 
-    private static SolidColorBrush Frozen(Color color)
-    {
-        var brush = new SolidColorBrush(color);
-        brush.Freeze();
-        return brush;
-    }
-
-    /// <summary>Riquadro del pannello: acceso è bianco con icona e testo neri, spento è grigio scuro.</summary>
+    /// <summary>Riquadro del pannello: acceso è nel colore d'accento, spento è appena riempito.</summary>
     private sealed class QuickTile : Border
     {
         private readonly DotMatrixView _icon;
@@ -488,8 +477,9 @@ public sealed class QuickPanelWindow : Window
             Child = stack;
             Height = 84;
             Margin = new Thickness(4);
-            Padding = new Thickness(14, 14, 10, 10);
-            CornerRadius = new CornerRadius(22);
+            Padding = new Thickness(12, 12, 8, 8);
+            CornerRadius = new CornerRadius(Theme.RadiusSmall);
+            BorderThickness = new Thickness(1);
             Cursor = Cursors.Hand;
             MouseLeftButtonUp += (_, e) =>
             {
@@ -519,39 +509,64 @@ public sealed class QuickPanelWindow : Window
         private void Apply()
         {
             var lit = _on == true;
-            Background = lit ? Theme.WhiteBrush : Theme.SurfaceBrush;
-            _icon.DotColor = lit ? Theme.Black : Theme.White;
-            _label.Foreground = lit ? Theme.BlackBrush : Theme.WhiteBrush;
-            _state.Foreground = lit ? DarkText : Theme.GreyBrush;
+            Background = lit ? Theme.AccentBrush : Theme.CardBrush;
+            BorderBrush = lit ? Theme.AccentBrush : Theme.OutlineBrush;
+            _icon.DotColor = lit ? Theme.OnAccent : Theme.Ink;
+            _label.Foreground = lit ? Theme.OnAccentBrush : Theme.InkBrush;
+            _state.Foreground = lit ? Theme.OnAccentBrush : Theme.MutedBrush;
+            _state.Opacity = lit ? 0.85 : 1;
             Opacity = _on is null ? 0.45 : 1;
         }
     }
 
-    /// <summary>Cursore a pillola alla Nothing: la parte piena è bianca, l'icona resta sempre sulla parte piena.</summary>
+    /// <summary>Cursore di Windows 11: icona, traccia sottile con la parte piena nel colore d'accento e levetta, valore.</summary>
     private sealed class PillSlider : Grid
     {
-        private const double PillHeight = 52;
+        private const double RowHeight = 40;
+        private const double IconColumn = 40;
+        private const double ValueColumn = 40;
+        private const double ThumbSize = 18;
 
         private readonly Border _fill = new()
         {
-            Background = Theme.WhiteBrush,
-            CornerRadius = new CornerRadius(PillHeight / 2),
+            Background = Theme.AccentBrush,
+            Height = 4,
+            CornerRadius = new CornerRadius(2),
             HorizontalAlignment = HorizontalAlignment.Left,
         };
+        private readonly Border _thumb = new()
+        {
+            Width = ThumbSize,
+            Height = ThumbSize,
+            CornerRadius = new CornerRadius(ThumbSize / 2),
+            Background = Theme.BaseSolidBrush,
+            BorderBrush = Theme.OutlineBrush,
+            BorderThickness = new Thickness(1),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Child = new System.Windows.Shapes.Ellipse
+            {
+                Width = 10,
+                Height = 10,
+                Fill = Theme.AccentBrush,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+        private readonly TranslateTransform _thumbShift = new();
         private readonly DotMatrixView _icon = new()
         {
             Pitch = 2.5,
-            DotColor = Theme.Black,
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(20, 0, 0, 0),
+            Margin = new Thickness(6, 0, 0, 0),
         };
         private readonly DotMatrixView _value = new()
         {
             Pitch = 2,
+            TextSize = 12,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 20, 0),
+            Margin = new Thickness(0, 0, 4, 0),
         };
         private readonly Action<double> _changed;
         private readonly Action? _onIcon;
@@ -562,12 +577,26 @@ public sealed class QuickPanelWindow : Window
         {
             _changed = changed;
             _onIcon = onIcon;
-            Height = PillHeight;
+            Height = RowHeight;
             Background = Brushes.Transparent;
             Cursor = Cursors.Hand;
-            var track = new Border { Background = Theme.SurfaceBrush, CornerRadius = new CornerRadius(PillHeight / 2) };
+            var track = new Border
+            {
+                Background = Theme.DotOffBrush,
+                Height = 4,
+                CornerRadius = new CornerRadius(2),
+                Margin = new Thickness(IconColumn, 0, ValueColumn, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                IsHitTestVisible = false,
+            };
+            var bars = new Grid { Margin = new Thickness(IconColumn, 0, ValueColumn, 0), IsHitTestVisible = false };
+            _fill.VerticalAlignment = VerticalAlignment.Center;
+            _thumb.VerticalAlignment = VerticalAlignment.Center;
+            _thumb.RenderTransform = _thumbShift;
+            bars.Children.Add(_fill);
+            bars.Children.Add(_thumb);
             Children.Add(track);
-            Children.Add(_fill);
+            Children.Add(bars);
             Children.Add(_icon);
             Children.Add(_value);
             Icon = icon;
@@ -578,7 +607,7 @@ public sealed class QuickPanelWindow : Window
             {
                 e.Handled = true;
                 var x = e.GetPosition(this).X;
-                if (_onIcon is not null && x < PillHeight)
+                if (_onIcon is not null && x < IconColumn)
                 {
                     _onIcon();
                     return;
@@ -617,25 +646,25 @@ public sealed class QuickPanelWindow : Window
             }
         }
 
+        private double TrackWidth => Math.Max(0, (ActualWidth > 0 ? ActualWidth : PanelWidth - 36) - IconColumn - ValueColumn);
+
         private void SetFrom(double x)
         {
-            var width = ActualWidth;
-            if (width <= PillHeight)
+            var width = TrackWidth;
+            if (width <= ThumbSize)
                 return;
-            _value01 = Math.Clamp((x - (PillHeight / 2)) / (width - PillHeight), 0, 1);
+            _value01 = Math.Clamp((x - IconColumn - (ThumbSize / 2)) / (width - ThumbSize), 0, 1);
             Render();
             _changed(_value01);
         }
 
-        /// <summary>La parte piena parte dalla larghezza dell'icona: a zero resta un cerchio bianco con l'icona.</summary>
         private void Render()
         {
-            var width = double.IsNaN(Width) ? ActualWidth : Width;
-            if (width <= 0)
-                width = PanelWidth - 36;
-            _fill.Width = PillHeight + ((width - PillHeight) * _value01);
+            var width = TrackWidth;
+            var center = (ThumbSize / 2) + ((width - ThumbSize) * _value01);
+            _fill.Width = Math.Max(0, center);
+            _thumbShift.X = center - (ThumbSize / 2);
             _value.Dots = DotText.Render($"{Math.Round(_value01 * 100):0}");
-            _value.DotColor = _fill.Width > width - 56 ? Theme.Black : Theme.Grey;
         }
     }
 }

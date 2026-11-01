@@ -29,18 +29,18 @@ public sealed class AccessWindow : Window
     private readonly RectangleGeometry _screen;
 
     private readonly Grid _root = new();
-    private readonly System.Windows.Shapes.Path _backdrop = new() { Fill = Theme.BlackBrush };
+    private readonly System.Windows.Shapes.Path _backdrop = new() { Fill = Theme.BaseSolidBrush };
     private readonly Canvas _chrome = new();
-    private readonly DotMatrixView _clock = new() { Pitch = 10, DotColor = Theme.White };
-    private readonly DotMatrixView _date = new() { Pitch = 3, DotColor = Theme.Grey };
+    private readonly DotMatrixView _clock = new() { Pitch = 10, DotColor = Theme.Ink };
+    private readonly DotMatrixView _date = new() { Pitch = 3, DotColor = Theme.Muted };
     private readonly Canvas _card = new();
     private readonly ScaleTransform _cardScale = new();
     private readonly Grid _avatar = new() { Width = AvatarSize, Height = AvatarSize };
-    private readonly TextBlock _name = CenteredText(28, Theme.WhiteBrush);
-    private readonly TextBlock _userName = CenteredText(14, Theme.GreyBrush);
+    private readonly TextBlock _name = CenteredText(28, Theme.InkBrush);
+    private readonly TextBlock _userName = CenteredText(14, Theme.MutedBrush);
     private readonly Canvas _ring = new();
     private readonly System.Windows.Shapes.Ellipse[] _ringDots = new System.Windows.Shapes.Ellipse[RingDots];
-    private readonly DotMatrixView _caption = new() { Pitch = 3.5, DotColor = Theme.White };
+    private readonly DotMatrixView _caption = new() { Pitch = 3.5, DotColor = Theme.Ink };
     private readonly Brush _dotOff = Frozen(Theme.DotOff);
 
     private UserProfile _profile = UserProfile.Fallback;
@@ -113,7 +113,7 @@ public sealed class AccessWindow : Window
             _avatar.Children.Add(new DotMatrixView
             {
                 Pitch = 8,
-                DotColor = Theme.White,
+                DotColor = Theme.Ink,
                 Dots = DotText.Render(AccessIdentity.Initials(profile.DisplayName)),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -199,16 +199,15 @@ public sealed class AccessWindow : Window
         _litDots = lit;
         _head = head;
         for (var i = 0; i < RingDots; i++)
-            _ringDots[i].Fill = head && i == lit - 1 ? Theme.RedBrush : i < lit ? Theme.WhiteBrush : _dotOff;
+            _ringDots[i].Fill = head && i == lit - 1 ? Theme.AccentBrush : i < lit ? Theme.InkBrush : Theme.DotOffBrush;
     }
 
     private void RenderCaption(string text, AccessCaption caption)
     {
-        text = text.ToUpper(Italian);
         if (text == _captionText)
             return;
         _captionText = text;
-        _caption.DotColor = caption == AccessCaption.Locked ? Theme.Grey : Theme.White;
+        _caption.DotColor = caption == AccessCaption.Locked ? Theme.Muted : Theme.Ink;
         _caption.Dots = DotText.Render(text);
         Place(_caption, _caption.Dots.Width * _caption.Pitch, _center.Y + RingRadius + 128);
     }
@@ -283,7 +282,7 @@ public sealed class AccessCover : Window
         _bounds = bounds;
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
-        Background = Theme.BlackBrush;
+        Background = Theme.BaseSolidBrush;
         ShowInTaskbar = false;
         ShowActivated = false;
         Topmost = true;

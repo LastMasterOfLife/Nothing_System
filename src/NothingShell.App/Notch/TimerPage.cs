@@ -25,7 +25,7 @@ public sealed class TimerPage : NotchPageView
             var label = new DotMatrixView { Pitch = 2.5, Dots = DotText.Render($"{minutes} MIN") };
             _presets.Children.Add(NotchUi.Button(label, () => start(TimeSpan.FromMinutes(minutes)), width: 84));
         }
-        _stop = NotchUi.Button(new DotMatrixView { Pitch = 2.5, Dots = DotText.Render("STOP"), DotColor = Theme.Red },
+        _stop = NotchUi.Button(new DotMatrixView { Pitch = 2.5, Dots = DotText.Render("STOP"), DotColor = Theme.Critical },
             stop, width: 84);
         _stop.HorizontalAlignment = HorizontalAlignment.Center;
 
@@ -43,7 +43,7 @@ public sealed class TimerPage : NotchPageView
     public void Update(bool running, TimeSpan remaining)
     {
         _remaining.Dots = DotText.Render(Countdown.Format(remaining));
-        _remaining.DotColor = running ? Theme.White : Theme.Grey;
+        _remaining.DotColor = running ? Theme.Ink : Theme.Muted;
         _presets.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
         _stop.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
     }

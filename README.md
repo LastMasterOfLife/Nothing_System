@@ -1,6 +1,6 @@
 # Nothing Shell
 
-Strato grafico in stile Nothing OS sopra Windows 11: notch interattivo, widget a punti, barra.
+Strato grafico sopra Windows 11: notch interattivo, widget, barra. Di serie si confonde con il sistema (tema e colore di Windows, vetro Liquid Glass); dalle impostazioni si scelgono tema, colori e lo stile a punti di Nothing.
 Non sostituisce `explorer.exe`. Le spec sono in [docs/](docs/).
 
 ## Avvio

@@ -14,14 +14,14 @@ public sealed class PluginWidget : WidgetView
     private const double MinPitch = 2;
 
     private readonly DotMatrixView _value = new() { HorizontalAlignment = HorizontalAlignment.Left };
-    private readonly TextBlock _caption = Label(string.Empty, 11, Theme.GreyBrush);
+    private readonly TextBlock _caption = Label(string.Empty, 11, Theme.MutedBrush);
     private readonly DotMatrixView _bar;
     private readonly int _barColumns;
     private readonly double _innerWidth;
     private readonly double _maxPitch;
 
     public PluginWidget(PluginManifest manifest)
-        : base(Guard(manifest).WidgetId, SizeOf(manifest), manifest.Name.ToUpperInvariant())
+        : base(Guard(manifest).WidgetId, SizeOf(manifest), manifest.Name)
     {
         Manifest = manifest;
         var wide = manifest.Size == PluginSize.Wide;
@@ -45,7 +45,7 @@ public sealed class PluginWidget : WidgetView
         stack.Children.Add(_bar);
         stack.Children.Add(_caption);
         Body.Children.Add(stack);
-        Update(new WidgetData(manifest.Name.ToUpperInvariant(), "...", "caricamento", null, false));
+        Update(new WidgetData(manifest.Name, "...", "caricamento", null, false));
     }
 
     public PluginManifest Manifest { get; }
@@ -57,13 +57,13 @@ public sealed class PluginWidget : WidgetView
         var dots = DotText.Render(data.Value);
         _value.Dots = dots;
         _value.Pitch = FitPitch(dots.Width);
-        _value.DotColor = data.Alert ? Theme.Red : Theme.White;
+        _value.DotColor = data.Alert ? Theme.Critical : Theme.Ink;
         _caption.Text = data.Caption;
 
         if (data.Bar is { } fraction)
         {
             _bar.Dots = DotBar.Render(fraction, _barColumns, 2);
-            _bar.DotColor = data.Alert ? Theme.Red : Theme.White;
+            _bar.DotColor = data.Alert ? Theme.Critical : Theme.Ink;
             _bar.Visibility = Visibility.Visible;
         }
         else

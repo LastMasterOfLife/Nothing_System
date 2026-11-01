@@ -185,7 +185,7 @@ public sealed partial class ShellController
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _notch.ShowNotice(DotIcons.Device, Theme.Red, $"CSV NON SCRITTO: {ex.Message}");
+            _notch.ShowNotice(DotIcons.Device, Theme.Critical, $"CSV NON SCRITTO: {ex.Message}");
             return;
         }
         ShowFile(path);
@@ -229,11 +229,11 @@ public sealed partial class ShellController
         _connectors.Alert += (manifest, reading) =>
         {
             if (CanShow(LiveActivity.Connectors))
-                _notch.ShowHint(DotIcons.Device, Theme.Red,
+                _notch.ShowHint(DotIcons.Device, Theme.Critical,
                     $"{manifest.Name}: {reading.Label} {reading.Text}{(reading.Unit is { Length: > 0 } u ? " " + u : string.Empty)}", NotchPage.Devices);
         };
         _connectors.ActionFinished += (manifest, action, error) =>
-            _notch.ShowNotice(DotIcons.Device, error is null ? Theme.White : Theme.Red,
+            _notch.ShowNotice(DotIcons.Device, error is null ? Theme.Ink : Theme.Critical,
                 error is null ? $"{manifest.Name}: {action.Label} FATTO" : $"{manifest.Name}: {action.Label} - {error}");
 
         _kde.Changed += RefreshPhonePage;
@@ -324,7 +324,7 @@ public sealed partial class ShellController
         if (dialog.ShowDialog() != true)
             return;
         var error = await _kde.SendFileAsync(dialog.FileName);
-        _notch.ShowNotice(DotIcons.Download, error is null ? Theme.White : Theme.Red,
+        _notch.ShowNotice(DotIcons.Download, error is null ? Theme.Ink : Theme.Critical,
             error is null ? $"{Path.GetFileName(dialog.FileName)} INVIATO" : $"NON INVIATO: {error}");
     }
 
@@ -337,15 +337,15 @@ public sealed partial class ShellController
         {
             if (!System.Windows.Clipboard.ContainsText())
             {
-                _notch.ShowNotice(DotIcons.Clip, Theme.Grey, "APPUNTI VUOTI");
+                _notch.ShowNotice(DotIcons.Clip, Theme.Muted, "APPUNTI VUOTI");
                 return;
             }
             _kde.SendClipboard(System.Windows.Clipboard.GetText());
-            _notch.ShowNotice(DotIcons.Clip, Theme.White, "APPUNTI AL TELEFONO");
+            _notch.ShowNotice(DotIcons.Clip, Theme.Ink, "APPUNTI AL TELEFONO");
         }
         catch (System.Runtime.InteropServices.ExternalException)
         {
-            _notch.ShowNotice(DotIcons.Clip, Theme.Red, "APPUNTI OCCUPATI");
+            _notch.ShowNotice(DotIcons.Clip, Theme.Critical, "APPUNTI OCCUPATI");
         }
     }
 

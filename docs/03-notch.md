@@ -4,14 +4,14 @@
 > con pagine (Home, Posta, Timer, Sistema) e swipe. La Home è più alta perché ha il campo per chiedere
 > (docs/16-assistente-notch.md).
 
-Finestra a pillola nera, in alto al centro del monitor principale, sempre in primo piano,
+Finestra a pillola (colori e vetro della pagina Aspetto, docs/02-design-system.md), in alto al centro del monitor principale, sempre in primo piano,
 che non ruba il focus (`WS_EX_NOACTIVATE`, `WS_EX_TOOLWINDOW`: non appare in Alt+Tab).
 
 ## Stati
 | Stato | Dimensione (px logici) | Contenuto |
 |-------|------------------------|-----------|
-| `Idle` | 200 × 34 | orologio HH:MM a punti |
-| `Activity` | 300 × 34 | orologio + indicatore musica (punto rosso pulsante se in riproduzione) |
+| `Idle` | 144 × 28 (96 × 6 col notch discreto) | orologio HH:MM |
+| `Activity` | 256 × 28 | orologio + indicatore musica (punto rosso pulsante se in riproduzione) |
 | `Expanded` | 420 × 150 | titolo/artista, controlli ◀◀ ▶/❚❚ ▶▶, ora |
 
 ## Transizioni

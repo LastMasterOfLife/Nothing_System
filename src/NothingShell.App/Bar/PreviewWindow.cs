@@ -26,12 +26,27 @@ public sealed class PreviewWindow : Window
     private const double TitleHeight = 28;
     private const double BarGap = 8;
     private const double ScreenMargin = 8;
-    private const uint OutlineColorRef = 0x00262626; // Outline del design system, come COLORREF (0x00BBGGRR)
 
     private readonly StackPanel _cards = new() { Orientation = Orientation.Horizontal, Margin = new Thickness(PanelPadding) };
     private readonly List<(nint Thumbnail, FrameworkElement Area)> _thumbnails = [];
     private nint _hwnd;
     private double _scale = 1;
+
+    /// <summary>Il bordo <c>Outline</c> visto sul fondo pieno, come COLORREF (0x00BBGGRR): Windows non conosce la trasparenza qui.</summary>
+    private static uint BorderColorRef()
+    {
+        var p = Theme.Current;
+        var c = p.BaseSolid.Mix(p.Outline, p.Outline.A / 255.0);
+        return (uint)((c.B << 16) | (c.G << 8) | c.R);
+    }
+
+    /// <summary>Il bordo lo disegna Windows: a ogni cambio di tema va ridetto.</summary>
+    private void OnThemeChanged(object? sender, EventArgs e)
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd != 0)
+            DwmNative.RoundCorners(hwnd, BorderColorRef());
+    }
 
     public PreviewWindow()
     {
@@ -40,7 +55,7 @@ public sealed class PreviewWindow : Window
         ShowInTaskbar = false;
         ShowActivated = false;
         Topmost = true;
-        Background = Theme.BlackBrush;
+        Background = Theme.BaseSolidBrush;
         Title = "Nothing Shell — Anteprime";
         Content = _cards;
         SourceInitialized += (_, _) =>
@@ -48,8 +63,10 @@ public sealed class PreviewWindow : Window
             // Scatta dentro EnsureHandle, prima che _hwnd sia assegnato
             var hwnd = new WindowInteropHelper(this).Handle;
             NativeMethods.MakeNonActivatingToolWindow(hwnd);
-            DwmNative.RoundCorners(hwnd, OutlineColorRef);
+            DwmNative.RoundCorners(hwnd, BorderColorRef());
         };
+        Theme.Changed += OnThemeChanged;
+        Closed += (_, _) => Theme.Changed -= OnThemeChanged;
     }
 
     /// <summary>Chiave dell'app mostrata, null se chiusa.</summary>
@@ -134,7 +151,7 @@ public sealed class PreviewWindow : Window
         {
             Width = 6,
             Height = 6,
-            Fill = isForeground ? Theme.RedBrush : Theme.GreyBrush,
+            Fill = isForeground ? Theme.AccentBrush : Theme.MutedBrush,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(2, 0, 8, 0),
         };
@@ -143,7 +160,7 @@ public sealed class PreviewWindow : Window
             Text = window.Title,
             FontFamily = Theme.BodyFont,
             FontSize = 12,
-            Foreground = Theme.WhiteBrush,
+            Foreground = Theme.InkBrush,
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -151,19 +168,19 @@ public sealed class PreviewWindow : Window
         {
             Width = 24,
             Height = 24,
-            CornerRadius = new CornerRadius(12),
+            CornerRadius = new CornerRadius(4),
             Background = Brushes.Transparent,
             ToolTip = "Chiudi finestra",
             Child = new DotMatrixView
             {
                 Pitch = 1.5,
                 Dots = DotGrid.From(DotIcons.Close),
-                DotColor = Theme.Grey,
+                DotColor = Theme.Muted,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
             },
         };
-        close.MouseEnter += (_, _) => close.Background = Theme.RedBrush;
+        close.MouseEnter += (_, _) => close.Background = Theme.CriticalBrush;
         close.MouseLeave += (_, _) => close.Background = Brushes.Transparent;
         close.MouseLeftButtonUp += (_, e) =>
         {
@@ -197,7 +214,7 @@ public sealed class PreviewWindow : Window
         {
             Padding = new Thickness(CardPadding, 2, CardPadding, CardPadding),
             Margin = new Thickness(Gap / 2, 0, Gap / 2, 0),
-            CornerRadius = new CornerRadius(12),
+            CornerRadius = new CornerRadius(4),
             Background = Brushes.Transparent,
             Child = stack,
             Cursor = Cursors.Hand,

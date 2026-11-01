@@ -1,15 +1,70 @@
 # 02 — Design system
 
+Di serie la shell deve potersi scambiare per un pezzo di Windows 11: tema e colore d'accento di Windows, Segoe UI Variable,
+icone Fluent, angoli e ombre del sistema, vetro discreto. La matrice a punti di Nothing resta come stile da scegliere.
+
+## Pagina Aspetto
+Impostazioni › **Aspetto** (`AppearanceSettings` in Core, salvate in `settings.json`). Ogni scelta si applica subito a tutte
+le finestre, senza riavvio; con Sistema e con l'accento di Windows la shell segue anche i cambi fatti nelle impostazioni di Windows.
+
+| Voce | Scelte | Di serie |
+|------|--------|----------|
+| Stile rapido | Windows 11 · Windows solido · Nothing | Windows 11 |
+| Modalità | Sistema · Chiaro · Scuro | Sistema |
+| Colore d'accento | quello di Windows, 10 proposti, oppure `#RRGGBB` | Windows |
+| Sfondo | Neutro · Colorato (punta d'accento) · Profondo (nero/bianco puro) | Neutro |
+| Liquid Glass | acceso/spento, con la trasparenza da velato a limpido | acceso, a metà |
+| Testo e icone | Windows (Segoe e Fluent) · Punti | Windows |
+| Notch discreto | a riposo solo una lineetta contro il bordo alto | spento |
+
+Con gli effetti di trasparenza di Windows spenti il vetro resta inattivo e la pagina lo dice.
+
 ## Colori
-| Token | Valore | Uso |
-|-------|--------|-----|
-| `Black` | `#000000` | sfondo notch/widget |
-| `Surface` | `#111111` | superfici secondarie |
-| `White` | `#FFFFFF` | punti accesi, testo |
-| `DotOff` | `#FFFFFF` @ 12% | punti spenti della griglia |
-| `Grey` | `#8A8A8A` | testo secondario |
-| `Red` | `#D71921` | accento (registrazione, play, alert) |
-| `Outline` | `#262626` | bordo dei riquadri widget |
+`Palette.Create` calcola i token da tema, accento, tono e vetro; `Theme` li espone a WPF.
+
+| Token | Scuro / Chiaro | Uso |
+|-------|----------------|-----|
+| `Base`, `BaseSolid` | `#202020` / `#F3F3F3` | sfondo delle superfici; `Base` col vetro è traslucido, `BaseSolid` mai (finestre che non possono averlo) |
+| `Card` | bianco 5,5% / bianco 70% | schede appoggiate su una superficie |
+| `Surface`, `SurfaceHover` | bianco 7–12% / nero 5–9% | passaggio del mouse, campi, pulsanti secondari |
+| `Ink` | `#FFFFFF` / `#1B1B1B` | testo, punti accesi |
+| `Muted` | `#C8C8C8` / `#505050` | testo secondario |
+| `Accent`, `OnAccent` | dall'accento | scelta corrente, barre, pulsante principale; testo sopra |
+| `Critical` | `#FF6B6B` / `#C42B1C` | errori, pericoli, privacy, batteria scarica: **resta rosso** con qualunque accento |
+| `DotOff` | inchiostro 14% | punti spenti, traccia delle barre |
+| `Outline` | bianco 10% / nero 10% | bordi |
+
+Regole, verificate dai test: `Accent` ha contrasto almeno 4,5:1 sul fondo in ogni tema e tono, anche con un colore scritto a
+mano (si schiarisce o si scurisce quanto basta); `OnAccent` almeno 4,5:1 sull'accento.
+
+I pennelli di `Theme` sono sempre gli stessi oggetti e cambiano colore: chi li usa si aggiorna da solo. Quindi: non si
+congelano (negli stili XAML si passa da un `Binding`, perché uno stile congela ciò che contiene), si usano solo sul thread
+dell'interfaccia e non si animano direttamente (`Motion.FadeTo` ne fa una copia).
+
+## Liquid Glass
+WPF con la trasparenza per pixel non sa sfocare ciò che sta dietro; l'acrilico di Windows sulla stessa finestra resta
+rettangolare e con una regione ha i bordi seghettati. Perciò ogni superficie ha sotto una **finestra compagna**
+(`GlassBackdrop`): vuota, grande come la superficie, contiene solo la sfocatura di sistema (composizione di Windows con angoli
+antialias) e porta l'ombra nativa di Windows 11. Sopra, la finestra WPF disegna la tinta, il velo di luce e il bordo che
+prende luce in alto (`PanelBrush`, `RimBrush`) e riceve i clic.
+
+- La compagna è proprietaria della finestra, così Windows le tiene incollate nell'ordine; per i widget è lei a stare in fondo al
+  desktop, di proprietà di Progman, e il widget le sta sopra.
+- **Mai chiamare `SetWindowPos` per l'ordine in risposta a un messaggio di posizione**: Windows riordina insieme le finestre dello
+  stesso proprietario e rimanda i messaggi alle altre, e due widget si rubano il fondo all'infinito (interfaccia bloccata, sfarfallio).
+  L'ordine si decide solo riscrivendo `WM_WINDOWPOSCHANGING`, che non genera altri messaggi.
+- Il notch le comunica la forma a ogni fotogramma dell'animazione.
+- La composizione si carica solo la prima volta che serve il vetro; spento resta solo l'ombra. Il rendering WPF resta software.
+- Il pannello delle anteprime resta opaco: DWM non disegna miniature su finestre a trasparenza per pixel.
+- Diagnostica: `NothingShell.exe --glass-check <cartella>` apre finestre vere sopra una tavola colorata, cambia tema dal vivo e
+  ne fotografa l'immagine dallo schermo (solo le proprie finestre); nel `report.txt` ordine di più widget insieme, assenza di cicli a riposo e clic.
+  `--snapshot <cartella> [chiaro|scuro] [punti] [#RRGGBB]` genera le immagini delle superfici, senza vetro.
+
+## Testo e icone
+`DotMatrixView` riceve sempre una `DotGrid`, che ricorda cosa rappresenta. Nello stile Windows disegna il testo in Segoe (le
+etichette tutte maiuscole diventano normali, `DotText.Friendly`; le sigle restano), l'icona Fluent corrispondente (`FluentIcons`)
+o una barra piena. Occupa quasi lo stesso spazio dei punti, così le pagine non cambiano impaginazione. Segnale ed
+equalizzatore restano a punti.
 
 ## Matrice a punti
 - Font proprietario NDot **non** usato: glifi 5x7 disegnati in `DotFont` (cifre, A–Z, punteggiatura base).
@@ -19,8 +74,9 @@
 - Ogni punto ha un'intensità 0..1, per transizioni morbide (fade a matrice).
 
 ## Forme
-- Angoli: notch a pillola (raggio = altezza/2), widget raggio 24 px.
-- Nessuna ombra, nessun gradiente. Il contrasto viene solo da bianco/nero/rosso.
+- Angoli come in Windows 11: superfici 8 (`Theme.RadiusLarge`), controlli 4 (`Theme.RadiusSmall`); notch a pillola, al massimo 14.
+- Ombra solo quella di Windows, sulle superfici. Gradienti solo nel vetro.
+- Superfici con `Theme.Panel`, così fondo, bordo e angoli sono uguali ovunque.
 
 ## Movimento
 - Espansione notch: molla (stiffness 280, damping 26), nessun rimbalzo eccessivo.

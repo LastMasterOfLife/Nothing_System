@@ -2,6 +2,7 @@
 using System.Windows.Input;
 using System.Windows.Media;
 using NothingShell.App.Interop;
+using NothingShell.App.Rendering;
 
 namespace NothingShell.App.Widgets;
 
@@ -25,6 +26,7 @@ public sealed class WidgetWindow : Window
         Content = view;
 
         DesktopLayer.Attach(this);
+        GlassBackdrop.Attach(this, view, bottom: true);
         MouseLeftButtonDown += OnMouseLeftButtonDown;
     }
 

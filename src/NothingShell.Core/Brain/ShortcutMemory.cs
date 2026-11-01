@@ -100,6 +100,44 @@ public sealed partial class ShortcutMemory
         }
     }
 
+    /// <summary>
+    /// Le scorciatoie di serie ancora valide, per argomento e per comando. Non ci sono quelle dimenticate né quelle che l'utente
+    /// ha corretto con un altro comando: quelle ormai sono sue e stanno fra le imparate.
+    /// </summary>
+    public IReadOnlyList<BuiltInSection> BuiltIn
+    {
+        get
+        {
+            lock (_gate)
+            {
+                var sections = new List<BuiltInSection>();
+                foreach (var section in ShortcutSeeds.Sections)
+                {
+                    var active = section.Shortcuts
+                        .Select(seed => (Seed: seed, Current: _exact.GetValueOrDefault(IntentText.Key(seed.Tokens))))
+                        .Where(p => p.Current is { Seed: true })
+                        .ToArray();
+                    var commands = active.GroupBy(p => p.Current!.Command, StringComparer.Ordinal).Select(group =>
+                    {
+                        // Due frasi con la stessa chiave sono una scorciatoia sola: i suoi usi si contano una volta.
+                        var stored = group.Select(p => p.Current!).Distinct().ToArray();
+                        return new BuiltInShortcut(
+                            group.Select(p => ShortcutSeeds.Spoken(p.Seed)).ToArray(),
+                            stored[0] with
+                            {
+                                Successes = TrustedAfter + stored.Sum(s => Math.Max(0, s.Successes - TrustedAfter)),
+                                Failures = stored.Max(s => s.Failures),
+                                LastUsed = stored.Max(s => s.LastUsed),
+                            });
+                    }).ToArray();
+                    if (commands.Length > 0)
+                        sections.Add(new BuiltInSection(section.Title, commands));
+                }
+                return sections;
+            }
+        }
+    }
+
     /// <summary>Le scorciatoie con una frase fissa, senza i modelli con un valore: per confrontarle con una richiesta.</summary>
     public IReadOnlyList<Shortcut> Phrases
     {

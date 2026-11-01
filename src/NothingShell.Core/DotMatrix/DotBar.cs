@@ -5,7 +5,7 @@ public static class DotBar
 {
     public static DotGrid Render(double fraction, int columns, int rows = 1)
     {
-        var grid = new DotGrid(columns, rows);
+        var grid = new DotGrid(columns, rows) { Fraction = double.IsNaN(fraction) ? 0 : Math.Clamp(fraction, 0, 1) };
         var lit = LitColumns(fraction, columns);
         for (var x = 0; x < lit; x++)
             for (var y = 0; y < rows; y++)

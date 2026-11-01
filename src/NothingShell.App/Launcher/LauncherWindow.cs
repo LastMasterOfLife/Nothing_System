@@ -33,26 +33,22 @@ public sealed partial class LauncherWindow : Window
     private readonly ShellIcons _icons;
     private readonly LauncherSettingsStore _store;
 
-    private readonly Border _panel = new()
+    private readonly Border _panel = Theme.Panel(new Border
     {
-        Background = Theme.BlackBrush,
-        BorderBrush = Theme.OutlineBrush,
-        BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(28),
         Padding = new Thickness(20),
-    };
+    });
     private readonly TranslateTransform _slide = new();
     private readonly TextBox _search = new()
     {
         Background = Brushes.Transparent,
         BorderThickness = new Thickness(0),
-        Foreground = Theme.WhiteBrush,
-        CaretBrush = Theme.WhiteBrush,
+        Foreground = Theme.InkBrush,
+        CaretBrush = Theme.InkBrush,
         FontFamily = Theme.BodyFont,
         FontSize = 18,
         VerticalContentAlignment = VerticalAlignment.Center,
     };
-    private readonly TextBlock _placeholder = Label("Cerca app, > per un comando", 18, Theme.GreyBrush);
+    private readonly TextBlock _placeholder = Label("Cerca app, > per un comando", 18, Theme.MutedBrush);
     private readonly StackPanel _content = new();
     private readonly ScrollViewer _scroll = new()
     {
@@ -92,6 +88,7 @@ public sealed partial class LauncherWindow : Window
         Topmost = true;
         Title = "Nothing Shell — Launcher";
         Content = BuildVisualTree();
+        GlassBackdrop.Attach(this, _panel);
 
         SourceInitialized += (_, _) => MakeToolWindow();
         Deactivated += (_, _) => Dismiss();
@@ -203,7 +200,7 @@ public sealed partial class LauncherWindow : Window
         {
             Pitch = 3,
             Dots = DotGrid.From(DotIcons.Search),
-            DotColor = Theme.Grey,
+            DotColor = Theme.Muted,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 14, 0),
         };
@@ -235,7 +232,7 @@ public sealed partial class LauncherWindow : Window
     private Grid BuildFooter()
     {
         var footer = new Grid { Margin = new Thickness(4, 12, 0, 0) };
-        var user = Label(Environment.UserName.ToLowerInvariant(), 13, Theme.GreyBrush);
+        var user = Label(Environment.UserName.ToLowerInvariant(), 13, Theme.MutedBrush);
         user.VerticalAlignment = VerticalAlignment.Center;
         footer.Children.Add(user);
 
@@ -266,7 +263,7 @@ public sealed partial class LauncherWindow : Window
         button.MouseLeave += (_, _) =>
         {
             if (armed is not null)
-                button.Background = Theme.RedBrush;
+                button.Background = Theme.CriticalBrush;
         };
         button.MouseLeftButtonUp += (_, e) =>
         {
@@ -276,7 +273,7 @@ public sealed partial class LauncherWindow : Window
                 armed = new DispatcherTimer { Interval = ConfirmWindow };
                 armed.Tick += (_, _) => Disarm();
                 armed.Start();
-                button.Background = Theme.RedBrush;
+                button.Background = Theme.CriticalBrush;
                 button.ToolTip = $"{name}: clicca di nuovo per confermare";
                 return;
             }
@@ -316,12 +313,12 @@ public sealed partial class LauncherWindow : Window
     {
         if (text.Length == 0)
         {
-            _content.Children.Add(CommandRow("Scrivi un comando PowerShell o una frase", null, Theme.GreyBrush));
+            _content.Children.Add(CommandRow("Scrivi un comando PowerShell o una frase", null, Theme.MutedBrush));
             return;
         }
         _literalRun = () => RunCommandLine(null, text);
         _commandRun = _literalRun;
-        _content.Children.Add(CommandRow(text, "ESEGUI COSÌ COM'È", Theme.WhiteBrush));
+        _content.Children.Add(CommandRow(text, "ESEGUI COSÌ COM'È", Theme.InkBrush));
         if (Decide is null || LiteralCommand().IsMatch(text))
             return;
 
@@ -347,7 +344,7 @@ public sealed partial class LauncherWindow : Window
         var dangerous = reply.Risk == "dangerous";
         var origin = reply.Source == "model" ? "MODELLO" : reply.Source == "similar" ? "SIMILE" : "SCORCIATOIA";
         var tag = $"{origin} · {reply.Ms:0.#} MS{(dangerous ? $" · CRITICO: {reply.Reason?.ToUpperInvariant()}. IL TERMINALE CHIEDE DI SCRIVERE SI" : string.Empty)}";
-        var row = CommandRow(command, tag, dangerous ? Theme.RedBrush : Theme.WhiteBrush);
+        var row = CommandRow(command, tag, dangerous ? Theme.CriticalBrush : Theme.InkBrush);
         row.Background = Theme.SurfaceBrush;
         _content.Children.Insert(0, row);
         _commandRun = () => RunCommandLine(text, command);
@@ -373,14 +370,14 @@ public sealed partial class LauncherWindow : Window
         stack.Children.Add(line);
         if (tag is not null)
         {
-            var label = Label(tag, 10, Theme.GreyBrush);
+            var label = Label(tag, 10, Theme.MutedBrush);
             label.Margin = new Thickness(0, 4, 0, 0);
             stack.Children.Add(label);
         }
         return new Border
         {
             Child = stack,
-            CornerRadius = new CornerRadius(12),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(12, 10, 12, 10),
             Margin = new Thickness(0, 0, 0, 4),
             Background = Brushes.Transparent,
@@ -405,7 +402,7 @@ public sealed partial class LauncherWindow : Window
         _content.Children.Add(_allApps!);
         _navigable.AddRange(_allAppsRows);
         if (_catalog.Apps.Count == 0)
-            _content.Children.Add(Label("Caricamento delle app…", 13, Theme.GreyBrush));
+            _content.Children.Add(Label("Caricamento delle app…", 13, Theme.MutedBrush));
     }
 
     private void BuildAllApps()
@@ -417,7 +414,7 @@ public sealed partial class LauncherWindow : Window
             _allApps.Children.Add(new DotMatrixView
             {
                 Pitch = 2,
-                DotColor = Theme.Red,
+                DotColor = Theme.Accent,
                 Dots = DotText.Render(section.Letter.ToString()),
                 HorizontalAlignment = HorizontalAlignment.Left,
                 Margin = new Thickness(10, 10, 0, 6),
@@ -437,7 +434,7 @@ public sealed partial class LauncherWindow : Window
         var results = AppSearch.Search(_catalog.Apps, query, _settings.Usage);
         if (results.Count == 0)
         {
-            var none = Label("Nessun risultato", 14, Theme.GreyBrush);
+            var none = Label("Nessun risultato", 14, Theme.MutedBrush);
             none.Margin = new Thickness(10, 8, 0, 0);
             _content.Children.Add(none);
             return;
@@ -457,7 +454,7 @@ public sealed partial class LauncherWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
         grid.ColumnDefinitions.Add(new ColumnDefinition());
         var icon = IconHost(app, 26, lazyIcon);
-        var name = Label(app.Name, 14, Theme.WhiteBrush);
+        var name = Label(app.Name, 14, Theme.InkBrush);
         name.VerticalAlignment = VerticalAlignment.Center;
         name.Margin = new Thickness(12, 0, 0, 0);
         name.TextTrimming = TextTrimming.CharacterEllipsis;
@@ -467,7 +464,7 @@ public sealed partial class LauncherWindow : Window
 
         var row = HoverBorder(grid, double.NaN, RowHeight);
         row.Padding = new Thickness(10, 0, 10, 0);
-        row.CornerRadius = new CornerRadius(12);
+        row.CornerRadius = new CornerRadius(4);
         grid.HorizontalAlignment = HorizontalAlignment.Stretch;
         row.MouseLeftButtonUp += (_, e) =>
         {
@@ -482,7 +479,7 @@ public sealed partial class LauncherWindow : Window
         var stack = new StackPanel();
         var icon = IconHost(app, 32, lazy: false);
         icon.HorizontalAlignment = HorizontalAlignment.Center;
-        var name = Label(app.Name, 11, Theme.GreyBrush);
+        var name = Label(app.Name, 11, Theme.MutedBrush);
         name.HorizontalAlignment = HorizontalAlignment.Center;
         name.TextTrimming = TextTrimming.CharacterEllipsis;
         name.Margin = new Thickness(4, 6, 4, 0);
@@ -490,7 +487,7 @@ public sealed partial class LauncherWindow : Window
         stack.Children.Add(name);
 
         var tile = HoverBorder(stack, double.NaN, 72);
-        tile.CornerRadius = new CornerRadius(16);
+        tile.CornerRadius = new CornerRadius(4);
         tile.ToolTip = app.Name;
         tile.MouseLeftButtonUp += (_, e) =>
         {
@@ -637,7 +634,7 @@ public sealed partial class LauncherWindow : Window
 
     private static TextBlock SectionTitle(string text)
     {
-        var title = Label(text, 11, Theme.GreyBrush);
+        var title = Label(text, 11, Theme.MutedBrush);
         title.Margin = new Thickness(10, 4, 0, 10);
         return title;
     }
@@ -659,7 +656,7 @@ public sealed partial class LauncherWindow : Window
         }
         border.MouseEnter += (_, _) =>
         {
-            if (border.Background != Theme.RedBrush)
+            if (border.Background != Theme.CriticalBrush)
                 border.Background = Theme.SurfaceBrush;
         };
         border.MouseLeave += (_, _) =>
@@ -672,7 +669,7 @@ public sealed partial class LauncherWindow : Window
 
     private static TextBlock Label(string text, double size, Brush foreground) => new()
     {
-        Text = text,
+        Text = DotText.Friendly(text),
         FontFamily = Theme.BodyFont,
         FontSize = size,
         Foreground = foreground,

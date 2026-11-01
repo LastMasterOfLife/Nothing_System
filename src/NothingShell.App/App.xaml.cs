@@ -13,6 +13,7 @@ using NothingShell.App.Services;
 using NothingShell.App.Settings;
 using NothingShell.App.Widgets;
 using NothingShell.Core.Access;
+using NothingShell.Core.Design;
 using NothingShell.Core.Brain;
 using NothingShell.Core.Connectors;
 using NothingShell.Core.Notch;
@@ -48,15 +49,21 @@ public partial class App : Application
 
         switch (e.Args)
         {
-            case ["--snapshot", var folder]:
+            case ["--snapshot", var folder, .. var look]:
                 Rendering.Motion.Suspended = true; // le immagini mostrano lo stato finale, non l'inizio delle animazioni
+                Rendering.Theme.Apply(SnapshotAppearance(look));
                 RenderSnapshots(folder);
+                RenderIconSheet(folder);
                 await RenderLauncherSnapshot(folder);
                 await RenderBarSnapshots(folder);
                 await RenderPluginAndSettingsSnapshots(folder);
                 RenderNotchSnapshots(folder);
                 RenderRemoteSnapshots(folder);
                 await RenderAccessSnapshots(folder);
+                Shutdown();
+                return;
+            case ["--glass-check", var folder, .. var mode]:
+                await GlassCheck(folder, mode.Contains("solido"));
                 Shutdown();
                 return;
             case ["--ask-demo", var report]:
@@ -447,7 +454,7 @@ public partial class App : Application
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "notch-volume-muted.png"));
         notch.ShowLevel(NothingShell.Core.Design.DotIcons.Sun, 0.8, muted: false);
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "notch-brightness.png"));
-        notch.ShowNotice(NothingShell.Core.Design.DotIcons.Headphones, Rendering.Theme.White, "Nothing Ear (a)  80%");
+        notch.ShowNotice(NothingShell.Core.Design.DotIcons.Headphones, Rendering.Theme.Ink, "Nothing Ear (a)  80%");
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "notch-bluetooth.png"));
 
         notch.SetPrivacy(new PrivacyState(["Zoom"], ["Zoom"]));
@@ -527,7 +534,7 @@ public partial class App : Application
             new NothingShell.Core.Dev.DevServer(5432, 4120, "postgres", "Postgres", true),
         ]);
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Servers), Path.Combine(folder, "notch-servers.png"));
-        notch.ShowHint(NothingShell.Core.Design.DotIcons.Plug, Rendering.Theme.White, "LOCALHOST:5173 - NODE", NotchPage.Servers);
+        notch.ShowHint(NothingShell.Core.Design.DotIcons.Plug, Rendering.Theme.Ink, "LOCALHOST:5173 - NODE", NotchPage.Servers);
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "notch-server-hint.png"));
 
         var history = new NothingShell.Core.Dev.ClipboardHistory();
@@ -536,7 +543,7 @@ public partial class App : Application
         history.Add("{\"id\": 42, \"nome\": \"Nothing\", \"attivo\": true}", NothingShell.Core.Dev.ClipKind.Json, now);
         notch.SetClipboard(history.Entries);
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Clipboard), Path.Combine(folder, "notch-clipboard.png"));
-        notch.ShowHint(NothingShell.Core.Design.DotIcons.Clip, Rendering.Theme.White, "JSON - 2,1 KB", NotchPage.Clipboard);
+        notch.ShowHint(NothingShell.Core.Design.DotIcons.Clip, Rendering.Theme.Ink, "JSON - 2,1 KB", NotchPage.Clipboard);
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "notch-clipboard-hint.png"));
         notch.ShowCard(NotchCards.Secret("CHIAVE GITHUB", "ghp_••••6789", () => { }, () => { }, null, () => { }), TimeSpan.FromSeconds(8));
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Card, NotchPage.Home), Path.Combine(folder, "notch-secret.png"));
@@ -706,6 +713,8 @@ public partial class App : Application
             settings.ShowShortcut(shortcut);
             SaveSnapshot(root, Path.Combine(folder, $"settings-shortcut-{name}.png"));
         }
+        settings.ShowBuiltIn(new ShortcutMemory().BuiltIn[0].Commands[0]);
+        SaveSnapshot(root, Path.Combine(folder, "settings-shortcut-seed.png"));
         settings.ShowConnectorTemplate("homeassistant");
         root.Height = settings.Height;
         SaveSnapshot(root, Path.Combine(folder, "settings-connector-form.png"));
@@ -905,6 +914,8 @@ public partial class App : Application
 
         public IPhoneActions Phone { get; } = new SnapshotPhone();
 
+        public AppearanceSettings Appearance { get; set; } = AppearanceSettings.Default;
+
         public bool NotchEnabled { get; set; } = true;
 
         public bool BarEnabled { get; set; } = true;
@@ -1058,6 +1069,8 @@ public partial class App : Application
         public void ClearBrainMemory()
         {
         }
+
+        public IReadOnlyList<BuiltInSection> BuiltInShortcuts { get; } = new ShortcutMemory().BuiltIn;
 
         public IReadOnlyList<Shortcut> LearnedShortcuts { get; } =
         [
@@ -1494,6 +1507,315 @@ public partial class App : Application
         {
         }
     }
+
+    /// <summary>Tutte le icone Fluent usate, accanto a quelle a punti che sostituiscono: per controllare che significhino lo stesso.</summary>
+    private static void RenderIconSheet(string folder)
+    {
+        var sheet = new System.Windows.Controls.WrapPanel { Width = 660, Height = 400, Background = Rendering.Theme.BaseSolidBrush };
+        foreach (var glyph in Rendering.FluentIcons.All.Keys)
+        {
+            var pair = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, Width = 110, Height = 44 };
+            pair.Children.Add(new Rendering.DotMatrixView { Pitch = 3, Dots = NothingShell.Core.DotMatrix.DotGrid.From(glyph), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
+            pair.Children.Add(new System.Windows.Controls.TextBlock { Text = Rendering.FluentIcons.For(glyph).ToString(), FontFamily = Rendering.Theme.IconFont, FontSize = 22, Foreground = Rendering.Theme.InkBrush, VerticalAlignment = VerticalAlignment.Center });
+            sheet.Children.Add(pair);
+        }
+        var previous = Rendering.Theme.Settings;
+        Rendering.Theme.Apply(previous with { Display = DisplayStyle.Dots });
+        SaveSnapshot(sheet, Path.Combine(folder, "icons.png"));
+        Rendering.Theme.Apply(previous);
+    }
+
+    /// <summary>
+    /// Il vetro non si vede nelle immagini di --snapshot: qui finestre vere sopra una tavola colorata, fotografate dallo
+    /// schermo. Stessi oggetti, tema cambiato dal vivo: scuro e chiaro col vetro, poi senza. Fotografa solo le proprie finestre.
+    /// </summary>
+    private static async Task GlassCheck(string folder, bool solid)
+    {
+        Directory.CreateDirectory(folder);
+        Rendering.Theme.Apply(new AppearanceSettings { Theme = AppTheme.Dark, Glass = !solid });
+        var report = new List<string>();
+        var memoryBefore = System.Diagnostics.Process.GetCurrentProcess().WorkingSet64;
+        var stripes = new System.Windows.Controls.Primitives.UniformGrid { Rows = 1 };
+        foreach (var color in new[] { "#E81123", "#FFB900", "#107C10", "#0078D4", "#000000", "#FFFFFF", "#F7630C", "#8764B8" })
+            stripes.Children.Add(new System.Windows.Controls.Border
+            {
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color)),
+                Child = new System.Windows.Controls.TextBlock { Text = "Testo dietro al vetro", FontSize = 26, TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Gray },
+            });
+        var board = new Window
+        {
+            WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            ShowActivated = false,
+            Topmost = true,
+            Left = (SystemParameters.PrimaryScreenWidth - 1120) / 2,
+            Top = 0,
+            Width = 1120,
+            Height = 720,
+            Content = stripes,
+        };
+        board.Show();
+
+        using var media = new MediaService();
+        var notch = new NotchWindow(media, DevPageActions.None, ConnectedPageActions.None) { ShowActivated = false };
+        notch.SetTime(DateTime.Now);
+        notch.Show();
+
+        var plugins = new PluginHost();
+        var quick = new QuickPanelWindow(() => { }, () => { }, new SnapshotPhone(), () => true) { ShowActivated = false };
+        var quickRoot = quick.PrepareSnapshot();
+        quick.Width = quickRoot.Width;
+        quick.Height = quickRoot.Height;
+        quick.Left = board.Left + 720;
+        quick.Top = 90;
+        quick.Show();
+
+        var settings = new SettingsWindow(new SnapshotSettings(plugins.Results)) { ShowActivated = false, WindowStartupLocation = WindowStartupLocation.Manual, Topmost = true, Left = board.Left + 20, Top = 240, Height = 460, Width = 680 };
+        settings.Show(SettingsPage.Appearance);
+        settings.Show();
+
+        var clock = new ClockWidget();
+        clock.Update(DateTime.Now);
+        var widget = new WidgetWindow(clock) { Left = board.Left + 20, Top = 90 };
+        widget.Show();
+        var widgets = new List<Window> { widget };
+        foreach (var view in new WidgetView[] { new BatteryWidget(), new SystemWidget(), new CalendarWidget() })
+        {
+            var extra = new WidgetWindow(view) { Left = board.Left + 20 + (180 * widgets.Count), Top = 730 };
+            extra.Show();
+            widgets.Add(extra);
+        }
+
+        var catalog = new AppCatalog();
+        var pins = TaskbarPins.Read();
+        var resolver = new AppIdResolver();
+        resolver.SetSources(pins, catalog.Apps);
+        using var tracker = new WindowTracker(resolver);
+        tracker.SetPinned(pins);
+        tracker.Refresh();
+        var monitor = Interop.WindowNative.Monitors().First(m => m.IsPrimary);
+        var shellIcons = new ShellIcons();
+        // Solo la finestra della barra: la taskbar di Windows non si tocca e il tasto Win resta a Windows.
+        var bar = new BarWindow(tracker, new AppIcons(), shellIcons, catalog, new WindowsTaskbar(),
+            new LauncherWindow(catalog, shellIcons, new LauncherSettingsStore(Path.Combine(folder, "launcher.json"))), monitor, NothingShell.Core.Bar.MultiMonitorMode.AllTaskbars);
+        bar.SetTime(DateTime.Now);
+        bar.Show();
+        await Task.Delay(1500);
+
+        report.Add($"memoria {(solid ? "senza vetro" : "col vetro")}: {memoryBefore / 1048576} MB prima delle finestre, {System.Diagnostics.Process.GetCurrentProcess().WorkingSet64 / 1048576} MB con 4 superfici");
+        if (solid)
+        {
+            File.WriteAllLines(Path.Combine(folder, "report-solido.txt"), report);
+            foreach (var window in new Window[] { notch, quick, settings, widget, bar, board })
+                window.Close();
+            return;
+        }
+        report.Add(WidgetOrder(widgets));
+        report.Add(await Stillness(widgets));
+        await CaptureWidgets(board, widgets, Path.Combine(folder, "widget.png"));
+
+        // Qualcosa li alza, si nascondono e tornano: devono restare in fondo, senza innescare cicli.
+        var raised = new WindowInteropHelper(widgets[1]).Handle;
+        RaiseWindow(raised);
+        widgets[2].Hide();
+        await Task.Delay(100);
+        widgets[2].Show();
+        await Task.Delay(300);
+        report.Add($"dopo averli alzati e riaperti: {WidgetOrder(widgets)}");
+        report.Add(await Stillness(widgets));
+        report.Add(HitTests(notch, board));
+        report.Add(CompanionFollows(widget));
+        foreach (var extra in widgets.Skip(1))
+            extra.Close();
+
+        var looks = new (string Name, AppearanceSettings Look)[]
+        {
+            ("scuro-vetro", new AppearanceSettings { Theme = AppTheme.Dark }),
+            ("chiaro-vetro", new AppearanceSettings { Theme = AppTheme.Light }),
+            ("scuro-limpido-viola", new AppearanceSettings { Theme = AppTheme.Dark, Accent = "#8764B8", GlassStrength = 1 }),
+            ("chiaro-solido", new AppearanceSettings { Theme = AppTheme.Light, Glass = false }),
+            ("nothing", AppearanceChoices.Presets[2].Settings),
+        };
+        foreach (var (name, look) in looks)
+        {
+            Rendering.Theme.Apply(look);
+            await Task.Delay(500);
+            foreach (var (state, page) in new[] { (NotchState.Idle, NotchPage.Home), (NotchState.Expanded, NotchPage.Home) })
+            {
+                notch.PrepareSnapshot(state, page);
+                await Task.Delay(250);
+                CaptureWindow(board, Path.Combine(folder, $"{name}-{(state == NotchState.Idle ? "riposo" : "aperto")}.png"));
+            }
+            CaptureWindow(bar, Path.Combine(folder, $"{name}-barra.png"));
+        }
+
+        Rendering.Theme.Apply(new AppearanceSettings { Theme = AppTheme.Dark, QuietNotch = true });
+        notch.PrepareSnapshot(NotchState.Idle, NotchPage.Home);
+        await Task.Delay(400);
+        CaptureWindow(board, Path.Combine(folder, "discreto.png"));
+        report.Add(QuietHit(notch));
+
+        Rendering.Theme.Apply(new AppearanceSettings { Theme = AppTheme.Dark });
+        var menu = new System.Windows.Controls.ContextMenu { PlacementTarget = board, Placement = System.Windows.Controls.Primitives.PlacementMode.Center };
+        menu.Items.Add(new System.Windows.Controls.MenuItem { Header = "Impostazioni…" });
+        menu.Items.Add(new System.Windows.Controls.MenuItem { Header = "Usa il tasto Win per il launcher", IsCheckable = true, IsChecked = true });
+        menu.Items.Add(new System.Windows.Controls.Separator());
+        menu.Items.Add(new System.Windows.Controls.MenuItem { Header = "Esci da Nothing Shell" });
+        menu.IsOpen = true;
+        await Task.Delay(400);
+        CaptureWindow(board, Path.Combine(folder, "menu.png"));
+        menu.IsOpen = false;
+
+        // Le compagne devono sparire con la loro finestra, e la tastiera non deve mai finire su di loro.
+        quick.Hide();
+        await Task.Delay(300);
+        CaptureWindow(board, Path.Combine(folder, "pannello-chiuso.png"));
+
+        File.WriteAllLines(Path.Combine(folder, "report.txt"), report);
+        foreach (var window in new Window[] { notch, quick, settings, widget, bar, board })
+            window.Close();
+    }
+
+    /// <summary>Dentro la pillola il mouse arriva al notch; nelle zone vuote della sua finestra passa a ciò che sta sotto.</summary>
+    private static string HitTests(Window notch, Window board)
+    {
+        var scale = VisualTreeHelper.GetDpi(notch).DpiScaleX;
+        var center = (int)((notch.Left + (notch.Width / 2)) * scale);
+        var onPill = WindowFromPoint(new NativePoint { X = center, Y = (int)(16 * scale) });
+        var beside = WindowFromPoint(new NativePoint { X = (int)((notch.Left + 10) * scale), Y = (int)(16 * scale) });
+        var below = WindowFromPoint(new NativePoint { X = center, Y = (int)(200 * scale) });
+        var ownNotch = new WindowInteropHelper(notch).Handle;
+        var ownBoard = new WindowInteropHelper(board).Handle;
+        return $"clic: sulla pillola {(onPill == ownNotch ? "notch ok" : "ERRORE " + Interop.WindowNative.GetClassName(onPill))}, accanto {(beside == ownBoard ? "passa sotto ok" : "ERRORE " + Interop.WindowNative.GetClassName(beside))}, sotto {(below == ownBoard ? "passa sotto ok" : "ERRORE " + Interop.WindowNative.GetClassName(below))}";
+    }
+
+    private static string QuietHit(Window notch)
+    {
+        var scale = VisualTreeHelper.GetDpi(notch).DpiScaleX;
+        var top = WindowFromPoint(new NativePoint { X = (int)((notch.Left + (notch.Width / 2)) * scale), Y = 0 });
+        return $"notch discreto: bordo alto dello schermo {(top == new WindowInteropHelper(notch).Handle ? "lo trova ok" : "ERRORE " + Interop.WindowNative.GetClassName(top))}";
+    }
+
+    /// <summary>La compagna del widget resta esattamente sotto il widget quando lo si sposta.</summary>
+    private static string CompanionFollows(Window widget)
+    {
+        var hwnd = new WindowInteropHelper(widget).Handle;
+        widget.Left += 40;
+        widget.Top += 15;
+        Interop.WindowNative.GetWindowRect(hwnd, out var own);
+        Interop.WindowNative.GetWindowRect(Interop.NativeMethods.GetOwner(hwnd), out var glass);
+        var same = own.Left == glass.Left && own.Top == glass.Top && own.Right == glass.Right && own.Bottom == glass.Bottom;
+        return $"widget spostato: compagna {(same ? "allineata ok" : $"ERRORE {own.Left},{own.Top} contro {glass.Left},{glass.Top}")}";
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint WindowFromPoint(NativePoint point);
+
+    /// <summary>Ogni widget ha la sua compagna come proprietaria e sta sopra di lei; sotto ci sono solo widget, compagne e poi il desktop.</summary>
+    private static string WidgetOrder(List<Window> widgets)
+    {
+        var own = widgets.Select(w => new WindowInteropHelper(w).Handle).ToHashSet();
+        var problems = new List<string>();
+        foreach (var widget in widgets)
+        {
+            var hwnd = new WindowInteropHelper(widget).Handle;
+            var glass = Interop.NativeMethods.GetOwner(hwnd);
+            if (Interop.WindowNative.GetClassName(glass) != Rendering.GlassBackdrop.ClassName)
+            {
+                problems.Add($"{widget.Title} senza compagna");
+                continue;
+            }
+            var sawGlass = false;
+            for (var next = GetNextWindow(hwnd, 2); next != 0 && Interop.WindowNative.GetClassName(next) != "Progman"; next = GetNextWindow(next, 2))
+            {
+                sawGlass |= next == glass;
+                if (Interop.WindowNative.IsWindowVisible(next) && !own.Contains(next) && Interop.WindowNative.GetClassName(next) != Rendering.GlassBackdrop.ClassName)
+                {
+                    problems.Add($"{widget.Title} è sopra {Interop.WindowNative.GetClassName(next)}");
+                    break;
+                }
+            }
+            if (!sawGlass)
+                problems.Add($"{widget.Title} è sotto la sua compagna");
+        }
+        return problems.Count == 0 ? $"ordine: {widgets.Count} widget ok, ognuno sopra la sua compagna, in fondo al desktop" : $"ordine ERRORE: {string.Join("; ", problems)}";
+    }
+
+    /// <summary>A riposo l'ordine delle finestre non cambia e il processore resta fermo: un ciclo fra widget si vede qui.</summary>
+    private static async Task<string> Stillness(List<Window> widgets)
+    {
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        var first = process.TotalProcessorTime;
+        var changes = 0;
+        string? last = null;
+        for (var i = 0; i < 100; i++)
+        {
+            var order = string.Join(' ', widgets.Select(w => GetNextWindow(new WindowInteropHelper(w).Handle, 2)));
+            if (last is not null && order != last)
+                changes++;
+            last = order;
+            await Task.Delay(15);
+        }
+        process.Refresh();
+        var busy = (process.TotalProcessorTime - first).TotalSeconds;
+        return $"riposo: ordine cambiato {changes} volte, {busy:0.00} s di processore in 1,5 s{(changes > 0 || busy > 0.5 ? " ERRORE" : " ok")}";
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindow")]
+    private static extern nint GetNextWindow(nint hwnd, uint command);
+
+    /// <summary>I widget stanno sotto a tutto: si fotografano dalle miniature di DWM, che li disegnano anche se sono coperti.</summary>
+    private static async Task CaptureWidgets(Window board, List<Window> widgets, string path)
+    {
+        var target = new WindowInteropHelper(board).Handle;
+        var scale = VisualTreeHelper.GetDpi(board).DpiScaleX;
+        var thumbnails = new List<nint>();
+        var x = 20.0;
+        foreach (var widget in widgets)
+        {
+            var thumbnail = Interop.DwmNative.Register(target, new WindowInteropHelper(widget).Handle);
+            Interop.DwmNative.Show(thumbnail, new NothingShell.Core.Widgets.Rect2(x, 20, widget.Width * scale, widget.Height * scale));
+            thumbnails.Add(thumbnail);
+            x += (widget.Width * scale) + 20;
+        }
+        await Task.Delay(400);
+        CaptureWindow(board, path);
+        thumbnails.ForEach(Interop.DwmNative.Unregister);
+    }
+
+    private static void RaiseWindow(nint hwnd) => SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(nint hwnd, nint insertAfter, int x, int y, int width, int height, uint flags);
+
+    private static void CaptureWindow(Window window, string path)
+    {
+        if (!Interop.WindowNative.GetWindowRect(new WindowInteropHelper(window).Handle, out var r) ||
+            Interop.NativeMethods.CaptureScreen(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top) is not { } shot)
+            return;
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(shot));
+        using var file = File.Create(path);
+        encoder.Save(file);
+    }
+
+    /// <summary>L'aspetto delle immagini: <c>chiaro</c>, <c>scuro</c>, <c>punti</c>, <c>#RRGGBB</c>; RenderTargetBitmap non vede il vetro, quindi senza.</summary>
+    private static AppearanceSettings SnapshotAppearance(string[] look) => new()
+    {
+        Theme = look.Contains("chiaro") ? AppTheme.Light : look.Contains("scuro") ? AppTheme.Dark : AppTheme.System,
+        Display = look.Contains("punti") ? DisplayStyle.Dots : DisplayStyle.Windows,
+        Accent = look.FirstOrDefault(a => a.StartsWith('#')),
+        Glass = false,
+    };
 
     private static void SaveSnapshot(FrameworkElement view, string path, double scale = 2)
     {

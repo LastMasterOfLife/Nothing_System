@@ -39,27 +39,23 @@ public sealed class AssistantWindow : Window, IAssistantView
     private const double Gap = 46; // sotto la pillola compatta, che resta visibile
 
     private readonly IAssistantPanelActions _actions;
-    private readonly Border _frame = new()
+    private readonly Border _frame = Theme.Panel(new Border
     {
-        Background = Theme.BlackBrush,
-        BorderBrush = Theme.OutlineBrush,
-        BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(NotchLayout.MaxCornerRadius),
         Padding = new Thickness(20, 16, 20, 16),
         VerticalAlignment = VerticalAlignment.Top,
-    };
+    });
     private readonly TextBox _input = new()
     {
         Background = Brushes.Transparent,
         BorderThickness = new Thickness(0),
-        Foreground = Theme.WhiteBrush,
-        CaretBrush = Theme.WhiteBrush,
+        Foreground = Theme.InkBrush,
+        CaretBrush = Theme.InkBrush,
         FontFamily = Theme.BodyFont,
         FontSize = 17,
         VerticalContentAlignment = VerticalAlignment.Center,
     };
-    private readonly TextBlock _placeholder = NotchUi.Text(17, Theme.GreyBrush, "Chiedi qualcosa o scrivi un comando");
-    private readonly TextBlock _who = NotchUi.Text(11, Theme.GreyBrush);
+    private readonly TextBlock _placeholder = NotchUi.Text(17, Theme.MutedBrush, "Chiedi qualcosa o scrivi un comando");
+    private readonly TextBlock _who = NotchUi.Text(11, Theme.MutedBrush);
     private readonly StackPanel _log = new();
     private readonly ScrollViewer _scroll = new()
     {
@@ -89,6 +85,7 @@ public sealed class AssistantWindow : Window, IAssistantView
         Topmost = true;
         Title = "Nothing Shell — Assistente";
         Content = BuildVisualTree();
+        GlassBackdrop.Attach(this, _frame);
 
         SourceInitialized += (_, _) => NativeMethods.AddExStyle(new WindowInteropHelper(this).Handle, WindowNative.WsExToolWindow);
         PreviewKeyDown += OnKey;
@@ -168,7 +165,7 @@ public sealed class AssistantWindow : Window, IAssistantView
         var inputRow = new Grid { Height = 40 };
         inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         inputRow.ColumnDefinitions.Add(new ColumnDefinition());
-        var glyph = new DotMatrixView { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Terminal), DotColor = Theme.Grey, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
+        var glyph = new DotMatrixView { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Terminal), DotColor = Theme.Muted, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
         _placeholder.VerticalAlignment = VerticalAlignment.Center;
         _placeholder.IsHitTestVisible = false;
         Grid.SetColumn(_input, 1);
@@ -187,7 +184,7 @@ public sealed class AssistantWindow : Window, IAssistantView
                 _actions.OpenTerminal();
                 HideIfIdle();
             }),
-            DevRows.Button("✕", () =>
+            DevRows.Button("Chiudi", () =>
             {
                 _running?.Cancel();
                 Hide();
@@ -306,7 +303,7 @@ public sealed class AssistantWindow : Window, IAssistantView
     {
         ArgumentNullException.ThrowIfNull(text);
         ClearWaiting();
-        var answer = Selectable(text, 14, Theme.WhiteBrush, Theme.BodyFont);
+        var answer = Selectable(text, 14, Theme.InkBrush, Theme.BodyFont);
         answer.Margin = new Thickness(0, 10, 0, 4);
         Add(answer);
         if (!verified)
@@ -333,7 +330,7 @@ public sealed class AssistantWindow : Window, IAssistantView
     {
         ArgumentNullException.ThrowIfNull(text);
         ClearWaiting();
-        var note = NotchUi.Text(12, Theme.GreyBrush, text);
+        var note = NotchUi.Text(12, Theme.MutedBrush, text);
         note.TextWrapping = TextWrapping.Wrap;
         note.TextTrimming = TextTrimming.None;
         note.Margin = new Thickness(0, 6, 0, 4);
@@ -360,7 +357,7 @@ public sealed class AssistantWindow : Window, IAssistantView
 
     private void AddQuestion(string text)
     {
-        var line = Selectable(text, 13, Theme.GreyBrush, Theme.BodyFont);
+        var line = Selectable(text, 13, Theme.MutedBrush, Theme.BodyFont);
         line.Margin = new Thickness(0, _log.Children.Count == 0 ? 2 : 16, 0, 4);
         Add(line);
     }
@@ -375,7 +372,7 @@ public sealed class AssistantWindow : Window, IAssistantView
     private void ShowWaiting(string text)
     {
         ClearWaiting();
-        var line = NotchUi.Text(12, Theme.GreyBrush, text);
+        var line = NotchUi.Text(12, Theme.MutedBrush, text);
         line.FontFamily = text.EndsWith('…') ? Theme.BodyFont : MonoFont;
         line.Margin = new Thickness(0, 4, 0, 4);
         _waiting = line;
@@ -403,7 +400,7 @@ public sealed class AssistantWindow : Window, IAssistantView
         BorderThickness = new Thickness(0),
         Foreground = foreground,
         CaretBrush = Brushes.Transparent,
-        SelectionBrush = Theme.GreyBrush,
+        SelectionBrush = Theme.MutedBrush,
         FontFamily = font,
         FontSize = size,
         Padding = new Thickness(0),
@@ -414,10 +411,10 @@ public sealed class AssistantWindow : Window, IAssistantView
     {
         var ok = step.Run.Status == AssistantRunStatus.Ok;
         var refused = step.Run.Status is AssistantRunStatus.Refused or AssistantRunStatus.Rewrite;
-        var mark = ok ? DevRows.Icon(DotIcons.Check, Theme.White, 1.5) : DevRows.Icon(DotIcons.Close, refused ? Theme.Grey : Theme.Red, 1.5);
+        var mark = ok ? DevRows.Icon(DotIcons.Check, Theme.Ink, 1.5) : DevRows.Icon(DotIcons.Close, refused ? Theme.Muted : Theme.Critical, 1.5);
         mark.VerticalAlignment = VerticalAlignment.Top;
         mark.Margin = new Thickness(0, 3, 10, 0);
-        var command = NotchUi.Text(12, ok ? Theme.WhiteBrush : Theme.GreyBrush, step.Command);
+        var command = NotchUi.Text(12, ok ? Theme.InkBrush : Theme.MutedBrush, step.Command);
         command.FontFamily = MonoFont;
         command.TextWrapping = TextWrapping.Wrap;
         command.TextTrimming = TextTrimming.None;
@@ -435,7 +432,7 @@ public sealed class AssistantWindow : Window, IAssistantView
             : string.Join('\n', new[] { step.Run.Output, step.Run.Error }.Where(t => !string.IsNullOrWhiteSpace(t)));
         if (body.Length == 0)
             body = ok ? "(nessun risultato)" : "non è riuscito";
-        var output = Selectable(body, 11, ok ? Theme.GreyBrush : Theme.RedBrush, MonoFont);
+        var output = Selectable(body, 11, ok ? Theme.MutedBrush : Theme.CriticalBrush, MonoFont);
         output.TextWrapping = TextWrapping.NoWrap;
         output.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
         output.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
@@ -456,14 +453,14 @@ public sealed class AssistantWindow : Window, IAssistantView
     private Border ConfirmCard(AssistantConfirm request, Action<bool> answer)
     {
         var critical = request.Level == ConfirmLevel.Critical;
-        var accent = critical ? Theme.RedBrush : Theme.GreyBrush;
-        var title = DevRows.Dots(critical ? "COMANDO CRITICO" : "VUOI ESEGUIRLO?", critical ? Theme.Red : Theme.White, 1.8);
+        var accent = critical ? Theme.CriticalBrush : Theme.MutedBrush;
+        var title = DevRows.Dots(critical ? "COMANDO CRITICO" : "VUOI ESEGUIRLO?", critical ? Theme.Critical : Theme.Ink, 1.8);
         title.HorizontalAlignment = HorizontalAlignment.Left;
-        var reason = NotchUi.Text(12, critical ? Theme.RedBrush : Theme.GreyBrush, request.Reason);
+        var reason = NotchUi.Text(12, critical ? Theme.CriticalBrush : Theme.MutedBrush, request.Reason);
         reason.TextWrapping = TextWrapping.Wrap;
         reason.TextTrimming = TextTrimming.None;
         reason.Margin = new Thickness(0, 8, 0, 8);
-        var command = Selectable(request.Command, 12, Theme.WhiteBrush, MonoFont); // tutto, mai tagliato: si conferma ciò che si legge
+        var command = Selectable(request.Command, 12, Theme.InkBrush, MonoFont); // tutto, mai tagliato: si conferma ciò che si legge
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
         buttons.Children.Add(DevRows.Button("ANNULLA", () => answer(false)));
@@ -484,7 +481,7 @@ public sealed class AssistantWindow : Window, IAssistantView
             Child = stack,
             BorderBrush = accent,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(16),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(14),
             Margin = new Thickness(0, 8, 0, 8),
         };
@@ -502,7 +499,7 @@ public sealed class AssistantWindow : Window, IAssistantView
         void Show(bool armed)
         {
             label!.Text = armed ? "CONFERMI? CLICCA ANCORA" : "ESEGUI";
-            label.Foreground = armed ? Theme.RedBrush : Theme.WhiteBrush;
+            label.Foreground = armed ? Theme.CriticalBrush : Theme.InkBrush;
         }
 
         timer.Tick += (_, _) =>

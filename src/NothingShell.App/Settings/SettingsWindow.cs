@@ -8,6 +8,7 @@ using System.Windows.Shapes;
 using NothingShell.App.Rendering;
 using NothingShell.Core.Brain;
 using NothingShell.Core.Connectors;
+using NothingShell.Core.Design;
 using NothingShell.Core.Widgets;
 using NothingShell.Core.DotMatrix;
 using NothingShell.Core.Notch;
@@ -29,6 +30,9 @@ public interface IShellSettingsActions
     bool MailInNotch { get; set; }
 
     bool AccessAnimations { get; set; }
+
+    /// <summary>Tema, colori e vetro (docs/02-design-system.md): si applicano subito a tutta la shell.</summary>
+    AppearanceSettings Appearance { get; set; }
 
     string NotificationAccessText { get; }
 
@@ -173,6 +177,9 @@ public interface IShellSettingsActions
     /// <summary>Le scorciatoie imparate, senza quelle di serie.</summary>
     IReadOnlyList<Shortcut> LearnedShortcuts { get; }
 
+    /// <summary>Le scorciatoie di serie ancora valide, per argomento.</summary>
+    IReadOnlyList<BuiltInSection> BuiltInShortcuts { get; }
+
     /// <summary>True se il comando è nell'elenco dei comandi critici dell'utente.</summary>
     bool IsUserCritical(string command);
 
@@ -211,6 +218,7 @@ public interface IShellSettingsActions
 public enum SettingsPage
 {
     General,
+    Appearance,
     Notch,
     Phone,
     Mail,
@@ -229,7 +237,7 @@ public enum SettingsPage
 /// Impostazioni in stile Nothing (docs/07-settings-plugins.md): menù laterale con le pagine, ogni pagina fatta di
 /// schede. Ogni modifica si applica subito.
 /// </summary>
-public sealed class SettingsWindow : Window
+public sealed partial class SettingsWindow : Window
 {
     private const double PanelWidth = 1000;
     private const double PanelHeight = 720;
@@ -239,12 +247,13 @@ public sealed class SettingsWindow : Window
     private static readonly (SettingsPage Page, string Title, string Subtitle)[] Pages =
     [
         (SettingsPage.General, "Generale", "Avvio e componenti della shell"),
+        (SettingsPage.Appearance, "Aspetto", "Tema, colori e vetro"),
         (SettingsPage.Notch, "Notch", "Pagine e attività dal vivo"),
         (SettingsPage.Phone, "Telefono", "Chiamate, notifiche e collegamento diretto"),
         (SettingsPage.Mail, "Posta", "Mail nel notch e casella collegata"),
         (SettingsPage.Agenda, "Agenda", "Appuntamenti, calendari e riepilogo"),
         (SettingsPage.Dev, "Sviluppo", "Build, appunti e server locali"),
-        (SettingsPage.Shortcuts, "Scorciatoie imparate", "Frasi diventate comandi nel terminale e nel notch"),
+        (SettingsPage.Shortcuts, "Scorciatoie", "Frasi che diventano comandi: le tue e quelle di serie"),
         (SettingsPage.Agents, "Agenti", "Claude Code e altri agenti al lavoro"),
         (SettingsPage.Connectors, "Connettori", "Dispositivi, servizi e automazioni"),
         (SettingsPage.Access, "Accesso", "Blocco e sblocco"),
@@ -256,8 +265,8 @@ public sealed class SettingsWindow : Window
     private readonly IShellSettingsActions _shell;
     private readonly StackPanel _nav = new();
     private readonly StackPanel _page = new() { Margin = new Thickness(0, 0, 4, 24) };
-    private readonly DotMatrixView _pageTitle = new() { Pitch = 3, HorizontalAlignment = HorizontalAlignment.Left };
-    private readonly TextBlock _pageSubtitle = Label(string.Empty, 12, Theme.GreyBrush);
+    private readonly DotMatrixView _pageTitle = new() { Pitch = 3, TextSize = 28, HorizontalAlignment = HorizontalAlignment.Left };
+    private readonly TextBlock _pageSubtitle = Label(string.Empty, 12, Theme.MutedBrush);
     private readonly ScrollViewer _scroll = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Hidden };
     private Panel _current;
     private SettingsPage _selected = SettingsPage.General;
@@ -272,6 +281,12 @@ public sealed class SettingsWindow : Window
 
     /// <summary>Scorciatoia di cui si sta guardando il dettaglio.</summary>
     private Shortcut? _shortcut;
+
+    /// <summary>Le frasi della scorciatoia di serie aperta; null se è una imparata.</summary>
+    private BuiltInShortcut? _builtIn;
+
+    /// <summary>Dove era l'elenco quando si è aperto un dettaglio: tornando indietro riparte da lì.</summary>
+    private double? _listOffset;
     private string? _libraryCategory;
     private TextBlock? _mailStatus;
     private TextBlock? _calendarStatus;
@@ -322,8 +337,11 @@ public sealed class SettingsWindow : Window
         _shell.CalendarChanged += OnCalendarChanged;
         _shell.Phone.Changed += OnPhoneChanged;
         _shell.BrainChanged += OnBrainChanged;
+        Theme.Changed += OnThemeChanged;
+        GlassBackdrop.Attach(this, (FrameworkElement)Content);
         Closed += (_, _) =>
         {
+            Theme.Changed -= OnThemeChanged;
             _shell.BrainChanged -= OnBrainChanged;
             _shell.Phone.Changed -= OnPhoneChanged;
             _shell.MailAccountChanged -= OnMailAccountChanged;
@@ -335,7 +353,10 @@ public sealed class SettingsWindow : Window
     public void Show(SettingsPage page)
     {
         if (page != _selected)
+        {
             CloseForms();
+            _listOffset = null;
+        }
         _selected = page;
         Rebuild();
         _scroll.ScrollToTop();
@@ -380,10 +401,20 @@ public sealed class SettingsWindow : Window
     public void ShowShortcut(Shortcut shortcut)
     {
         _selected = SettingsPage.Shortcuts;
+        _listOffset = _scroll.VerticalOffset;
         CloseForms();
         _shortcut = shortcut ?? throw new ArgumentNullException(nameof(shortcut));
         Rebuild();
         _scroll.ScrollToTop();
+    }
+
+    /// <summary>Dettaglio di una scorciatoia di serie (anche per le istantanee).</summary>
+    public void ShowBuiltIn(BuiltInShortcut builtIn)
+    {
+        ArgumentNullException.ThrowIfNull(builtIn);
+        ShowShortcut(builtIn.Shortcut);
+        _builtIn = builtIn;
+        Rebuild();
     }
 
     private void CloseForms()
@@ -393,6 +424,7 @@ public sealed class SettingsWindow : Window
         _duplicate = false;
         _llmDraft = null;
         _shortcut = null;
+        _builtIn = null;
     }
 
     /// <summary>Ridisegna il menù e la pagina aperta (dopo una ricarica dei plugin cambiano i widget e gli errori).</summary>
@@ -406,13 +438,21 @@ public sealed class SettingsWindow : Window
         _phoneStatus = null;
 
         var (_, title, subtitle) = Pages.First(p => p.Page == _selected);
-        _pageTitle.Dots = DotText.Render(title.ToUpperInvariant());
+        _pageTitle.Dots = DotText.Render(title);
         _pageSubtitle.Text = subtitle;
+        if (_shortcut is null && _listOffset is { } offset)
+        {
+            _listOffset = null;
+            Dispatcher.BeginInvoke(() => _scroll.ScrollToVerticalOffset(offset), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
 
         switch (_selected)
         {
             case SettingsPage.General:
                 GeneralPage();
+                break;
+            case SettingsPage.Appearance:
+                AppearancePage();
                 break;
             case SettingsPage.Notch:
                 NotchPage();
@@ -472,14 +512,14 @@ public sealed class SettingsWindow : Window
         ToggleRow("Tasto Win apre il launcher", "Le combinazioni Win+… restano a Windows", _shell.UseWinKey, v => _shell.UseWinKey = v);
 
         Section("SCORCIATOIE");
-        Note("Ctrl+Win spegne e riaccende la shell. Ctrl+Tab passa alla pagina successiva delle impostazioni, Esc chiude.", Theme.GreyBrush);
+        Note("Ctrl+Win spegne e riaccende la shell. Ctrl+Tab passa alla pagina successiva delle impostazioni, Esc chiude.", Theme.MutedBrush);
     }
 
     private void NotchPage()
     {
         Section("PAGINE");
         Note("Swipe sul notch aperto (touchpad, rotellina o trascinamento) per Agenda, Posta, Telefono, Lavoro, Agenti, Server, " +
-             "Dispositivi, Appunti, Timer e Sistema. Le pagine si accendono e spengono con le loro funzioni.", Theme.GreyBrush);
+             "Dispositivi, Appunti, Timer e Sistema. Le pagine si accendono e spengono con le loro funzioni.", Theme.MutedBrush);
 
         Section("ATTIVITÀ DAL VIVO");
         ActivityRow(LiveActivity.Volume, "Volume", "Con i tasti del volume, al posto dell'indicatore di Windows");
@@ -497,19 +537,59 @@ public sealed class SettingsWindow : Window
             Rebuild();
     });
 
-    /// <summary>Le scorciatoie imparate, prima le più recenti (docs/15-comandi-cervello.md).</summary>
+    /// <summary>Due elenchi separati: le imparate, prima le più recenti, e quelle di serie per argomento (docs/15-comandi-cervello.md).</summary>
     private void ShortcutsPage()
     {
         var learned = _shell.LearnedShortcuts;
-        Section("ELENCO");
+        Section("Imparate da te", learned.Count > 0 ? learned.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) : null);
         if (learned.Count == 0)
-        {
-            Note("Ancora nessuna. Si impara ciò che confermi nel terminale, o che chiedi di ricordare nel notch: da lì in poi non serve più il modello.", Theme.GreyBrush);
-            return;
-        }
-        Note("Si impara solo ciò che hai confermato e che è riuscito. Le scorciatoie di serie non sono qui. Apri una scorciatoia per vedere cosa fa.", Theme.GreyBrush);
+            Note("Ancora nessuna. Si impara ciò che confermi nel terminale, o che chiedi di ricordare nel notch: da lì in poi non serve più il modello.", Theme.MutedBrush);
+        else
+            Note("Si impara solo ciò che hai confermato e che è riuscito. Apri una scorciatoia per vedere cosa fa.", Theme.MutedBrush);
         foreach (var shortcut in learned)
             ShortcutRow(shortcut);
+
+        var builtIn = _shell.BuiltInShortcuts;
+        var commands = builtIn.Sum(s => s.Commands.Count);
+        var phrases = builtIn.Sum(s => s.Commands.Sum(c => c.Phrases.Count));
+        Section("Di serie", $"{commands} comandi · {phrases} frasi");
+        Note("Ci sono dal primo giorno, in italiano e in inglese, e leggono soltanto: non cambiano nulla sul PC. Vale qualsiasi frase del comando, " +
+             "anche con parole in più come \"mostrami\" o \"quanta\".", Theme.MutedBrush);
+        foreach (var section in builtIn)
+        {
+            Section(section.Title, section.Commands.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            foreach (var command in section.Commands)
+                BuiltInRow(command);
+        }
+    }
+
+    /// <summary>Riga di un comando di serie: tutte le frasi che lo chiedono e il comando; un clic apre il dettaglio.</summary>
+    private void BuiltInRow(BuiltInShortcut builtIn)
+    {
+        var row = new Grid { Margin = new Thickness(0, 8, 0, 8), Background = Brushes.Transparent, Cursor = Cursors.Hand };
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 40, 0) };
+        var phrases = Label(string.Join("  ·  ", builtIn.Phrases), 14, Theme.InkBrush);
+        phrases.TextWrapping = TextWrapping.Wrap;
+        text.Children.Add(phrases);
+        var command = Label(builtIn.Command, 12, Theme.MutedBrush);
+        command.Margin = new Thickness(0, 3, 0, 0);
+        command.TextTrimming = TextTrimming.CharacterEllipsis;
+        text.Children.Add(command);
+        row.Children.Add(text);
+        var critical = _shell.IsUserCritical(builtIn.Command);
+        var end = Label(critical ? "CRITICA  ›" : "›", critical ? 10 : 14, critical ? Theme.CriticalBrush : Theme.MutedBrush);
+        end.HorizontalAlignment = HorizontalAlignment.Right;
+        end.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(end);
+        row.MouseEnter += (_, _) => command.Foreground = Theme.InkBrush;
+        row.MouseLeave += (_, _) => command.Foreground = Theme.MutedBrush;
+        row.MouseLeftButtonDown += (_, e) => e.Handled = true;
+        row.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            ShowBuiltIn(builtIn);
+        };
+        AddRow(row);
     }
 
     /// <summary>Riga dell'elenco: la frase e il comando; un clic apre il dettaglio.</summary>
@@ -517,21 +597,21 @@ public sealed class SettingsWindow : Window
     {
         var row = new Grid { Margin = new Thickness(0, 8, 0, 8), Background = Brushes.Transparent, Cursor = Cursors.Hand };
         var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 90, 0) };
-        var phrase = Label(shortcut.Phrase, 14, Theme.WhiteBrush);
+        var phrase = Label(shortcut.Phrase, 14, Theme.InkBrush);
         phrase.TextTrimming = TextTrimming.CharacterEllipsis;
         text.Children.Add(phrase);
-        var command = Label(shortcut.Command, 12, Theme.GreyBrush);
+        var command = Label(shortcut.Command, 12, Theme.MutedBrush);
         command.Margin = new Thickness(0, 3, 0, 0);
         command.TextTrimming = TextTrimming.CharacterEllipsis;
         text.Children.Add(command);
         row.Children.Add(text);
         var critical = CommandSafety.Reason(shortcut.Command) is not null || _shell.IsUserCritical(shortcut.Command);
-        var end = Label(critical ? "CRITICA  ›" : "›", critical ? 10 : 14, critical ? Theme.RedBrush : Theme.GreyBrush);
+        var end = Label(critical ? "CRITICA  ›" : "›", critical ? 10 : 14, critical ? Theme.CriticalBrush : Theme.MutedBrush);
         end.HorizontalAlignment = HorizontalAlignment.Right;
         end.VerticalAlignment = VerticalAlignment.Center;
         row.Children.Add(end);
-        row.MouseEnter += (_, _) => command.Foreground = Theme.WhiteBrush;
-        row.MouseLeave += (_, _) => command.Foreground = Theme.GreyBrush;
+        row.MouseEnter += (_, _) => command.Foreground = Theme.InkBrush;
+        row.MouseLeave += (_, _) => command.Foreground = Theme.MutedBrush;
         row.MouseLeftButtonDown += (_, e) => e.Handled = true;
         row.MouseLeftButtonUp += (_, e) =>
         {
@@ -544,7 +624,7 @@ public sealed class SettingsWindow : Window
     /// <summary>Cosa fa una scorciatoia, da quando c'è, e il pulsante che la mette fra i comandi critici.</summary>
     private void ShortcutDetail(Shortcut shortcut)
     {
-        var back = Label("‹  SCORCIATOIE", 11, Theme.GreyBrush);
+        var back = Label("‹  SCORCIATOIE", 11, Theme.MutedBrush);
         back.Cursor = Cursors.Hand;
         back.Margin = new Thickness(0, 0, 0, 14);
         back.MouseLeftButtonDown += (_, e) => e.Handled = true;
@@ -557,17 +637,26 @@ public sealed class SettingsWindow : Window
         _page.Children.Add(back);
 
         Section("COSA FA");
-        CardTitle(shortcut.Phrase, shortcut.IsTemplate ? "CON UN VALORE" : null, Theme.GreyBrush);
+        CardTitle(_builtIn?.Phrases[0] ?? shortcut.Phrase, _builtIn is not null ? "DI SERIE" : shortcut.IsTemplate ? "CON UN VALORE" : null, Theme.MutedBrush);
+        if (_builtIn is { Phrases.Count: > 1 } many)
+            DetailRow("Si chiede anche con", string.Join("  ·  ", many.Phrases.Skip(1)));
         DetailRow("Descrizione", CommandExplainer.Describe(shortcut.Command));
         DetailRow("Comando", shortcut.Command);
         DetailRow("Quando parte", CommandExplainer.Effect(shortcut));
         if (shortcut.IsTemplate)
-            Note($"{ShortcutMemory.Slot} è la parola che cambia nella frase.", Theme.GreyBrush);
+            Note($"{ShortcutMemory.Slot} è la parola che cambia nella frase.", Theme.MutedBrush);
 
         Section("STORIA");
-        DetailRow("Creata", shortcut.Created is { } created ? Moment(created) : "Non registrata: è stata imparata prima che si salvasse la data");
-        DetailRow("Ultimo uso", Moment(shortcut.LastUsed));
-        var runs = shortcut.Successes == 1 ? "1 riuscita" : $"{shortcut.Successes} riuscite";
+        DetailRow("Creata", _builtIn is not null ? "Di serie: c'è dal primo giorno"
+            : shortcut.Created is { } created ? Moment(created) : "Non registrata: è stata imparata prima che si salvasse la data");
+        DetailRow("Ultimo uso", _builtIn is { WasUsed: false } ? "Mai usata" : Moment(shortcut.LastUsed));
+        var successes = _builtIn?.Uses ?? shortcut.Successes;
+        var runs = successes switch
+        {
+            0 => "Ancora nessuna",
+            1 => "1 riuscita",
+            _ => $"{successes} riuscite",
+        };
         DetailRow("Esecuzioni", shortcut.Failures switch
         {
             0 => runs,
@@ -576,7 +665,7 @@ public sealed class SettingsWindow : Window
         });
 
         Section("COMANDI CRITICI");
-        var result = Note(string.Empty, Theme.RedBrush);
+        var result = Note(string.Empty, Theme.CriticalBrush);
         result.Visibility = Visibility.Collapsed;
         void Set(bool critical)
         {
@@ -590,17 +679,17 @@ public sealed class SettingsWindow : Window
         }
         if (_shell.IsUserCritical(shortcut.Command))
         {
-            Note("È nel tuo elenco: parte solo dopo una conferma esplicita, due clic nel notch e scrivere SI nel terminale.", Theme.WhiteBrush);
+            Note("È nel tuo elenco: parte solo dopo una conferma esplicita, due clic nel notch e scrivere SI nel terminale.", Theme.InkBrush);
             ButtonRow(("TOGLI DALL'ELENCO", () => Set(false)));
         }
         else if (CommandSafety.Reason(shortcut.Command) is { } reason)
         {
-            Note($"È già critico: {reason}.", Theme.WhiteBrush);
+            Note($"È già critico: {reason}.", Theme.InkBrush);
         }
         else
         {
             Note("Da subito, questo comando chiederà una conferma esplicita: due clic nel notch, scrivere SI quando il terminale lo propone. " +
-                 "Scritto a mano nel terminale parte comunque com'è. Vale per il comando esatto, non per quelli che gli somigliano.", Theme.GreyBrush);
+                 "Scritto a mano nel terminale parte comunque com'è. Vale per il comando esatto, non per quelli che gli somigliano.", Theme.MutedBrush);
             ButtonRow(primary: true, ("AGGIUNGI AI COMANDI CRITICI", () => Set(true)));
         }
     }
@@ -609,8 +698,8 @@ public sealed class SettingsWindow : Window
     private void DetailRow(string label, string value)
     {
         var row = new StackPanel { Margin = new Thickness(0, 8, 0, 8) };
-        row.Children.Add(Label(label, 11, Theme.GreyBrush));
-        var text = Label(value, 14, Theme.WhiteBrush);
+        row.Children.Add(Label(label, 11, Theme.MutedBrush));
+        var text = Label(value, 14, Theme.InkBrush);
         text.Margin = new Thickness(0, 3, 0, 0);
         text.TextWrapping = TextWrapping.Wrap;
         row.Children.Add(text);
@@ -625,8 +714,8 @@ public sealed class SettingsWindow : Window
     {
         Section("COMANDI E CERVELLO");
         Note("Il terminale Nothing è PowerShell vero: ogni comando parte com'è. Le frasi che PowerShell non capisce passano dalle " +
-             "scorciatoie imparate e poi dal modello locale; nel launcher si scrive > e il comando o la frase.", Theme.GreyBrush);
-        Note($"{_shell.BrainStatus} · {_shell.BrainLearned} scorciatoie imparate", Theme.WhiteBrush);
+             "scorciatoie imparate e poi dal modello locale; nel launcher si scrive > e il comando o la frase.", Theme.MutedBrush);
+        Note($"{_shell.BrainStatus} · {_shell.BrainLearned} scorciatoie imparate", Theme.InkBrush);
         ButtonRow(("APRI TERMINALE", _shell.OpenTerminal), ("VEDI LE SCORCIATOIE", () => Show(SettingsPage.Shortcuts)),
             _shell.BrainInstalling ? ("ANNULLA DOWNLOAD", _shell.CancelBrainInstall)
             : _shell.BrainModelInstalled ? ("DIMENTICA LE SCORCIATOIE", _shell.ClearBrainMemory)
@@ -634,8 +723,8 @@ public sealed class SettingsWindow : Window
 
         Section("ASSISTENTE NEL NOTCH");
         Note("Il pulsante in basso a destra nel notch apre una casella: scrivi cosa ti serve e i comandi di sola lettura partono da " +
-             "soli, fino alla risposta. Tutto resta su questo PC.", Theme.GreyBrush);
-        Note(_shell.AssistantStatus, Theme.WhiteBrush);
+             "soli, fino alla risposta. Tutto resta su questo PC.", Theme.MutedBrush);
+        Note(_shell.AssistantStatus, Theme.InkBrush);
         static Func<Task> Now(Action action) => () =>
         {
             action();
@@ -650,11 +739,11 @@ public sealed class SettingsWindow : Window
 
         Section("COMANDI CRITICI");
         Note("Partono solo dopo una conferma esplicita, anche se sono scorciatoie imparate: nel notch due clic, nel terminale bisogna scrivere SI. " +
-             "Un comando scritto a mano nel terminale resta tuo e parte com'è. Quello che non è sola lettura verificata chiede comunque un clic.", Theme.GreyBrush);
+             "Un comando scritto a mano nel terminale resta tuo e parte com'è. Quello che non è sola lettura verificata chiede comunque un clic.", Theme.MutedBrush);
         foreach (var group in CriticalCommands.All)
         {
-            Note(group.Reason, Theme.WhiteBrush);
-            Note(string.Join("  ·  ", group.Commands), Theme.GreyBrush);
+            Note(group.Reason, Theme.InkBrush);
+            Note(string.Join("  ·  ", group.Commands), Theme.MutedBrush);
         }
         ButtonRow(("AGGIUNGI I TUOI", _shell.OpenCriticalCommands));
     }
@@ -664,10 +753,10 @@ public sealed class SettingsWindow : Window
     {
         Section("COMPUTER REMOTI");
         Note("Nel notch, sotto la data: \"collegati al computer di Luca\". Nel file ci sono solo nome, indirizzo e utente; le " +
-             "password restano nel Gestore credenziali di Windows, dove le salva anche Desktop remoto.", Theme.GreyBrush);
+             "password restano nel Gestore credenziali di Windows, dove le salva anche Desktop remoto.", Theme.MutedBrush);
         foreach (var computer in _shell.RemoteComputers)
         {
-            Note($"{computer.Name} · {computer.Address}{(computer.UserName is { } user ? $" · {user}" : string.Empty)}", Theme.WhiteBrush);
+            Note($"{computer.Name} · {computer.Address}{(computer.UserName is { } user ? $" · {user}" : string.Empty)}", Theme.InkBrush);
             ButtonRow(("MODIFICA", () => _shell.EditRemoteComputer(computer)), ("RIMUOVI", () => _shell.RemoveRemoteComputer(computer)));
         }
         ButtonRow(("AGGIUNGI COMPUTER", _shell.AddRemoteComputer));
@@ -693,10 +782,10 @@ public sealed class SettingsWindow : Window
         var profileLine = $"Import-Module '{module}'; Enable-NothingShellPrompt";
         Note("Nel terminale: ns seguito dal comando (ns dotnet build, ns npm test) manda inizio e fine al notch. " +
              "Con l'hook del prompt arrivano anche i comandi lunghi (30 s o più) e i git push. Aggiungi al profilo " +
-             "di PowerShell ($PROFILE):", Theme.GreyBrush);
+             "di PowerShell ($PROFILE):", Theme.MutedBrush);
         Code(profileLine);
         Note("Altre shell: NothingShell.exe --task '{\"event\":\"done\",\"title\":\"make\",\"seconds\":40,\"exitCode\":0}'. " +
-             "Editor per gli errori: \"editor\" in settings.json, altrimenti VS Code o Cursor dal PATH.", Theme.GreyBrush);
+             "Editor per gli errori: \"editor\" in settings.json, altrimenti VS Code o Cursor dal PATH.", Theme.MutedBrush);
         ButtonRow(("COPIA RIGA DEL PROFILO", () => Clipboard.SetDataObject(profileLine, copy: true)));
     }
 
@@ -708,14 +797,14 @@ public sealed class SettingsWindow : Window
 
         Section("CLAUDE CODE");
         Note("Compare da solo: Nothing Shell legge solo token, modello e stato dai transcript in ~/.claude/projects, mai il " +
-             "testo dei messaggi. Il costo è quello del listino dell'API: con un abbonamento è una stima, non quanto paghi.", Theme.GreyBrush);
+             "testo dei messaggi. Il costo è quello del listino dell'API: con un abbonamento è una stima, non quanto paghi.", Theme.MutedBrush);
 
         Section("ALTRI AGENTI");
-        Note("Mandano i loro totali dalla riga di comando, con \"state\":\"done\" alla fine:", Theme.GreyBrush);
+        Note("Mandano i loro totali dalla riga di comando, con \"state\":\"done\" alla fine:", Theme.MutedBrush);
         Code("NothingShell.exe --task '{\"event\":\"agent\",\"id\":\"mio-agente\",\"title\":\"Report\",\"model\":\"claude-sonnet-5-5\"," +
              "\"input\":12000,\"output\":800,\"state\":\"working\"}'");
         Note("Per dare agli agenti occhi su casa, server e servizi usa i connettori: valori e avvisi finiscono nella pagina " +
-             "Dispositivi del notch.", Theme.GreyBrush);
+             "Dispositivi del notch.", Theme.MutedBrush);
         ButtonRow(("APRI CONNETTORI", () => Show(SettingsPage.Connectors)));
     }
 
@@ -737,18 +826,18 @@ public sealed class SettingsWindow : Window
         }
         Heading(results.Count == 0 ? "ATTIVI" : $"ATTIVI · {results.Count}");
         if (results.Count == 0)
-            Card(() => Note("Nessun connettore: scegline uno dalla libreria qui sotto.", Theme.GreyBrush));
+            Card(() => Note("Nessun connettore: scegline uno dalla libreria qui sotto.", Theme.MutedBrush));
         foreach (var result in results)
             Card(() => ConnectorCard(result));
 
         Heading("LIBRERIA");
         Note("Connettori pronti: scrivi pochi dati e partono subito. Leggere non cambia nulla; quelli che eseguono comandi o hanno " +
-             "pulsanti (accendi, riavvia) chiedono il tuo permesso.", Theme.GreyBrush);
+             "pulsanti (accendi, riavvia) chiedono il tuo permesso.", Theme.MutedBrush);
         var chips = new WrapPanel { Margin = new Thickness(0, 10, 0, 6) };
         foreach (var category in new string?[] { null }.Concat(ConnectorCatalog.Categories))
         {
             var selected = category == _libraryCategory;
-            var chip = Chip(category?.ToUpperInvariant() ?? "TUTTI", selected);
+            var chip = Chip(category ?? "Tutti", selected);
             chip.MouseLeftButtonUp += (_, e) =>
             {
                 e.Handled = true;
@@ -769,7 +858,7 @@ public sealed class SettingsWindow : Window
         Card(() =>
         {
             Note("Ogni connettore è un file .json nella cartella dei connettori: si può scrivere a mano per casi particolari " +
-                 "(formato in docs/14-agenti-connettori.md). Gli esempi copiati vanno in connectors\\esempi, dove non partono.", Theme.GreyBrush);
+                 "(formato in docs/14-agenti-connettori.md). Gli esempi copiati vanno in connectors\\esempi, dove non partono.", Theme.MutedBrush);
             ButtonRow(
                 ("APRI CARTELLA", () => OpenFolder(_shell.ConnectorFolder)),
                 ("COPIA GLI ESEMPI", _shell.CopyConnectorExamples),
@@ -786,8 +875,8 @@ public sealed class SettingsWindow : Window
     {
         if (result.Manifest is not { } m)
         {
-            CardTitle(result.FileName, "NON VALIDO", Theme.RedBrush);
-            Note(result.Error ?? string.Empty, Theme.RedBrush);
+            CardTitle(result.FileName, "NON VALIDO", Theme.CriticalBrush);
+            Note(result.Error ?? string.Empty, Theme.CriticalBrush);
             ButtonRow(("APRI CARTELLA", () => OpenFolder(_shell.ConnectorFolder)));
             return;
         }
@@ -802,12 +891,12 @@ public sealed class SettingsWindow : Window
             _ => "HTTP",
         };
         var granted = _shell.IsConnectorGranted(m);
-        CardTitle(m.Name, kind, Theme.GreyBrush);
+        CardTitle(m.Name, kind, Theme.MutedBrush);
         var values = m.Readings.Count == 0 ? null : string.Join(", ", m.Readings.Select(r => r.Label ?? r.Source ?? r.Value).Where(l => l is not null).Take(5));
         var origin = m.Template is { } t && ConnectorCatalog.Find(t) is { } template ? template.Name : null;
-        Note(string.Join(" · ", new[] { origin, values, $"ogni {FormatRefresh(m.Refresh)}" }.Where(p => p is not null)), Theme.GreyBrush);
+        Note(string.Join(" · ", new[] { origin, values, $"ogni {FormatRefresh(m.Refresh)}" }.Where(p => p is not null)), Theme.MutedBrush);
         if (m.Actions.Count > 0)
-            Note($"Pulsanti: {string.Join(", ", m.Actions.Select(a => a.Label))}", Theme.GreyBrush);
+            Note($"Pulsanti: {string.Join(", ", m.Actions.Select(a => a.Label))}", Theme.MutedBrush);
 
         if (m.Kind is ConnectorKind.Http or ConnectorKind.Command or ConnectorKind.File)
             LlmCard(m);
@@ -862,18 +951,18 @@ public sealed class SettingsWindow : Window
             complete &= c.TodayEur is not null && c.MonthEur is not null;
             var over = (m.Llm!.DailyBudget is { } d && c.TodayEur > d) || (m.Llm.MonthlyBudget is { } mb && c.MonthEur > mb);
             var row = Note($"{m.Name}   ·   oggi € {LlmLedger.FormatEuro(c.TodayEur)}{Budget(m.Llm.DailyBudget)}   ·   mese € {LlmLedger.FormatEuro(c.MonthEur)}{Budget(m.Llm.MonthlyBudget)}" +
-                           $"   ·   {c.Today.Calls} chiamate oggi", over ? Theme.RedBrush : Theme.WhiteBrush);
+                           $"   ·   {c.Today.Calls} chiamate oggi", over ? Theme.CriticalBrush : Theme.InkBrush);
             row.FontSize = 13;
         }
         if (tracked.Length > 1)
         {
-            var total = Note($"In tutto   ·   oggi € {LlmLedger.FormatEuro(today)}   ·   mese € {LlmLedger.FormatEuro(month)}{(complete ? string.Empty : "  (manca il cambio)")}", Theme.WhiteBrush);
+            var total = Note($"In tutto   ·   oggi € {LlmLedger.FormatEuro(today)}   ·   mese € {LlmLedger.FormatEuro(month)}{(complete ? string.Empty : "  (manca il cambio)")}", Theme.InkBrush);
             total.FontWeight = FontWeights.SemiBold;
         }
         Note(_shell.UsdToEur is { } rate
                 ? $"Dollari convertiti col cambio BCE: 1 $ = {rate.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture)} €. I valori compaiono anche nella pagina Dispositivi e nei widget."
                 : "Il cambio della BCE arriva al primo giro con costi in dollari; fino ad allora quei costi restano in sospeso.",
-            Theme.GreyBrush);
+            Theme.MutedBrush);
         ButtonRow(("ESPORTA CSV", _shell.ExportConnectorCosts));
     }
 
@@ -898,13 +987,13 @@ public sealed class SettingsWindow : Window
              $" · {c.Today.Calls} chiamate, {NothingShell.Core.Agents.AgentFormat.Tokens(c.Today.Input + c.Today.CacheRead + c.Today.CacheWrite)} in, " +
              $"{NothingShell.Core.Agents.AgentFormat.Tokens(c.Today.Output)} out oggi" +
              (c.Today.UnpricedTokens > 0 ? $" · {NothingShell.Core.Agents.AgentFormat.Tokens(c.Today.UnpricedTokens)} token senza prezzo (aggiungi i prezzi)" : string.Empty),
-            over ? Theme.RedBrush : Theme.WhiteBrush);
+            over ? Theme.CriticalBrush : Theme.InkBrush);
         foreach (var call in _shell.ConnectorCalls(m).Take(4))
         {
             var euro = call.Priced ? (call.Usd == 0 ? call.Eur : _shell.UsdToEur is { } rate ? call.Eur + call.Usd * rate : (double?)null) : null;
             Note($"{call.At.ToLocalTime():dd/MM HH:mm} · {(call.Model.Length > 0 ? NothingShell.Core.Agents.AgentPricing.ShortName(call.Model) is { Length: > 0 } s ? s : call.Model : "modello?")}" +
                  $"{(call.Calls > 1 ? $" · {call.Calls} chiamate" : string.Empty)} · IN {NothingShell.Core.Agents.AgentFormat.Tokens(call.Input)} · OUT {NothingShell.Core.Agents.AgentFormat.Tokens(call.Output)}" +
-                 $" · € {(call.Priced ? LlmLedger.FormatEuro(euro) : "senza prezzo")}", Theme.GreyBrush);
+                 $" · € {(call.Priced ? LlmLedger.FormatEuro(euro) : "senza prezzo")}", Theme.MutedBrush);
         }
         ButtonRow(("COSTI LLM", () => EditConnectorCosts(m)));
         ConfirmButtonRow("AZZERA I COSTI", "CONFERMA AZZERAMENTO", () =>
@@ -920,7 +1009,7 @@ public sealed class SettingsWindow : Window
     /// </summary>
     private void LlmForm(ConnectorManifest m)
     {
-        var back = Label("‹  CONNETTORI", 11, Theme.GreyBrush);
+        var back = Label("‹  CONNETTORI", 11, Theme.MutedBrush);
         back.Cursor = Cursors.Hand;
         back.Margin = new Thickness(0, 0, 0, 14);
         back.MouseLeftButtonDown += (_, e) => e.Handled = true;
@@ -934,11 +1023,11 @@ public sealed class SettingsWindow : Window
 
         var spec = m.Llm ?? new LlmSpec { Model = "{model}", Input = "{usage.input_tokens}", Output = "{usage.output_tokens}" };
         Section("COSTI LLM");
-        CardTitle(m.Name, "EURO", Theme.GreyBrush);
+        CardTitle(m.Name, "EURO", Theme.MutedBrush);
         Note("Il sito deve rispondere (o il comando stampare) un JSON con l'uso del modello. Scrivi dove sono i valori come nelle " +
              "letture: {usage.input_tokens}. Con le singole chiamate ognuna si conta una volta (per id); con i totali si conta " +
              "quanto sono cresciuti da un giro all'altro. Il costo viene dal sito, dai prezzi qui sotto o dal listino di Anthropic " +
-             "per i modelli Claude, in dollari convertiti col cambio BCE del giorno.", Theme.GreyBrush);
+             "per i modelli Claude, in dollari convertiti col cambio BCE del giorno.", Theme.MutedBrush);
 
         var calls = spec.Mode == LlmMode.Calls;
         ToggleRow("Singole chiamate", "Il sito dà un elenco di chiamate, ognuna con un id. Spento: contatori totali", calls, v => calls = v);
@@ -969,7 +1058,7 @@ public sealed class SettingsWindow : Window
         ToggleRow("Conta anche la prima lettura", "Per contatori che ripartono ogni giorno (Admin API di Anthropic). Spento: la prima lettura fa da punto di partenza",
             countFirst, v => countFirst = v);
 
-        var result = Note(string.Empty, Theme.RedBrush);
+        var result = Note(string.Empty, Theme.CriticalBrush);
         result.Visibility = Visibility.Collapsed;
         ButtonRow(primary: true,
             ("SALVA", () =>
@@ -1021,24 +1110,24 @@ public sealed class SettingsWindow : Window
     {
         var stack = new StackPanel();
         var top = new Grid();
-        top.Children.Add(Label(template.Category.ToUpperInvariant(), 10, Theme.GreyBrush));
+        top.Children.Add(Label(template.Category, 12, Theme.MutedBrush));
         if (template.Permission is not null)
         {
-            var tag = Label("PERMESSO", 10, Theme.GreyBrush);
+            var tag = Label("PERMESSO", 10, Theme.MutedBrush);
             tag.HorizontalAlignment = HorizontalAlignment.Right;
             tag.ToolTip = template.Permission;
             top.Children.Add(tag);
         }
         stack.Children.Add(top);
-        var name = Label(template.Name, 15, Theme.WhiteBrush);
+        var name = Label(template.Name, 15, Theme.InkBrush);
         name.FontWeight = FontWeights.SemiBold;
         name.Margin = new Thickness(0, 6, 0, 4);
         stack.Children.Add(name);
-        var description = Label(template.Description, 12, Theme.GreyBrush);
+        var description = Label(template.Description, 12, Theme.MutedBrush);
         description.TextWrapping = TextWrapping.Wrap;
         description.Height = 34;
         stack.Children.Add(description);
-        var footer = Label(active > 0 ? $"+ AGGIUNGI ANCORA · {active} ATTIVO" : "+ AGGIUNGI", 11, active > 0 ? Theme.GreyBrush : Theme.RedBrush);
+        var footer = Label(active > 0 ? $"+ AGGIUNGI ANCORA · {active} ATTIVO" : "+ AGGIUNGI", 11, active > 0 ? Theme.MutedBrush : Theme.AccentBrush);
         footer.Margin = new Thickness(0, 10, 0, 0);
         stack.Children.Add(footer);
 
@@ -1047,13 +1136,13 @@ public sealed class SettingsWindow : Window
             Background = Theme.SurfaceBrush,
             BorderBrush = Theme.OutlineBrush,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
+            CornerRadius = new CornerRadius(8),
             Padding = new Thickness(16, 14, 16, 14),
             Margin = new Thickness(0, 0, 10, 10),
             Cursor = Cursors.Hand,
             Child = stack,
         };
-        tile.MouseEnter += (_, _) => tile.BorderBrush = Theme.GreyBrush;
+        tile.MouseEnter += (_, _) => tile.BorderBrush = Theme.MutedBrush;
         tile.MouseLeave += (_, _) => tile.BorderBrush = Theme.OutlineBrush;
         tile.MouseLeftButtonDown += (_, e) => e.Handled = true;
         tile.MouseLeftButtonUp += (_, e) =>
@@ -1067,7 +1156,7 @@ public sealed class SettingsWindow : Window
     /// <summary>Modulo di un connettore della libreria: nome, i pochi campi che servono, permesso e Attiva.</summary>
     private void ConnectorForm(ConnectorTemplate template)
     {
-        var back = Label("‹  LIBRERIA", 11, Theme.GreyBrush);
+        var back = Label("‹  LIBRERIA", 11, Theme.MutedBrush);
         back.Cursor = Cursors.Hand;
         back.Margin = new Thickness(0, 0, 0, 14);
         back.MouseLeftButtonDown += (_, e) => e.Handled = true;
@@ -1081,11 +1170,11 @@ public sealed class SettingsWindow : Window
 
         var source = _source;
         var editing = source is not null && !_duplicate;
-        Section(template.Category.ToUpperInvariant());
-        CardTitle(template.Name, editing ? "MODIFICA" : _duplicate ? "DUPLICA" : null, Theme.GreyBrush);
-        Note(template.Description, Theme.GreyBrush);
+        Section(template.Category);
+        CardTitle(template.Name, editing ? "MODIFICA" : _duplicate ? "DUPLICA" : null, Theme.MutedBrush);
+        Note(template.Description, Theme.MutedBrush);
         if (_duplicate)
-            Note("Una copia indipendente: cambia indirizzo, server o processo e ottieni un altro connettore, con il suo widget e i suoi costi.", Theme.GreyBrush);
+            Note("Una copia indipendente: cambia indirizzo, server o processo e ottieni un altro connettore, con il suo widget e i suoi costi.", Theme.MutedBrush);
         var name = Field("Nome nella pagina Dispositivi", source is null ? template.Name : editing ? source.Name : source.Name + " 2");
         var inputs = new List<(ConnectorField Field, Func<string> Read)>();
         foreach (var field in template.Fields)
@@ -1112,14 +1201,14 @@ public sealed class SettingsWindow : Window
             Section("PERMESSO");
             ToggleRow("Consenti comandi e azioni", permission, grant, v => grant = v);
             Note("Il permesso vale per il connettore com'è adesso: se il file cambia va dato di nuovo. I pulsanti delicati " +
-                 "(riavvia, termina) chiedono un secondo clic.", Theme.GreyBrush);
+                 "(riavvia, termina) chiedono un secondo clic.", Theme.MutedBrush);
         }
 
         Section(editing ? "SALVA" : "ATTIVA");
         Note(editing ? "Il connettore riparte con i nuovi valori; widget, costi LLM e token restano."
             : "Il connettore compare nella pagina Dispositivi del notch; i valori arrivano al primo aggiornamento. " +
-              "Puoi attivare lo stesso connettore quante volte vuoi: un sito, un server o un processo per volta.", Theme.GreyBrush);
-        var result = Note(string.Empty, Theme.RedBrush);
+              "Puoi attivare lo stesso connettore quante volte vuoi: un sito, un server o un processo per volta.", Theme.MutedBrush);
+        var result = Note(string.Empty, Theme.CriticalBrush);
         result.Visibility = Visibility.Collapsed;
         ButtonRow(primary: true,
             (editing ? "SALVA" : "ATTIVA", () =>
@@ -1148,7 +1237,7 @@ public sealed class SettingsWindow : Window
         ToggleRow("Animazioni di blocco e sblocco", "Card con il tuo account prima e dopo il blocco di Windows",
             _shell.AccessAnimations, v => _shell.AccessAnimations = v);
         Note("Password, PIN e Windows Hello restano a Windows: Nothing Shell anima solo il prima e il dopo. " +
-             "Blocca dal launcher o con NothingShell.exe --lock.", Theme.GreyBrush);
+             "Blocca dal launcher o con NothingShell.exe --lock.", Theme.MutedBrush);
     }
 
     private void WidgetsPage()
@@ -1167,16 +1256,16 @@ public sealed class SettingsWindow : Window
         Section("INSTALLATI");
         var valid = _shell.PluginResults.Where(r => r.Manifest is not null).ToArray();
         if (valid.Length == 0)
-            Note("Nessun plugin installato.", Theme.GreyBrush);
+            Note("Nessun plugin installato.", Theme.MutedBrush);
         foreach (var plugin in valid)
             ToggleRow(plugin.Manifest!.Name, plugin.FolderName, _shell.IsWidgetEnabled(plugin.Manifest.WidgetId),
                 v => _shell.SetWidgetEnabled(plugin.Manifest.WidgetId, v));
         foreach (var bad in _shell.PluginResults.Where(r => r.Error is not null))
-            Note($"{bad.FolderName}: {bad.Error}", Theme.RedBrush);
+            Note($"{bad.FolderName}: {bad.Error}", Theme.CriticalBrush);
 
         Section("CARTELLA");
         Note("Un plugin è una cartella con plugin.json: i dati arrivano da una URL JSON o da un comando che stampa JSON " +
-             "(formato in docs/07-settings-plugins.md).", Theme.GreyBrush);
+             "(formato in docs/07-settings-plugins.md).", Theme.MutedBrush);
         ButtonRow(
             ("APRI CARTELLA", () => OpenFolder(_shell.PluginFolder)),
             ("RICARICA", () =>
@@ -1189,12 +1278,12 @@ public sealed class SettingsWindow : Window
     private void InfoPage()
     {
         Section("VERSIONE");
-        CardTitle($"Nothing Shell {typeof(SettingsWindow).Assembly.GetName().Version?.ToString(2)}", null, Theme.GreyBrush);
-        Note("Strato grafico in stile Nothing OS sopra Windows 11. Non sostituisce explorer.exe.", Theme.GreyBrush);
+        CardTitle($"Nothing Shell {typeof(SettingsWindow).Assembly.GetName().Version?.ToString(2)}", null, Theme.MutedBrush);
+        Note("Strato grafico in stile Nothing OS sopra Windows 11. Non sostituisce explorer.exe.", Theme.MutedBrush);
 
         Section("DATI");
-        Note(_shell.DataFolder, Theme.WhiteBrush);
-        Note("Impostazioni, posizioni dei widget, plugin e connettori. Password e token sono nel Gestore credenziali di Windows.", Theme.GreyBrush);
+        Note(_shell.DataFolder, Theme.InkBrush);
+        Note("Impostazioni, posizioni dei widget, plugin e connettori. Password e token sono nel Gestore credenziali di Windows.", Theme.MutedBrush);
         ButtonRow(("APRI CARTELLA DEI DATI", () => OpenFolder(_shell.DataFolder)));
     }
 
@@ -1214,16 +1303,16 @@ public sealed class SettingsWindow : Window
             });
         if (!_shell.PhoneDirect)
         {
-            Note("Senza collegamento diretto chiamate e notifiche arrivano da Collegamento al telefono di Windows.", Theme.GreyBrush);
+            Note("Senza collegamento diretto chiamate e notifiche arrivano da Collegamento al telefono di Windows.", Theme.MutedBrush);
             return;
         }
         Note("Sul telefono installa KDE Connect (Play Store o F-Droid), sulla stessa rete Wi-Fi del PC; il telefono " +
-             "compare qui sotto. Windows deve consentire le porte 1714–1764 sulle reti private.", Theme.GreyBrush);
-        _phoneStatus = Note(_shell.Phone.Status, Theme.GreyBrush);
+             "compare qui sotto. Windows deve consentire le porte 1714–1764 sulle reti private.", Theme.MutedBrush);
+        _phoneStatus = Note(_shell.Phone.Status, Theme.MutedBrush);
 
         Section("TELEFONI");
         if (_shell.Phone.Devices.Count == 0)
-            Note("Nessun telefono in rete per ora.", Theme.GreyBrush);
+            Note("Nessun telefono in rete per ora.", Theme.MutedBrush);
         foreach (var device in _shell.Phone.Devices)
         {
             var detail = device switch
@@ -1269,7 +1358,7 @@ public sealed class SettingsWindow : Window
         Note("Nothing Shell legge il calendario di Windows (se Windows lo consente alle app desktop) e i link iCal " +
              "(.ics) che aggiungi qui. Outlook: Impostazioni › Calendario › Calendari condivisi › Pubblica un " +
              "calendario, link ICS. Google Calendar: impostazioni del calendario › Indirizzo segreto in formato iCal. " +
-             "I link si leggono soltanto.", Theme.GreyBrush);
+             "I link si leggono soltanto.", Theme.MutedBrush);
 
         var feeds = _shell.CalendarFeeds;
         foreach (var feed in feeds)
@@ -1280,7 +1369,7 @@ public sealed class SettingsWindow : Window
             })]);
 
         var link = Field("Aggiungi un link iCal (https:// o webcal://)", "");
-        var result = Note(string.Empty, Theme.RedBrush);
+        var result = Note(string.Empty, Theme.CriticalBrush);
         result.Visibility = Visibility.Collapsed;
         ButtonRow(
             ("AGGIUNGI", () =>
@@ -1295,7 +1384,7 @@ public sealed class SettingsWindow : Window
             }),
             ("AGGIORNA", _shell.RefreshCalendar),
             ("PROVA RIEPILOGO", _shell.ShowMorningBriefNow));
-        _calendarStatus = Note(_shell.CalendarStatus, Theme.GreyBrush);
+        _calendarStatus = Note(_shell.CalendarStatus, Theme.MutedBrush);
     }
 
     private void OnCalendarChanged()
@@ -1324,12 +1413,12 @@ public sealed class SettingsWindow : Window
         Note("Nothing Shell si collega direttamente alla casella (IMAP) e avvisa appena arriva una mail, senza " +
              "altre app aperte. Un clic su una mail nel notch la apre nel lettore di Nothing: la mail resta non " +
              "letta finché non premi Segna come letta, l'unica modifica che Nothing Shell fa alla casella. " +
-             "La password resta cifrata nel Gestore credenziali di Windows.", Theme.GreyBrush);
+             "La password resta cifrata nel Gestore credenziali di Windows.", Theme.MutedBrush);
         if (_shell.MailAccount is { } account)
         {
-            _mailStatus = Note(_shell.MailAccountStatus, _shell.MailAccountConnected ? Theme.WhiteBrush : Theme.RedBrush);
+            _mailStatus = Note(_shell.MailAccountStatus, _shell.MailAccountConnected ? Theme.InkBrush : Theme.CriticalBrush);
             Note($"Utente: {account.Login} · server {account.Server}:{account.Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
-                Theme.GreyBrush);
+                Theme.MutedBrush);
             var webmail = Field("Webmail (per «Apri in…» e gli allegati; se è installata come app di Edge si apre l'app)",
                 _shell.WebmailAddress ?? string.Empty);
             webmail.LostFocus += (_, _) =>
@@ -1351,11 +1440,11 @@ public sealed class SettingsWindow : Window
         Section("OPPURE: NOTIFICHE DI UN'APP DI POSTA");
         Note("Per Gmail, Outlook.com o un programma di posta già configurato sul PC: Nothing Shell legge le " +
              "notifiche che mostrano in Windows. Le webmail aziendali (Exchange) di solito non ne mandano: per " +
-             "quelle usa la casella collegata qui sopra.", Theme.GreyBrush);
+             "quelle usa la casella collegata qui sopra.", Theme.MutedBrush);
 
         var allowed = _shell.NotificationAccessAllowed;
         Step(1, "Consenti l'accesso alle notifiche", done: allowed);
-        Note(_shell.NotificationAccessText, allowed ? Theme.GreyBrush : Theme.RedBrush);
+        Note(_shell.NotificationAccessText, allowed ? Theme.MutedBrush : Theme.CriticalBrush);
         if (_shell.CanRequestNotificationAccess)
             ButtonRow(("CONSENTI ACCESSO", async () =>
             {
@@ -1367,20 +1456,20 @@ public sealed class SettingsWindow : Window
 
         Step(2, "Usa un'app di posta con le notifiche attive", done: null);
         Note("Riconosciute da sole: Outlook (classico e nuovo), Posta, Thunderbird, eM Client, Mailbird, Spark.",
-            Theme.GreyBrush);
+            Theme.MutedBrush);
         Note("Webmail nel browser (Gmail, Outlook.com, Yahoo, Proton): consenti le notifiche al sito " +
-             "(lucchetto accanto all'indirizzo › Notifiche › Consenti) e lascia aperta una scheda.", Theme.GreyBrush);
-        Note("In Windows l'app deve avere le notifiche attive e Non disturbare deve essere spento.", Theme.GreyBrush);
+             "(lucchetto accanto all'indirizzo › Notifiche › Consenti) e lascia aperta una scheda.", Theme.MutedBrush);
+        Note("In Windows l'app deve avere le notifiche attive e Non disturbare deve essere spento.", Theme.MutedBrush);
         ButtonRow(("APRI NOTIFICHE DI WINDOWS", () => OpenUri("ms-settings:notifications")));
 
         Step(3, "La tua app non è riconosciuta?", done: null);
         var candidates = _shell.MailAppCandidates;
         if (candidates.Count == 0)
             Note("Qui compaiono le app che hanno mandato notifiche da quando Nothing Shell è avviato. " +
-                 "Mandati una mail di prova, poi premi Aggiorna.", Theme.GreyBrush);
+                 "Mandati una mail di prova, poi premi Aggiorna.", Theme.MutedBrush);
         else
         {
-            Note("Accendi l'app che ti avvisa delle mail: le sue notifiche diventano mail nel notch.", Theme.GreyBrush);
+            Note("Accendi l'app che ti avvisa delle mail: le sue notifiche diventano mail nel notch.", Theme.MutedBrush);
             foreach (var (app, isMail) in candidates)
                 ToggleRow(app, null, isMail, v => _shell.SetMailApp(app, v));
         }
@@ -1390,7 +1479,7 @@ public sealed class SettingsWindow : Window
         Note(last is null
                 ? "Nessuna mail rilevata finora."
                 : $"Ultima mail rilevata alle {last.Received.ToLocalTime():HH:mm} da {last.App}: «{last.Subject}»",
-            Theme.GreyBrush);
+            Theme.MutedBrush);
         ButtonRow(("PROVA L'AVVISO", _shell.ShowTestMailAlert), ("AGGIORNA", Rebuild));
     }
 
@@ -1411,14 +1500,14 @@ public sealed class SettingsWindow : Window
                 server.Text = suggested;
         };
 
-        var result = Note(string.Empty, Theme.GreyBrush);
+        var result = Note(string.Empty, Theme.MutedBrush);
         var busy = false;
         ButtonRow(primary: true, ("COLLEGA", async () =>
         {
             if (busy)
                 return;
             busy = true;
-            result.Foreground = Theme.GreyBrush;
+            result.Foreground = Theme.MutedBrush;
             result.Text = "Prova di accesso in corso…";
             var account = new MailAccount(
                 address.Text.Trim(),
@@ -1432,7 +1521,7 @@ public sealed class SettingsWindow : Window
                 Rebuild();
                 return;
             }
-            result.Foreground = Theme.RedBrush;
+            result.Foreground = Theme.CriticalBrush;
             result.Text = error;
         }));
     }
@@ -1442,7 +1531,7 @@ public sealed class SettingsWindow : Window
         if (_mailStatus is null)
             return;
         _mailStatus.Text = _shell.MailAccountStatus;
-        _mailStatus.Foreground = _shell.MailAccountConnected ? Theme.WhiteBrush : Theme.RedBrush;
+        _mailStatus.Foreground = _shell.MailAccountConnected ? Theme.InkBrush : Theme.CriticalBrush;
     }
 
     // ── Struttura della finestra ────────────────────────────────────────────────
@@ -1451,13 +1540,13 @@ public sealed class SettingsWindow : Window
     {
         var sidebar = new DockPanel { Background = Brushes.Transparent };
         var brand = new StackPanel { Margin = new Thickness(10, 4, 0, 26) };
-        brand.Children.Add(new DotMatrixView { Pitch = 2, Dots = DotText.Render("NOTHING"), DotColor = Theme.Red, HorizontalAlignment = HorizontalAlignment.Left });
-        var shell = Label("SHELL · IMPOSTAZIONI", 10, Theme.GreyBrush);
-        shell.Margin = new Thickness(0, 8, 0, 0);
+        brand.Children.Add(new DotMatrixView { Pitch = 2, TextSize = 14, Dots = DotText.Render("Nothing Shell"), HorizontalAlignment = HorizontalAlignment.Left });
+        var shell = Label("Impostazioni", 12, Theme.MutedBrush);
+        shell.Margin = new Thickness(0, 2, 0, 0);
         brand.Children.Add(shell);
         DockPanel.SetDock(brand, Dock.Top);
         sidebar.Children.Add(brand);
-        var version = Label($"v{typeof(SettingsWindow).Assembly.GetName().Version?.ToString(2)}", 10, Theme.GreyBrush);
+        var version = Label($"v{typeof(SettingsWindow).Assembly.GetName().Version?.ToString(2)}", 10, Theme.MutedBrush);
         version.Margin = new Thickness(12, 12, 0, 0);
         DockPanel.SetDock(version, Dock.Bottom);
         sidebar.Children.Add(version);
@@ -1467,11 +1556,8 @@ public sealed class SettingsWindow : Window
         var sidebarBorder = new Border
         {
             Width = SidebarWidth,
-            Background = Theme.SurfaceBrush,
-            BorderBrush = Theme.OutlineBrush,
-            BorderThickness = new Thickness(0, 0, 1, 0),
-            CornerRadius = new CornerRadius(27, 0, 0, 27),
-            Padding = new Thickness(14, 24, 14, 18),
+            Background = Brushes.Transparent,
+            Padding = new Thickness(10, 20, 10, 14),
             Child = sidebar,
         };
 
@@ -1483,25 +1569,22 @@ public sealed class SettingsWindow : Window
         header.Children.Add(titles);
         var close = new Border
         {
-            Width = 34,
-            Height = 34,
-            CornerRadius = new CornerRadius(17),
+            Width = 46,
+            Height = 32,
+            CornerRadius = new CornerRadius(0, Theme.RadiusLarge - 1, 0, 0),
             Background = Brushes.Transparent,
-            BorderBrush = Theme.OutlineBrush,
-            BorderThickness = new Thickness(1),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
-            Cursor = Cursors.Hand,
             ToolTip = "Chiudi (Esc)",
             Child = new DotMatrixView
             {
-                Pitch = 2,
-                Dots = DotText.Render("X"),
+                Pitch = 1.5,
+                Dots = DotGrid.From(DotIcons.Close),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
             },
         };
-        close.MouseEnter += (_, _) => close.Background = Theme.SurfaceBrush;
+        close.MouseEnter += (_, _) => close.Background = Theme.CriticalBrush;
         close.MouseLeave += (_, _) => close.Background = Brushes.Transparent;
         // La pressione va fermata qui: arrivando all'intestazione avvierebbe DragMove, che cattura il mouse
         // fino al rilascio, e il clic sulla X non arriverebbe mai.
@@ -1511,11 +1594,10 @@ public sealed class SettingsWindow : Window
             e.Handled = true;
             Close();
         };
-        header.Children.Add(close);
         header.MouseLeftButtonDown += DragWindow;
 
         _scroll.Content = _page;
-        var content = new DockPanel { Margin = new Thickness(36, 28, 32, 0) };
+        var content = new DockPanel { Margin = new Thickness(24, 24, 28, 0) };
         DockPanel.SetDock(header, Dock.Top);
         content.Children.Add(header);
         content.Children.Add(_scroll);
@@ -1526,15 +1608,10 @@ public sealed class SettingsWindow : Window
         grid.Children.Add(sidebarBorder);
         Grid.SetColumn(content, 1);
         grid.Children.Add(content);
+        Grid.SetColumnSpan(close, 2);
+        grid.Children.Add(close);
 
-        return new Border
-        {
-            Background = Theme.BlackBrush,
-            BorderBrush = Theme.OutlineBrush,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(28),
-            Child = grid,
-        };
+        return Theme.Panel(new Border { Child = grid });
     }
 
     private void DragWindow(object sender, MouseButtonEventArgs e)
@@ -1543,7 +1620,7 @@ public sealed class SettingsWindow : Window
             DragMove();
     }
 
-    /// <summary>Voci del menù: la pagina aperta su fondo chiaro con il punto rosso; un numero dove serve.</summary>
+    /// <summary>Voci del menù come in Impostazioni di Windows: la pagina aperta è riempita, col trattino d'accento; un numero dove serve.</summary>
     private void BuildNav()
     {
         _nav.Children.Clear();
@@ -1551,42 +1628,40 @@ public sealed class SettingsWindow : Window
         {
             var selected = page == _selected;
             var row = new Grid();
-            var dot = new Ellipse { Width = 6, Height = 6, Fill = selected ? Theme.RedBrush : Brushes.Transparent, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
+            var dot = new Rectangle { Width = 3, Height = 16, RadiusX = 1.5, RadiusY = 1.5, Margin = new Thickness(-9, 0, 0, 0), Fill = selected ? Theme.AccentBrush : Brushes.Transparent, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
             row.Children.Add(dot);
-            var label = Label(title, 13, selected ? Theme.WhiteBrush : Theme.GreyBrush);
-            label.Margin = new Thickness(16, 0, 0, 0);
+            var label = Label(title, 14, Theme.InkBrush);
+            label.Margin = new Thickness(4, 0, 0, 0);
             label.VerticalAlignment = VerticalAlignment.Center;
-            if (selected)
-                label.FontWeight = FontWeights.SemiBold;
             row.Children.Add(label);
             var count = page switch
             {
                 SettingsPage.Connectors => _shell.ConnectorResults.Count,
                 SettingsPage.Plugins => _shell.PluginResults.Count(r => r.Manifest is not null),
-                SettingsPage.Shortcuts => _shell.LearnedShortcuts.Count,
+                SettingsPage.Shortcuts => _shell.LearnedShortcuts.Count + _shell.BuiltInShortcuts.Sum(s => s.Commands.Count),
                 _ => 0,
             };
             if (count > 0)
             {
-                var badge = Label(count.ToString(System.Globalization.CultureInfo.InvariantCulture), 11, Theme.GreyBrush);
+                var badge = Label(count.ToString(System.Globalization.CultureInfo.InvariantCulture), 11, Theme.MutedBrush);
                 badge.HorizontalAlignment = HorizontalAlignment.Right;
                 badge.VerticalAlignment = VerticalAlignment.Center;
                 row.Children.Add(badge);
             }
             var item = new Border
             {
-                Height = 38,
-                CornerRadius = new CornerRadius(12),
+                Height = 36,
+                CornerRadius = new CornerRadius(4),
                 Padding = new Thickness(12, 0, 12, 0),
                 Margin = new Thickness(0, 0, 0, 2),
-                Background = selected ? Theme.OutlineBrush : Brushes.Transparent,
+                Background = selected ? Theme.SurfaceBrush : Brushes.Transparent,
                 Cursor = Cursors.Hand,
                 Child = row,
             };
             if (!selected)
             {
-                item.MouseEnter += (_, _) => label.Foreground = Theme.WhiteBrush;
-                item.MouseLeave += (_, _) => label.Foreground = Theme.GreyBrush;
+                item.MouseEnter += (_, _) => item.Background = Theme.SurfaceBrush;
+                item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
             }
             item.MouseLeftButtonDown += (_, e) => e.Handled = true;
             item.MouseLeftButtonUp += (_, e) =>
@@ -1611,10 +1686,12 @@ public sealed class SettingsWindow : Window
     private void Heading(string title, string? tag = null)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, _page.Children.Count == 0 ? 0 : 26, 0, 10) };
-        row.Children.Add(Label(title, 11, Theme.GreyBrush));
+        var caption = Label(title, 14, Theme.InkBrush);
+        caption.FontWeight = FontWeights.SemiBold;
+        row.Children.Add(caption);
         if (tag is not null)
         {
-            var badge = Label(tag.ToUpperInvariant(), 10, Theme.RedBrush);
+            var badge = Label(tag, 12, Theme.AccentBrush);
             badge.VerticalAlignment = VerticalAlignment.Center;
             badge.Margin = new Thickness(10, 0, 0, 0);
             row.Children.Add(badge);
@@ -1636,11 +1713,11 @@ public sealed class SettingsWindow : Window
         var stack = new StackPanel();
         _page.Children.Add(new Border
         {
-            Background = Theme.SurfaceBrush,
+            Background = Theme.CardBrush,
             BorderBrush = Theme.OutlineBrush,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(20),
-            Padding = new Thickness(20, 12, 20, 14),
+            CornerRadius = new CornerRadius(Theme.RadiusLarge),
+            Padding = new Thickness(16, 8, 16, 10),
             Margin = new Thickness(0, 0, 0, 10),
             Child = stack,
         });
@@ -1659,7 +1736,7 @@ public sealed class SettingsWindow : Window
     private void CardTitle(string text, string? tag, Brush tagBrush)
     {
         var row = new Grid { Margin = new Thickness(0, 4, 0, 4) };
-        var label = Label(text, 16, Theme.WhiteBrush);
+        var label = Label(text, 16, Theme.InkBrush);
         label.FontWeight = FontWeights.SemiBold;
         label.Margin = new Thickness(0, 0, 110, 0);
         label.TextTrimming = TextTrimming.CharacterEllipsis;
@@ -1681,10 +1758,10 @@ public sealed class SettingsWindow : Window
     {
         var row = new Grid { Margin = new Thickness(0, 8, 0, 8) };
         var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 64, 0) };
-        text.Children.Add(Label(title, 14, Theme.WhiteBrush));
+        text.Children.Add(Label(title, 14, Theme.InkBrush));
         if (description is not null)
         {
-            var d = Label(description, 12, Theme.GreyBrush);
+            var d = Label(description, 12, Theme.MutedBrush);
             d.Margin = new Thickness(0, 3, 0, 0);
             d.TextWrapping = TextWrapping.Wrap;
             text.Children.Add(d);
@@ -1701,13 +1778,13 @@ public sealed class SettingsWindow : Window
     {
         var row = new Grid { Margin = new Thickness(0, 8, 0, 8) };
         var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 150, 0) };
-        var t = Label(title, 14, Theme.WhiteBrush);
+        var t = Label(title, 14, Theme.InkBrush);
         t.TextTrimming = TextTrimming.CharacterEllipsis;
         t.ToolTip = title;
         text.Children.Add(t);
         if (detail is not null)
         {
-            var d = Label(detail, 12, Theme.GreyBrush);
+            var d = Label(detail, 12, Theme.MutedBrush);
             d.Margin = new Thickness(0, 3, 0, 0);
             text.Children.Add(d);
         }
@@ -1715,7 +1792,7 @@ public sealed class SettingsWindow : Window
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         foreach (var (label, click) in actions)
         {
-            var button = Label(label, 11, Theme.RedBrush);
+            var button = Label(label, 13, Theme.AccentBrush);
             button.Margin = new Thickness(14, 0, 0, 0);
             button.Cursor = Cursors.Hand;
             button.MouseLeftButtonUp += (_, e) =>
@@ -1737,11 +1814,11 @@ public sealed class SettingsWindow : Window
         {
             Pitch = 2,
             Dots = DotText.Render(number.ToString("00", System.Globalization.CultureInfo.InvariantCulture)),
-            DotColor = done == true ? Theme.Grey : Theme.Red,
+            DotColor = done == true ? Theme.Muted : Theme.Accent,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 10, 0),
         });
-        var label = Label(done == true ? $"{title}  ·  fatto" : title, 14, Theme.WhiteBrush);
+        var label = Label(done == true ? $"{title}  ·  fatto" : title, 14, Theme.InkBrush);
         label.VerticalAlignment = VerticalAlignment.Center;
         row.Children.Add(label);
         _current.Children.Add(row);
@@ -1757,36 +1834,36 @@ public sealed class SettingsWindow : Window
     /// <summary>Campo in stile Nothing: etichetta grigia, riquadro nero con bordo Outline e angoli arrotondati.</summary>
     private void AddField(string label, Control input)
     {
-        var caption = Label(label, 11, Theme.GreyBrush);
+        var caption = Label(label, 11, Theme.MutedBrush);
         caption.TextWrapping = TextWrapping.Wrap;
         caption.Margin = new Thickness(0, 12, 0, 5);
         _current.Children.Add(caption);
 
         input.Background = Brushes.Transparent;
         input.BorderThickness = new Thickness(0);
-        input.Foreground = Theme.WhiteBrush;
+        input.Foreground = Theme.InkBrush;
         input.FontFamily = Theme.BodyFont;
         input.FontSize = 13;
         input.VerticalContentAlignment = VerticalAlignment.Center;
         switch (input)
         {
             case TextBox t:
-                t.CaretBrush = Theme.WhiteBrush;
+                t.CaretBrush = Theme.InkBrush;
                 break;
             case PasswordBox p:
-                p.CaretBrush = Theme.WhiteBrush;
+                p.CaretBrush = Theme.InkBrush;
                 break;
         }
         var frame = new Border
         {
-            Background = Theme.BlackBrush,
+            Background = Theme.SurfaceBrush,
             BorderBrush = Theme.OutlineBrush,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(12, 8, 12, 8),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(10, 6, 10, 6),
             Child = input,
         };
-        input.GotKeyboardFocus += (_, _) => frame.BorderBrush = Theme.GreyBrush;
+        input.GotKeyboardFocus += (_, _) => frame.BorderBrush = Theme.AccentBrush;
         input.LostKeyboardFocus += (_, _) => frame.BorderBrush = Theme.OutlineBrush;
         _current.Children.Add(frame);
     }
@@ -1833,7 +1910,7 @@ public sealed class SettingsWindow : Window
             timer.Stop();
             armed = false;
             label.Text = text;
-            label.Foreground = Theme.WhiteBrush;
+            label.Foreground = Theme.InkBrush;
         };
         button.MouseLeftButtonUp += (_, e) =>
         {
@@ -1846,7 +1923,7 @@ public sealed class SettingsWindow : Window
             }
             armed = true;
             label.Text = confirmText;
-            label.Foreground = Theme.RedBrush;
+            label.Foreground = Theme.CriticalBrush;
             timer.Start();
         };
         row.Children.Add(button);
@@ -1857,19 +1934,19 @@ public sealed class SettingsWindow : Window
     {
         var button = new Border
         {
-            BorderBrush = primary ? Theme.WhiteBrush : Theme.GreyBrush,
+            BorderBrush = primary ? Theme.AccentBrush : Theme.OutlineBrush,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(17),
-            Padding = new Thickness(16, 8, 16, 8),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(12, 5, 12, 6),
             Margin = new Thickness(0, 0, 8, 0),
-            Background = primary ? Theme.WhiteBrush : Brushes.Transparent,
+            Background = primary ? Theme.AccentBrush : Theme.SurfaceBrush,
             Cursor = Cursors.Hand,
-            Child = Label(text, 11, primary ? Theme.BlackBrush : Theme.WhiteBrush),
+            Child = Label(text, 13, primary ? Theme.OnAccentBrush : Theme.InkBrush),
         };
         if (!primary)
         {
-            button.MouseEnter += (_, _) => button.Background = Theme.OutlineBrush;
-            button.MouseLeave += (_, _) => button.Background = Brushes.Transparent;
+            button.MouseEnter += (_, _) => button.Background = Theme.SurfaceHoverBrush;
+            button.MouseLeave += (_, _) => button.Background = Theme.SurfaceBrush;
         }
         return button;
     }
@@ -1877,14 +1954,14 @@ public sealed class SettingsWindow : Window
     /// <summary>Filtro a pillola della libreria: quello scelto è pieno.</summary>
     private static Border Chip(string text, bool selected) => new()
     {
-        BorderBrush = selected ? Theme.WhiteBrush : Theme.OutlineBrush,
+        BorderBrush = selected ? Theme.AccentBrush : Theme.OutlineBrush,
         BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(14),
-        Padding = new Thickness(12, 6, 12, 6),
+        CornerRadius = new CornerRadius(4),
+        Padding = new Thickness(12, 5, 12, 6),
         Margin = new Thickness(0, 0, 6, 6),
-        Background = selected ? Theme.WhiteBrush : Brushes.Transparent,
+        Background = selected ? Theme.AccentBrush : Theme.SurfaceBrush,
         Cursor = Cursors.Hand,
-        Child = Label(text, 10, selected ? Theme.BlackBrush : Theme.GreyBrush),
+        Child = Label(text, 13, selected ? Theme.OnAccentBrush : Theme.InkBrush),
     };
 
     private TextBlock Note(string text, Brush brush)
@@ -1902,10 +1979,10 @@ public sealed class SettingsWindow : Window
     {
         _current.Children.Add(new Border
         {
-            Background = Theme.BlackBrush,
+            Background = Theme.SurfaceBrush,
             BorderBrush = Theme.OutlineBrush,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(12, 8, 12, 8),
             Margin = new Thickness(0, 6, 0, 6),
             Child = new TextBox
@@ -1915,8 +1992,8 @@ public sealed class SettingsWindow : Window
                 TextWrapping = TextWrapping.Wrap,
                 Background = Brushes.Transparent,
                 BorderThickness = new Thickness(0),
-                Foreground = Theme.WhiteBrush,
-                CaretBrush = Theme.WhiteBrush,
+                Foreground = Theme.InkBrush,
+                CaretBrush = Theme.InkBrush,
                 FontFamily = new FontFamily("Cascadia Mono, Consolas"),
                 FontSize = 12,
             },
@@ -1950,7 +2027,7 @@ public sealed class SettingsWindow : Window
 
     private static TextBlock Label(string text, double size, Brush foreground) => new()
     {
-        Text = text,
+        Text = DotText.Friendly(text),
         FontFamily = Theme.BodyFont,
         FontSize = size,
         Foreground = foreground,

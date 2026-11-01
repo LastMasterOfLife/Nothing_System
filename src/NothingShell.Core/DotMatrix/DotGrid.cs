@@ -21,13 +21,22 @@ public sealed class DotGrid
     public static DotGrid From(DotGlyph glyph)
     {
         ArgumentNullException.ThrowIfNull(glyph);
-        var grid = new DotGrid(glyph.Width, glyph.Height);
+        var grid = new DotGrid(glyph.Width, glyph.Height) { Glyph = glyph };
         grid.Draw(glyph, 0, 0);
         return grid;
     }
 
     public int Width { get; }
     public int Height { get; }
+
+    /// <summary>Il testo disegnato, se è un testo: lo stile Windows lo scrive in Segoe invece che a punti.</summary>
+    public string? Text { get; init; }
+
+    /// <summary>L'icona disegnata, se è un'icona: lo stile Windows usa quella Fluent.</summary>
+    public DotGlyph? Glyph { get; init; }
+
+    /// <summary>Il riempimento da 0 a 1, se è una barra: lo stile Windows la disegna piena.</summary>
+    public double? Fraction { get; init; }
 
     public float this[int x, int y]
     {

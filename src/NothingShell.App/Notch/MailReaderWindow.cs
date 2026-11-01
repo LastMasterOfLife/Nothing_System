@@ -10,6 +10,7 @@ using System.Windows.Shapes;
 using System.Windows.Shell;
 using NothingShell.App.Interop;
 using NothingShell.App.Rendering;
+using NothingShell.Core.Design;
 using NothingShell.Core.DotMatrix;
 using NothingShell.Core.Notch;
 
@@ -56,6 +57,7 @@ public sealed class MailReaderWindow : Window
 
     private readonly IMailReaderActions _mail;
     private readonly Dictionary<ImapMessageRef, MailContent> _loaded = [];
+    private readonly GlassBackdrop _glass;
     private readonly Border _frame = new();
     private readonly Grid _panes = new();
     private readonly ColumnDefinition _listColumn = new();
@@ -64,15 +66,15 @@ public sealed class MailReaderWindow : Window
     private readonly StackPanel _list = new();
     private readonly ScrollViewer _listScroll = new();
     private readonly Border _detail = new();
-    private readonly DotMatrixView _unread = new() { Pitch = 2, DotColor = Theme.White, VerticalAlignment = VerticalAlignment.Center };
+    private readonly DotMatrixView _unread = new() { Pitch = 2, DotColor = Theme.Ink, VerticalAlignment = VerticalAlignment.Center };
     private readonly Border _unreadPill = new();
     private readonly TextBox _search = new();
     private readonly Border _segmentIndicator = new();
     private readonly TranslateTransform _segmentShift = new();
     private readonly TextBlock[] _segmentLabels = new TextBlock[2];
     private readonly Border _back = new();
-    private readonly Rectangle _maximizeIcon = new() { Stroke = Theme.WhiteBrush, StrokeThickness = 1.5, RadiusX = 2, RadiusY = 2 };
-    private readonly TextBlock _searchHint = Text(string.Empty, 12, Theme.GreyBrush);
+    private readonly Rectangle _maximizeIcon = new() { Stroke = Theme.InkBrush, StrokeThickness = 1.5, RadiusX = 2, RadiusY = 2 };
+    private readonly TextBlock _searchHint = Text(string.Empty, 12, Theme.MutedBrush);
     private Border? _searchBox;
     private MailReaderLayout _layout;
     private MailItem? _selected;
@@ -120,6 +122,7 @@ public sealed class MailReaderWindow : Window
         });
         Title = "Posta · Nothing Shell";
         Content = BuildVisualTree();
+        _glass = GlassBackdrop.Attach(this, _frame);
         _listColumn.Width = new GridLength(_layout.ListWidth);
         PreviewKeyDown += OnKey;
         PreviewMouseWheel += OnZoomWheel;
@@ -214,7 +217,7 @@ public sealed class MailReaderWindow : Window
             var header = new DotMatrixView
             {
                 Pitch = 1.6,
-                DotColor = Theme.Grey,
+                DotColor = Theme.Muted,
                 Dots = DotText.Render(label),
                 HorizontalAlignment = HorizontalAlignment.Left,
                 Margin = new Thickness(12, _list.Children.Count == 0 ? 2 : 16, 0, 8),
@@ -238,23 +241,23 @@ public sealed class MailReaderWindow : Window
         var sender = mail.Sender.Length > 0 ? mail.Sender : mail.App;
 
         var avatar = Avatar(sender, 34, isSelected);
-        var when = Text(ShortDate(mail.Received), 11, mail.IsUnread ? Theme.WhiteBrush : Theme.GreyBrush);
+        var when = Text(ShortDate(mail.Received), 11, mail.IsUnread ? Theme.InkBrush : Theme.MutedBrush);
         when.Margin = new Thickness(8, 0, 0, 0);
         var header = new DockPanel();
         DockPanel.SetDock(when, Dock.Right);
         header.Children.Add(when);
         if (mail.IsUnread)
         {
-            var dot = new Ellipse { Width = 6, Height = 6, Fill = Theme.RedBrush, Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            var dot = new Ellipse { Width = 6, Height = 6, Fill = Theme.AccentBrush, Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
             DockPanel.SetDock(dot, Dock.Right);
             header.Children.Add(dot);
         }
-        var name = Text(sender, 12, mail.IsUnread ? Theme.WhiteBrush : Theme.GreyBrush);
+        var name = Text(sender, 12, mail.IsUnread ? Theme.InkBrush : Theme.MutedBrush);
         if (mail.IsUnread)
             name.FontWeight = FontWeights.SemiBold;
         header.Children.Add(name);
 
-        var subject = Text(mail.Subject, 13, mail.IsUnread || isSelected ? Theme.WhiteBrush : Theme.GreyBrush);
+        var subject = Text(mail.Subject, 13, mail.IsUnread || isSelected ? Theme.InkBrush : Theme.MutedBrush);
         subject.Margin = new Thickness(0, 3, 0, 0);
         var text = new StackPanel { Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         text.Children.Add(header);
@@ -271,7 +274,7 @@ public sealed class MailReaderWindow : Window
             Width = 3,
             Height = 22,
             CornerRadius = new CornerRadius(1.5),
-            Background = Theme.RedBrush,
+            Background = Theme.AccentBrush,
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(-10, 0, 0, 0),
@@ -284,7 +287,7 @@ public sealed class MailReaderWindow : Window
         var row = new Border
         {
             Child = layered,
-            CornerRadius = new CornerRadius(14),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(10, 9, 12, 9),
             Margin = new Thickness(0, 0, 4, 3),
             Cursor = Cursors.Hand,
@@ -308,14 +311,14 @@ public sealed class MailReaderWindow : Window
             Width = size,
             Height = size,
             CornerRadius = new CornerRadius(size / 2),
-            Background = lit ? Theme.BlackBrush : Theme.SurfaceBrush,
+            Background = lit ? Theme.AccentBrush : Theme.SurfaceBrush,
             BorderBrush = Theme.OutlineBrush,
             BorderThickness = new Thickness(1),
             VerticalAlignment = VerticalAlignment.Center,
             Child = new DotMatrixView
             {
                 Pitch = size >= 44 ? 2.4 : 1.6,
-                DotColor = lit ? Theme.White : Theme.Grey,
+                DotColor = lit ? Theme.OnAccent : Theme.Muted,
                 Dots = DotText.Render(initials),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -327,7 +330,7 @@ public sealed class MailReaderWindow : Window
     {
         var panel = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 60, 0, 0) };
         panel.Children.Add(new DotMatrixView { Pitch = 3, DotColor = Theme.Outline, Dots = DotText.Render(dots), HorizontalAlignment = HorizontalAlignment.Center });
-        var line = Text(text, 12, Theme.GreyBrush);
+        var line = Text(text, 12, Theme.MutedBrush);
         line.HorizontalAlignment = HorizontalAlignment.Center;
         line.Margin = new Thickness(0, 14, 0, 0);
         panel.Children.Add(line);
@@ -392,7 +395,7 @@ public sealed class MailReaderWindow : Window
         var sender = content?.From ?? (mail.Sender.Length > 0 ? mail.Sender : mail.App);
         var (name, address) = SplitAddress(sender, mail.SenderAddress);
         var meta = new StackPanel { Margin = new Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-        var who = Text(name, 15, Theme.WhiteBrush);
+        var who = Text(name, 15, Theme.InkBrush);
         who.FontWeight = FontWeights.SemiBold;
         meta.Children.Add(who);
         var details = address ?? string.Empty;
@@ -400,11 +403,11 @@ public sealed class MailReaderWindow : Window
             details += (details.Length > 0 ? "  ·  " : string.Empty) + $"a {content.To}";
         if (details.Length > 0)
         {
-            var line = Text(details, 11, Theme.GreyBrush);
+            var line = Text(details, 11, Theme.MutedBrush);
             line.Margin = new Thickness(0, 2, 0, 0);
             meta.Children.Add(line);
         }
-        var date = Text(LongDate(content?.Date ?? mail.Received), 11, Theme.GreyBrush);
+        var date = Text(LongDate(content?.Date ?? mail.Received), 11, Theme.MutedBrush);
         date.VerticalAlignment = VerticalAlignment.Top;
         date.Margin = new Thickness(12, 4, 0, 0);
         var top = new DockPanel();
@@ -416,7 +419,7 @@ public sealed class MailReaderWindow : Window
         top.Children.Add(meta);
         grid.Children.Add(top);
 
-        var subject = Text(content?.Subject ?? mail.Subject, 22, Theme.WhiteBrush);
+        var subject = Text(content?.Subject ?? mail.Subject, 22, Theme.InkBrush);
         subject.FontWeight = FontWeights.SemiBold;
         subject.TextWrapping = TextWrapping.Wrap;
         subject.TextTrimming = TextTrimming.None;
@@ -446,7 +449,7 @@ public sealed class MailReaderWindow : Window
             AddWebmailButton(actions);
         }
         else if (note is not null && mail.AppId is not null && mail.App.Length > 0)
-            AddButton(actions, $"APRI {mail.App.ToUpperInvariant()}", () =>
+            AddButton(actions, $"Apri {mail.App}", () =>
             {
                 if (_mail.OpenSourceApp(mail))
                     CloseAnimated();
@@ -466,7 +469,7 @@ public sealed class MailReaderWindow : Window
         var card = new Border
         {
             Background = Theme.SurfaceBrush,
-            CornerRadius = new CornerRadius(18),
+            CornerRadius = new CornerRadius(8),
             Padding = new Thickness(20, 16, 14, 16),
             Margin = new Thickness(0, 14, 0, 0),
         };
@@ -495,7 +498,7 @@ public sealed class MailReaderWindow : Window
 
     private static TextBlock ErrorLine(string error)
     {
-        var line = Text(error, 12, Theme.RedBrush);
+        var line = Text(error, 12, Theme.CriticalBrush);
         line.TextWrapping = TextWrapping.Wrap;
         line.TextTrimming = TextTrimming.None;
         line.Margin = new Thickness(0, 10, 0, 0);
@@ -505,7 +508,7 @@ public sealed class MailReaderWindow : Window
 
     private static TextBlock Note(string text)
     {
-        var line = Text(text, 13, Theme.GreyBrush);
+        var line = Text(text, 13, Theme.MutedBrush);
         line.TextWrapping = TextWrapping.Wrap;
         line.TextTrimming = TextTrimming.None;
         return line;
@@ -517,11 +520,11 @@ public sealed class MailReaderWindow : Window
         var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top };
         for (var i = 0; i < 3; i++)
         {
-            var dot = new Ellipse { Width = 6, Height = 6, Fill = Theme.WhiteBrush, Margin = new Thickness(0, 0, 5, 0), VerticalAlignment = VerticalAlignment.Center };
+            var dot = new Ellipse { Width = 6, Height = 6, Fill = Theme.InkBrush, Margin = new Thickness(0, 0, 5, 0), VerticalAlignment = VerticalAlignment.Center };
             Motion.Breathe(dot, 0.15, i * 170);
             row.Children.Add(dot);
         }
-        var label = Text(text, 12, Theme.GreyBrush);
+        var label = Text(text, 12, Theme.MutedBrush);
         label.Margin = new Thickness(8, 0, 0, 0);
         row.Children.Add(label);
         return row;
@@ -537,9 +540,9 @@ public sealed class MailReaderWindow : Window
             TextWrapping = TextWrapping.Wrap,
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
-            Foreground = Theme.WhiteBrush,
-            CaretBrush = Theme.WhiteBrush,
-            SelectionBrush = Theme.RedBrush,
+            Foreground = Theme.InkBrush,
+            CaretBrush = Theme.InkBrush,
+            SelectionBrush = Theme.AccentBrush,
             FontFamily = Theme.BodyFont,
             FontSize = _layout.BodySize,
             Padding = new Thickness(0, 0, 10, 0),
@@ -551,7 +554,7 @@ public sealed class MailReaderWindow : Window
         {
             Width = 3,
             CornerRadius = new CornerRadius(1.5),
-            Background = Theme.GreyBrush,
+            Background = Theme.MutedBrush,
             Opacity = 0.5,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
@@ -579,8 +582,8 @@ public sealed class MailReaderWindow : Window
 
     private static Border CodeCard(string code)
     {
-        var label = Text("CODICE DI VERIFICA", 10, Theme.GreyBrush);
-        var digits = new DotMatrixView { Pitch = 4, DotColor = Theme.White, Dots = DotText.Render(code), Margin = new Thickness(0, 8, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        var label = Text("CODICE DI VERIFICA", 10, Theme.MutedBrush);
+        var digits = new DotMatrixView { Pitch = 4, DotColor = Theme.Ink, Dots = DotText.Render(code), Margin = new Thickness(0, 8, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
         var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         left.Children.Add(label);
         left.Children.Add(digits);
@@ -593,7 +596,7 @@ public sealed class MailReaderWindow : Window
             {
                 Clipboard.SetText(code);
                 ((TextBlock)copy!.Child).Text = "COPIATO";
-                Motion.FadeTo(copy, Theme.Red, Motion.Normal);
+                Motion.FadeTo(copy, Theme.Accent, Motion.Normal);
             }
             catch (COMException)
             {
@@ -606,9 +609,9 @@ public sealed class MailReaderWindow : Window
         dock.Children.Add(left);
         return new Border
         {
-            BorderBrush = Theme.RedBrush,
+            BorderBrush = Theme.AccentBrush,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
+            CornerRadius = new CornerRadius(8),
             Padding = new Thickness(18, 14, 14, 14),
             Margin = new Thickness(0, 6, 0, 0),
             Child = dock,
@@ -622,7 +625,7 @@ public sealed class MailReaderWindow : Window
         {
             var chip = new Border
             {
-                CornerRadius = new CornerRadius(12),
+                CornerRadius = new CornerRadius(4),
                 BorderBrush = Theme.OutlineBrush,
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(10, 5, 12, 5),
@@ -630,8 +633,8 @@ public sealed class MailReaderWindow : Window
                 ToolTip = _mail.WebmailName is { } w ? $"Gli allegati si aprono in {w}" : "Gli allegati si aprono dalla webmail",
             };
             var content = new StackPanel { Orientation = Orientation.Horizontal };
-            content.Children.Add(new Rectangle { Width = 8, Height = 10, Stroke = Theme.GreyBrush, StrokeThickness = 1, RadiusX = 1.5, RadiusY = 1.5, VerticalAlignment = VerticalAlignment.Center });
-            var label = Text(name, 11, Theme.WhiteBrush);
+            content.Children.Add(new Rectangle { Width = 8, Height = 10, Stroke = Theme.MutedBrush, StrokeThickness = 1, RadiusX = 1.5, RadiusY = 1.5, VerticalAlignment = VerticalAlignment.Center });
+            var label = Text(name, 11, Theme.InkBrush);
             label.Margin = new Thickness(7, 0, 0, 0);
             label.MaxWidth = 260;
             content.Children.Add(label);
@@ -654,7 +657,7 @@ public sealed class MailReaderWindow : Window
     private void AddWebmailButton(WrapPanel actions)
     {
         if (_mail.WebmailName is { } name)
-            AddButton(actions, $"APRI IN {name.ToUpperInvariant()}", _mail.OpenWebmail);
+            AddButton(actions, $"Apri in {name}", _mail.OpenWebmail);
     }
 
     private static Border AddButton(WrapPanel actions, string text, Action click, bool primary = false) =>
@@ -666,20 +669,20 @@ public sealed class MailReaderWindow : Window
 
     private static Border AddButton(WrapPanel actions, string text, Func<Task> click, bool primary = false)
     {
-        var label = Text(text, 11, primary ? Theme.BlackBrush : Theme.WhiteBrush);
+        var label = Text(text, 12, primary ? Theme.OnAccentBrush : Theme.InkBrush);
         label.FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal;
         var button = new Border
         {
-            BorderBrush = primary ? Theme.WhiteBrush : Theme.OutlineBrush,
+            BorderBrush = primary ? Theme.InkBrush : Theme.OutlineBrush,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(17),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(16, 8, 16, 8),
             Margin = new Thickness(0, 0, 8, 8),
             Cursor = Cursors.Hand,
             Child = label,
         };
         if (primary)
-            Motion.StateLayer(button, Theme.White, Color.FromRgb(0xD9, 0xD9, 0xD9));
+            Motion.StateLayer(button, Theme.Accent, Theme.Accent);
         else
             Motion.StateLayer(button, Colors.Transparent, Theme.Surface);
         Motion.Press(button);
@@ -700,7 +703,7 @@ public sealed class MailReaderWindow : Window
         _back.Child = new Polyline
         {
             Points = [new Point(6, 0), new Point(0, 6), new Point(6, 12)],
-            Stroke = Theme.WhiteBrush,
+            Stroke = Theme.InkBrush,
             StrokeThickness = 2,
             StrokeLineJoin = PenLineJoin.Round,
             StrokeStartLineCap = PenLineCap.Round,
@@ -718,8 +721,8 @@ public sealed class MailReaderWindow : Window
         title.Children.Add(_back);
         title.Children.Add(new DotMatrixView { Pitch = 3, Dots = DotText.Render("POSTA"), VerticalAlignment = VerticalAlignment.Center });
         _unreadPill.Child = _unread;
-        _unreadPill.Background = Theme.RedBrush;
-        _unreadPill.CornerRadius = new CornerRadius(10);
+        _unreadPill.Background = Theme.AccentBrush;
+        _unreadPill.CornerRadius = new CornerRadius(4);
         _unreadPill.Padding = new Thickness(8, 4, 8, 4);
         _unreadPill.Margin = new Thickness(14, 0, 0, 0);
         _unreadPill.VerticalAlignment = VerticalAlignment.Center;
@@ -736,7 +739,7 @@ public sealed class MailReaderWindow : Window
         tools.Children.Add(maximize);
         var close = new Border
         {
-            Child = new DotMatrixView { Pitch = 2, Dots = DotText.Render("X"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
+            Child = new DotMatrixView { Pitch = 1.5, Dots = DotGrid.From(DotIcons.Close), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
             Margin = new Thickness(4, 0, 0, 0),
         };
         RoundButton(close, "Chiudi (Esc)", CloseAnimated);
@@ -768,7 +771,7 @@ public sealed class MailReaderWindow : Window
             Focusable = false,
             ToolTip = "Trascina per allargare l'elenco",
         };
-        splitter.MouseEnter += (_, _) => line.Fill = Theme.GreyBrush;
+        splitter.MouseEnter += (_, _) => line.Fill = Theme.MutedBrush;
         splitter.MouseLeave += (_, _) => line.Fill = Theme.OutlineBrush;
         splitter.DragCompleted += (_, _) => _layout = _layout with { ListWidth = _listColumn.ActualWidth };
         Grid.SetColumn(line, 1);
@@ -794,10 +797,7 @@ public sealed class MailReaderWindow : Window
         layered.Children.Add(dock);
         layered.Children.Add(grip);
 
-        _frame.Background = Theme.BlackBrush;
-        _frame.BorderBrush = Theme.OutlineBrush;
-        _frame.BorderThickness = new Thickness(1);
-        _frame.CornerRadius = new CornerRadius(28);
+        Theme.Panel(_frame);
         _frame.Padding = new Thickness(24, 20, 24, 20);
         _frame.Child = layered;
         return _frame;
@@ -829,9 +829,9 @@ public sealed class MailReaderWindow : Window
     {
         _search.Background = Brushes.Transparent;
         _search.BorderThickness = new Thickness(0);
-        _search.Foreground = Theme.WhiteBrush;
-        _search.CaretBrush = Theme.WhiteBrush;
-        _search.SelectionBrush = Theme.RedBrush;
+        _search.Foreground = Theme.InkBrush;
+        _search.CaretBrush = Theme.InkBrush;
+        _search.SelectionBrush = Theme.AccentBrush;
         _search.FontFamily = Theme.BodyFont;
         _search.FontSize = 12;
         _search.VerticalContentAlignment = VerticalAlignment.Center;
@@ -845,8 +845,8 @@ public sealed class MailReaderWindow : Window
             RebuildList();
         };
         var lens = new Canvas { Width = 12, Height = 12, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
-        lens.Children.Add(new Ellipse { Width = 8.5, Height = 8.5, Stroke = Theme.GreyBrush, StrokeThickness = 1.4 });
-        lens.Children.Add(new Line { X1 = 7.5, Y1 = 7.5, X2 = 11.5, Y2 = 11.5, Stroke = Theme.GreyBrush, StrokeThickness = 1.4, StrokeEndLineCap = PenLineCap.Round });
+        lens.Children.Add(new Ellipse { Width = 8.5, Height = 8.5, Stroke = Theme.MutedBrush, StrokeThickness = 1.4 });
+        lens.Children.Add(new Line { X1 = 7.5, Y1 = 7.5, X2 = 11.5, Y2 = 11.5, Stroke = Theme.MutedBrush, StrokeThickness = 1.4, StrokeEndLineCap = PenLineCap.Round });
         var field = new Grid();
         field.Children.Add(hint);
         field.Children.Add(_search);
@@ -858,7 +858,7 @@ public sealed class MailReaderWindow : Window
         {
             Width = 190,
             Height = 32,
-            CornerRadius = new CornerRadius(16),
+            CornerRadius = new CornerRadius(4),
             Padding = new Thickness(12, 0, 12, 0),
             BorderBrush = Theme.OutlineBrush,
             BorderThickness = new Thickness(1),
@@ -870,7 +870,7 @@ public sealed class MailReaderWindow : Window
         _search.GotKeyboardFocus += (_, _) =>
         {
             Motion.FadeTo(box, Theme.Surface);
-            box.BorderBrush = Theme.GreyBrush;
+            box.BorderBrush = Theme.MutedBrush;
         };
         _search.LostKeyboardFocus += (_, _) =>
         {
@@ -890,8 +890,8 @@ public sealed class MailReaderWindow : Window
     {
         _segmentIndicator.Width = SegmentAll - 4;
         _segmentIndicator.Height = 26;
-        _segmentIndicator.CornerRadius = new CornerRadius(13);
-        _segmentIndicator.Background = Theme.WhiteBrush;
+        _segmentIndicator.CornerRadius = new CornerRadius(4);
+        _segmentIndicator.Background = Theme.AccentBrush;
         _segmentIndicator.HorizontalAlignment = HorizontalAlignment.Left;
         _segmentIndicator.Margin = new Thickness(2, 0, 0, 0);
         _segmentIndicator.RenderTransform = _segmentShift;
@@ -901,7 +901,7 @@ public sealed class MailReaderWindow : Window
         for (var i = 0; i < 2; i++)
         {
             var index = i;
-            var label = Text(names[i], 10, i == 0 ? Theme.BlackBrush : Theme.GreyBrush);
+            var label = Text(names[i], 11, i == 0 ? Theme.OnAccentBrush : Theme.MutedBrush);
             label.FontWeight = FontWeights.SemiBold;
             label.HorizontalAlignment = HorizontalAlignment.Center;
             label.VerticalAlignment = VerticalAlignment.Center;
@@ -920,10 +920,10 @@ public sealed class MailReaderWindow : Window
         grid.Children.Add(labels);
         return new Border
         {
-            CornerRadius = new CornerRadius(16),
+            CornerRadius = new CornerRadius(4),
             BorderBrush = Theme.OutlineBrush,
             BorderThickness = new Thickness(1),
-            Background = Theme.BlackBrush,
+            Background = Theme.BaseBrush,
             Child = grid,
             ToolTip = "Tutte le mail o solo quelle da leggere",
         };
@@ -935,8 +935,8 @@ public sealed class MailReaderWindow : Window
             return;
         _unreadOnly = unreadOnly;
         Motion.Slide(_segmentIndicator, _segmentShift, unreadOnly ? SegmentAll : 0, (unreadOnly ? SegmentUnread : SegmentAll) - 4);
-        _segmentLabels[0].Foreground = unreadOnly ? Theme.GreyBrush : Theme.BlackBrush;
-        _segmentLabels[1].Foreground = unreadOnly ? Theme.BlackBrush : Theme.GreyBrush;
+        _segmentLabels[0].Foreground = unreadOnly ? Theme.MutedBrush : Theme.OnAccentBrush;
+        _segmentLabels[1].Foreground = unreadOnly ? Theme.OnAccentBrush : Theme.MutedBrush;
         _firstList = true; // l'elenco filtrato entra di nuovo in sequenza
         RebuildList();
     }
@@ -945,7 +945,7 @@ public sealed class MailReaderWindow : Window
     {
         button.Width = 32;
         button.Height = 32;
-        button.CornerRadius = new CornerRadius(16);
+        button.CornerRadius = new CornerRadius(4);
         button.Cursor = Cursors.Hand;
         button.ToolTip = tooltip;
         Motion.StateLayer(button, Colors.Transparent, Theme.Surface);
@@ -1045,7 +1045,8 @@ public sealed class MailReaderWindow : Window
             Width = _restore.Width;
             Height = _restore.Height;
         }
-        _frame.CornerRadius = new CornerRadius(maximized ? 0 : 28);
+        _frame.CornerRadius = new CornerRadius(maximized ? 0 : Theme.RadiusLarge);
+        _glass.SetRadius(maximized ? 0 : Theme.RadiusLarge);
         _frame.BorderThickness = new Thickness(maximized ? 0 : 1);
         UpdateMaximizeIcon();
         if (Motion.Enabled)
@@ -1157,7 +1158,7 @@ public sealed class MailReaderWindow : Window
 
     private static TextBlock Text(string text, double size, Brush foreground) => new()
     {
-        Text = text,
+        Text = DotText.Friendly(text),
         FontFamily = Theme.BodyFont,
         FontSize = size,
         Foreground = foreground,

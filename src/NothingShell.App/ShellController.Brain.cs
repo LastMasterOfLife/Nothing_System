@@ -40,6 +40,8 @@ public sealed partial class ShellController : IAssistantPanelActions
 
     public IReadOnlyList<Shortcut> LearnedShortcuts => _brain.Memory.Learned;
 
+    public IReadOnlyList<BuiltInSection> BuiltInShortcuts => _brain.Memory.BuiltIn;
+
     public bool IsUserCritical(string command) => CriticalCommands.IsInUserFile(CriticalCommands.DefaultUserPath, command);
 
     public string? SetUserCritical(string command, bool critical)

@@ -65,6 +65,17 @@ internal static partial class NativeMethods
     /// <summary>Imposta il proprietario della finestra (non il genitore: resta top-level).</summary>
     public static void SetOwner(nint hwnd, nint owner) => SetWindowLongPtr(hwnd, GwlpHwndParent, owner);
 
+    public static nint GetOwner(nint hwnd) => GetWindow(hwnd, GwOwner);
+
+    /// <summary>La finestra subito sopra nell'ordine; 0 se è la prima.</summary>
+    public static nint WindowAbove(nint hwnd) => GetWindow(hwnd, GwHwndPrev);
+
+    private const uint GwOwner = 4;
+    private const uint GwHwndPrev = 3;
+
+    [LibraryImport("user32.dll")]
+    private static partial nint GetWindow(nint hwnd, uint command);
+
     public static void SendToBottom(nint hwnd) =>
         SetWindowPos(hwnd, HwndBottom, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate);
 

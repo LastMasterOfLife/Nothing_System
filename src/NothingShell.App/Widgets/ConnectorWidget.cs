@@ -18,8 +18,8 @@ public sealed class ConnectorWidget : WidgetView
     private const double MinPitch = 1.5;
     private const double ColumnGap = 16;
 
-    private readonly TextBlock _name = Label(string.Empty, 11, Theme.GreyBrush);
-    private readonly TextBlock _status = Label(string.Empty, 11, Theme.GreyBrush);
+    private readonly TextBlock _name = Label(string.Empty, 11, Theme.MutedBrush);
+    private readonly TextBlock _status = Label(string.Empty, 11, Theme.MutedBrush);
     private readonly Grid _cells = new();
     private ConnectorState? _state;
 
@@ -61,15 +61,15 @@ public sealed class ConnectorWidget : WidgetView
             Resized?.Invoke(this);
         }
 
-        _name.Text = state.Manifest.Name.ToUpperInvariant();
+        _name.Text = state.Manifest.Name;
         _name.ToolTip = state.Error;
         (_status.Text, _status.Foreground) = state.Status switch
         {
-            ConnectorStatus.Error => ("errore", Theme.RedBrush),
-            ConnectorStatus.NeedsGrant => ("permesso", Theme.RedBrush),
-            ConnectorStatus.Waiting => ("...", Theme.GreyBrush),
-            _ when state.UpdatedAt is { } at => (TaskTracker.FormatAgo(at, DateTimeOffset.Now), Theme.GreyBrush),
-            _ => (string.Empty, Theme.GreyBrush),
+            ConnectorStatus.Error => ("errore", Theme.CriticalBrush),
+            ConnectorStatus.NeedsGrant => ("permesso", Theme.CriticalBrush),
+            ConnectorStatus.Waiting => ("...", Theme.MutedBrush),
+            _ when state.UpdatedAt is { } at => (TaskTracker.FormatAgo(at, DateTimeOffset.Now), Theme.MutedBrush),
+            _ => (string.Empty, Theme.MutedBrush),
         };
         Render(count);
     }
@@ -101,7 +101,7 @@ public sealed class ConnectorWidget : WidgetView
                 ConnectorStatus.NeedsGrant => "Consenti comandi e azioni in Impostazioni › Connettori",
                 ConnectorStatus.Error => "nessun valore",
                 _ => "in attesa dei primi valori",
-            }, 11, state.Status == ConnectorStatus.Waiting ? Theme.GreyBrush : Theme.RedBrush);
+            }, 11, state.Status == ConnectorStatus.Waiting ? Theme.MutedBrush : Theme.CriticalBrush);
             note.TextWrapping = TextWrapping.Wrap;
             Grid.SetColumnSpan(note, columns);
             Grid.SetRowSpan(note, rows);
@@ -128,23 +128,23 @@ public sealed class ConnectorWidget : WidgetView
     {
         var warning = reading.Level == ReadingLevel.Warning;
         var cell = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        var label = Label(reading.Label, 10, Theme.GreyBrush);
+        var label = Label(reading.Label, 10, Theme.MutedBrush);
         label.TextTrimming = TextTrimming.CharacterEllipsis;
         label.Margin = new Thickness(0, 0, 0, 4);
         cell.Children.Add(label);
 
-        var unit = reading.Unit is { Length: > 0 } u ? Label(u, 11, Theme.GreyBrush) : null;
+        var unit = reading.Unit is { Length: > 0 } u ? Label(u, 11, Theme.MutedBrush) : null;
         var unitWidth = unit is null ? 0 : 8 + 7 * unit.Text.Length;
         var dots = DotText.Render(reading.Text);
         var pitch = dots.Width == 0 ? maxPitch : Math.Min(maxPitch, Math.Floor((width - unitWidth) / dots.Width * 2) / 2);
         var line = new StackPanel { Orientation = Orientation.Horizontal };
         if (pitch >= MinPitch && reading.Text.All(Core.Design.DotFont.Supports))
         {
-            line.Children.Add(new DotMatrixView { Pitch = pitch, Dots = dots, DotColor = warning ? Theme.Red : Theme.White });
+            line.Children.Add(new DotMatrixView { Pitch = pitch, Dots = dots, DotColor = warning ? Theme.Critical : Theme.Ink });
         }
         else
         {
-            var text = Label(reading.Text, 14, warning ? Theme.RedBrush : Theme.WhiteBrush);
+            var text = Label(reading.Text, 14, warning ? Theme.CriticalBrush : Theme.InkBrush);
             text.TextTrimming = TextTrimming.CharacterEllipsis;
             text.MaxWidth = Math.Max(20, width - unitWidth);
             text.ToolTip = reading.Text;

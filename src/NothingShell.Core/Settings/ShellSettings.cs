@@ -1,4 +1,5 @@
 using System.Text.Json;
+using NothingShell.Core.Design;
 using NothingShell.Core.Notch;
 using NothingShell.Core.Storage;
 using NothingShell.Core.Widgets;
@@ -22,7 +23,8 @@ public sealed record ShellSettings(
     IReadOnlyDictionary<string, string>? ConnectorGrants = null,
     IReadOnlyList<string>? ConnectorWidgets = null,
     MailReaderLayout? MailReader = null,
-    string? AssistantModel = null)
+    string? AssistantModel = null,
+    AppearanceSettings? Appearance = null)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
 

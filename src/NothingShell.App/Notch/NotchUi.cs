@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using NothingShell.App.Rendering;
+using NothingShell.Core.DotMatrix;
 using NothingShell.Core.Notch;
 
 namespace NothingShell.App.Notch;
@@ -19,7 +20,7 @@ internal static class NotchUi
 
     public static TextBlock Text(double size, Brush foreground, string text = "") => new()
     {
-        Text = text,
+        Text = DotText.Friendly(text),
         FontFamily = Theme.BodyFont,
         FontSize = size,
         Foreground = foreground,
@@ -38,7 +39,7 @@ internal static class NotchUi
         {
             Width = width,
             Height = 34,
-            CornerRadius = new CornerRadius(17),
+            CornerRadius = new CornerRadius(4),
             Margin = new Thickness(5, 0, 5, 0),
             Cursor = Cursors.Hand,
             Child = content,
@@ -73,7 +74,7 @@ public sealed class NotchScrollList : Grid
     {
         Width = 3,
         CornerRadius = new CornerRadius(1.5),
-        Background = Theme.GreyBrush,
+        Background = Theme.MutedBrush,
         HorizontalAlignment = HorizontalAlignment.Right,
         VerticalAlignment = VerticalAlignment.Top,
         Margin = new Thickness(0, 0, -10, 0),

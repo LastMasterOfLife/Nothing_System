@@ -1,20 +1,21 @@
 # 07 — Impostazioni e plugin (M5)
 
 ## Impostazioni
-Finestra Nothing (nera, 1000 × 720 DIP, ridotta se lo schermo è più piccolo), aperta da: menu col tasto destro di barra,
+Finestra come Impostazioni di Windows 11 (colori e vetro della pagina Aspetto, 1000 × 720 DIP, ridotta se lo schermo è più piccolo), aperta da: menu col tasto destro di barra,
 notch e widget (*Impostazioni…*) e dal launcher (voce "Impostazioni Nothing Shell").
 Ogni modifica si applica **subito**, senza riavvio.
 
-A sinistra il **menù** delle pagine (Generale, Notch, Telefono, Posta, Agenda, Sviluppo, Scorciatoie imparate, Agenti,
-Connettori, Accesso, Widget, Plugin, Info): la pagina aperta ha il fondo chiaro e il punto rosso, Scorciatoie imparate,
-Connettori e Plugin mostrano quanti ce ne sono. A destra il titolo a punti della pagina e le sue **schede** (fondo `Surface`, raggio 20), ognuna con un titolo
+A sinistra il **menù** delle pagine (Generale, Aspetto, Notch, Telefono, Posta, Agenda, Sviluppo, Scorciatoie, Agenti,
+Connettori, Accesso, Widget, Plugin, Info): la pagina aperta è riempita col trattino d'accento, Scorciatoie,
+Connettori e Plugin mostrano quanti ce ne sono. A destra il titolo della pagina e le sue **schede** (fondo `Surface`, raggio 20), ognuna con un titolo
 grigio sopra; tra due interruttori di fila una linea sottile. Ctrl+Tab e Ctrl+Maiusc+Tab cambiano pagina, Esc chiude
-(o torna alla libreria dal modulo di un connettore). Il pulsante principale di un modulo (Collega, Attiva) è bianco
-pieno, gli altri a contorno; Rimuovi chiede un secondo clic entro 3 s.
+(o torna alla libreria dal modulo di un connettore). Il pulsante principale di un modulo (Collega, Attiva) è pieno
+nel colore d'accento, gli altri appena riempiti; Rimuovi chiede un secondo clic entro 3 s.
 
 | Sezione | Voce | Effetto |
 |---|---|---|
 | Generale | Avvia con Windows | valore `NothingShell` in `HKCU\…\CurrentVersion\Run` (solo utente corrente) |
+| Aspetto | tema, colori, Liquid Glass, testo e icone, notch discreto | docs/02-design-system.md |
 | Componenti | Notch | mostra/nasconde il notch |
 | | Barra al posto della taskbar | spenta: barra nascosta e taskbar di Windows ripristinata |
 | | Tasto Win apre il launcher | come l'opzione nel menu della barra |

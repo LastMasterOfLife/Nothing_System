@@ -5,8 +5,8 @@ public readonly record struct Size2(double Width, double Height);
 /// <summary>Dimensioni della pillola per ogni stato, in pixel logici (DIP).</summary>
 public static class NotchLayout
 {
-    public const double TopMargin = 6;
-    public const double MaxCornerRadius = 28;
+    public const double TopMargin = 4;
+    public const double MaxCornerRadius = 14;
 
     /// <summary>Altezza del notch espanso sulle pagine con un elenco che scorre (Posta, Telefono, Agenti, Dispositivi).</summary>
     public const double TallHeight = 340;
@@ -25,11 +25,14 @@ public static class NotchLayout
         : page == NotchPage.Home ? new(For(NotchState.Expanded).Width, media ? HomeMediaHeight : HomeHeight)
         : For(NotchState.Expanded);
 
+    /// <summary>A riposo col notch discreto: una lineetta contro il bordo alto, dove il mouse la trova comunque.</summary>
+    public static Size2 Quiet { get; } = new(96, 6);
+
     public static Size2 For(NotchState state) => state switch
     {
-        NotchState.Idle => new(200, 34),
-        NotchState.Activity => new(300, 34),
-        NotchState.Alert => new(400, 40),
+        NotchState.Idle => new(144, 28),
+        NotchState.Activity => new(256, 28),
+        NotchState.Alert => new(360, 36),
         NotchState.Expanded => new(420, 172),
         NotchState.Card => new(420, 112),
         _ => throw new ArgumentOutOfRangeException(nameof(state), state, null),
