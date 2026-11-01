@@ -18,9 +18,13 @@ public enum DecisionSource
 /// <param name="Command">Il comando; in un modello, <c>{0}</c> è il valore preso dalla frase.</param>
 /// <param name="Successes">Esecuzioni riuscite dopo che qualcuno ha premuto Invio.</param>
 /// <param name="Failures">Fallimenti di fila dall'ultima riuscita.</param>
-public sealed record Shortcut(IReadOnlyList<string> Tokens, string Command, int Successes, int Failures, DateTimeOffset LastUsed, bool Seed = false)
+/// <param name="Created">Quando è nata; null per quelle di serie e per quelle imparate prima che si salvasse la data.</param>
+public sealed record Shortcut(IReadOnlyList<string> Tokens, string Command, int Successes, int Failures, DateTimeOffset LastUsed, bool Seed = false, DateTimeOffset? Created = null)
 {
     public bool IsTemplate => Tokens.Contains(ShortcutMemory.Slot);
+
+    /// <summary>La frase, com'è ridotta a parole chiave.</summary>
+    public string Phrase => string.Join(' ', Tokens);
 }
 
 public sealed record BrainDecision(string Command, DecisionSource Source, CommandRisk Risk, bool RunNow, int Successes);
@@ -86,6 +90,16 @@ public sealed partial class ShortcutMemory
         }
     }
 
+    /// <summary>Le scorciatoie imparate, con i modelli con un valore e senza quelle di serie: prima le più recenti.</summary>
+    public IReadOnlyList<Shortcut> Learned
+    {
+        get
+        {
+            lock (_gate)
+                return _exact.Values.Concat(_templates.Values).Where(s => !s.Seed).OrderByDescending(s => s.Created ?? s.LastUsed).ToArray();
+        }
+    }
+
     /// <summary>Le scorciatoie con una frase fissa, senza i modelli con un valore: per confrontarle con una richiesta.</summary>
     public IReadOnlyList<Shortcut> Phrases
     {
@@ -147,7 +161,7 @@ public sealed partial class ShortcutMemory
                 return false;
 
             var same = known is not null && string.Equals(known.Command, command, StringComparison.Ordinal);
-            var learned = new Shortcut(known?.Tokens ?? tokens, command, same ? known!.Successes + 1 : 1, 0, now, same && known!.Seed);
+            var learned = new Shortcut(known?.Tokens ?? tokens, command, same ? known!.Successes + 1 : 1, 0, now, same && known!.Seed, same ? known!.Created : now);
             Put(learned);
             _forgotten.Remove(key);
             Generalize(learned);
@@ -168,7 +182,9 @@ public sealed partial class ShortcutMemory
             return false;
         lock (_gate)
         {
-            Put(new Shortcut(tokens, command, TrustedAfter, 0, now));
+            _exact.TryGetValue(IntentText.Key(tokens), out var known);
+            var kept = known is { Seed: false } && string.Equals(known.Command, command, StringComparison.Ordinal);
+            Put(new Shortcut(tokens, command, TrustedAfter, 0, now, Created: kept ? known!.Created : now));
             _forgotten.Remove(IntentText.Key(tokens));
             Save();
             return true;
@@ -277,7 +293,9 @@ public sealed partial class ShortcutMemory
             if (a is null || !string.Equals(a, Parameterize(other.Command, other.Tokens[at]), StringComparison.Ordinal))
                 continue;
             var pattern = learned.Tokens.Select((t, i) => i == at ? Slot : t).ToArray();
-            _templates[IntentText.Key(pattern)] = new Shortcut(pattern, a, learned.Successes + other.Successes, 0, learned.LastUsed);
+            var patternKey = IntentText.Key(pattern);
+            var born = _templates.TryGetValue(patternKey, out var existing) ? existing.Created : learned.LastUsed;
+            _templates[patternKey] = new Shortcut(pattern, a, learned.Successes + other.Successes, 0, learned.LastUsed, Created: born);
         }
     }
 

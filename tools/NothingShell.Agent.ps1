@@ -20,6 +20,7 @@ $Cmdlets = @(
     'Get-PSDrive', 'Get-WmiObject', 'Get-NetConnectionProfile', 'Get-NetIPConfiguration', 'Get-Volume', 'Get-Disk', 'Get-Partition', 'Get-PhysicalDisk', 'Get-CimInstance', 'Get-ComputerInfo', 'Get-HotFix',
     'Get-TimeZone', 'Get-Culture', 'Get-NetIPAddress', 'Get-NetAdapter', 'Get-NetTCPConnection', 'Get-NetUDPEndpoint', 'Get-NetRoute',
     'Get-DnsClientServerAddress', 'Get-WinEvent', 'Get-ScheduledTask', 'Get-Printer', 'Get-LocalUser', 'Get-Command', 'Get-FileHash',
+    'Get-PnpDevice', 'Get-NetFirewallProfile', 'Get-MpComputerStatus', 'Get-SmbShare', 'Get-Host',
     'Get-Acl', 'Get-Member', 'Get-Unique', 'Test-Path', 'Join-Path', 'Split-Path', 'Resolve-Path', 'Select-String', 'Where-Object',
     'Select-Object', 'Sort-Object', 'Measure-Object', 'Group-Object', 'Compare-Object', 'ForEach-Object', 'Format-Table', 'Format-List',
     'Format-Wide', 'Out-String', 'ConvertTo-Json', 'ConvertTo-Csv'
@@ -32,7 +33,8 @@ $Modules = @{
     'Get-NetConnectionProfile' = 'NetConnection'; 'Get-NetIPConfiguration' = 'NetTCPIP'; 'Get-NetIPAddress' = 'NetTCPIP'; 'Get-NetTCPConnection' = 'NetTCPIP'; 'Get-NetUDPEndpoint' = 'NetTCPIP'; 'Get-NetRoute' = 'NetTCPIP'
     'Get-NetAdapter' = 'NetAdapter'; 'Get-Volume' = 'Storage'; 'Get-Disk' = 'Storage'; 'Get-Partition' = 'Storage'; 'Get-PhysicalDisk' = 'Storage'
     'Get-DnsClientServerAddress' = 'DnsClient'; 'Get-ScheduledTask' = 'ScheduledTasks'; 'Get-Printer' = 'PrintManagement'
-    'Get-LocalUser' = 'Microsoft.PowerShell.LocalAccounts'
+    'Get-LocalUser' = 'Microsoft.PowerShell.LocalAccounts'; 'Get-PnpDevice' = 'PnpDevice'; 'Get-NetFirewallProfile' = 'NetSecurity'
+    'Get-MpComputerStatus' = 'ConfigDefender'; 'Get-SmbShare' = 'SmbShare'; 'Get-WinEvent' = 'Microsoft.PowerShell.Diagnostics'
 }
 
 # Niente rete né sessioni verso altri computer, niente scrittura attraverso i parametri comuni.

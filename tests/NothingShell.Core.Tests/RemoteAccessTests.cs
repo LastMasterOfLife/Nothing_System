@@ -152,7 +152,8 @@ public class RemoteAccessTests
     public void ANewRequestMayGoToTheModel()
     {
         var route = RequestRouter.Route("che ore sono a tokyo", [], new ShortcutMemory());
-        Assert.Empty(route.Options);
+        Assert.Empty(route.Likely); // "che ore sono" è una scorciatoia, ma a Tokyo è un'altra domanda
+        Assert.Equal(RequestAction.Ask, route.ActionFor());
         Assert.False(route.Connection.IsConnection);
         Assert.Contains("assistente", route.Preview, StringComparison.Ordinal);
     }

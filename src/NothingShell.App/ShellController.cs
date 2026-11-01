@@ -465,7 +465,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         _taskbar.Show();
         _quickPanel?.Close();
         _brain.Dispose();
-        _assistantModel?.Dispose();
+        (_assistantModel as IDisposable)?.Dispose();
         _calendar.Dispose();
         _access.Dispose();
         _plugins.Dispose();

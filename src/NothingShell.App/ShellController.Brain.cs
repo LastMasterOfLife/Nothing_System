@@ -15,7 +15,7 @@ public sealed partial class ShellController : IAssistantPanelActions
     private readonly BrainService _brain = new();
     private AssistantWindow? _assistantWindow;
     private CommandAssistant? _assistant;
-    private OllamaAssistantModel? _assistantModel;
+    private IAssistantModel? _assistantModel;
     private IReadOnlyList<string> _assistantModels = [];
 
     public string BrainStatus => _brain.Status;
@@ -28,11 +28,36 @@ public sealed partial class ShellController : IAssistantPanelActions
 
     public event Action? BrainChanged;
 
-    public void InstallBrainModel() => _ = InstallBrainModelAsync();
+    public void InstallBrainModel() => _ = InstallBrainModelAsync(BrainModel.Default);
+
+    public bool AssistantModelInstalled => BrainService.AssistantInstalled;
+
+    public void InstallAssistantModel() => _ = InstallBrainModelAsync(BrainModel.Assistant);
 
     public void CancelBrainInstall() => _brain.CancelInstall();
 
     public void ClearBrainMemory() => _brain.ClearMemory();
+
+    public IReadOnlyList<Shortcut> LearnedShortcuts => _brain.Memory.Learned;
+
+    public bool IsUserCritical(string command) => CriticalCommands.IsInUserFile(CriticalCommands.DefaultUserPath, command);
+
+    public string? SetUserCritical(string command, bool critical)
+    {
+        try
+        {
+            if (!critical)
+                CriticalCommands.RemoveFromUserFile(CriticalCommands.DefaultUserPath, command);
+            else if (!CriticalCommands.AddToUserFile(CriticalCommands.DefaultUserPath, command))
+                return "Questo comando non si può scrivere nell'elenco.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ex.Message;
+        }
+        BrainChanged?.Invoke();
+        return null;
+    }
 
     public void OpenTerminal() => OpenTerminal(null, null, null);
 
@@ -40,9 +65,12 @@ public sealed partial class ShellController : IAssistantPanelActions
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), _brain.ProposeAsync);
 
     /// <summary>Chi risponde nel pannello, per le impostazioni.</summary>
-    public string AssistantStatus => _assistantModel is { } model
-        ? $"Risponde {model.Name}, con Ollama su questo PC"
-        : "Senza Ollama il pannello usa le scorciatoie e il modello piccolo, che propone comandi ma non scrive risposte";
+    public string AssistantStatus => _assistantModel switch
+    {
+        OllamaAssistantModel model => $"Risponde {model.Name}, con Ollama su questo PC",
+        { } model => $"Risponde {model.Name}, incorporato: occupa circa 3 GB mentre lavora",
+        null => "Senza modello il pannello usa le scorciatoie e il modello piccolo, che propone comandi ma non scrive risposte",
+    };
 
     public IReadOnlyList<string> AssistantModels => _assistantModels;
 
@@ -59,7 +87,7 @@ public sealed partial class ShellController : IAssistantPanelActions
         _assistantWindow.Ask(text);
     }
 
-    /// <summary>Passa al modello successivo fra quelli installati in Ollama.</summary>
+    /// <summary>Passa al modello successivo fra quello incorporato e quelli installati in Ollama.</summary>
     public async Task NextAssistantModelAsync()
     {
         await RefreshAssistantModelAsync(CancellationToken.None);
@@ -92,20 +120,25 @@ public sealed partial class ShellController : IAssistantPanelActions
     async Task<string> IAssistantPanelActions.PrepareAsync(CancellationToken token)
     {
         await RefreshAssistantModelAsync(token);
-        return _assistantModel is { } model ? $"{model.Name} · su questo PC" : "scorciatoie e modello piccolo · Ollama non trovato";
+        return _assistantModel is { } model ? $"{model.Name} · su questo PC" : "scorciatoie e modello piccolo · assistente non scaricato";
     }
 
     void IAssistantPanelActions.OpenInTerminal(string? phrase, string command, string? criticalReason) => OpenTerminal(phrase, command, criticalReason);
 
-    /// <summary>Quello scelto nelle impostazioni, altrimenti il primo installato. Ollama può accendersi o spegnersi in ogni momento.</summary>
+    /// <summary>
+    /// Quello scelto nelle impostazioni, altrimenti quello incorporato se è scaricato, altrimenti il primo di Ollama, che può
+    /// accendersi o spegnersi in ogni momento.
+    /// </summary>
     private async Task RefreshAssistantModelAsync(CancellationToken token)
     {
-        _assistantModels = await OllamaAssistantModel.InstalledAsync(token);
+        var embedded = BrainModel.Assistant;
+        var fromOllama = await OllamaAssistantModel.InstalledAsync(token);
+        _assistantModels = BrainService.AssistantInstalled ? [embedded.Name, .. fromOllama] : fromOllama;
         var name = _assistantModels.Contains(_settings.AssistantModel ?? string.Empty) ? _settings.AssistantModel : _assistantModels.Count > 0 ? _assistantModels[0] : null;
         if (_assistantModel?.Name != name)
         {
-            _assistantModel?.Dispose();
-            _assistantModel = name is null ? null : new OllamaAssistantModel(name);
+            (_assistantModel as IDisposable)?.Dispose();
+            _assistantModel = name is null ? null : name == embedded.Name ? new EmbeddedAssistantModel(embedded) : new OllamaAssistantModel(name);
         }
         var assistant = ((IAssistantPanelActions)this).Assistant;
         assistant.Model = _assistantModel;
@@ -127,10 +160,11 @@ public sealed partial class ShellController : IAssistantPanelActions
         BrainChanged?.Invoke();
     }
 
-    private async Task InstallBrainModelAsync()
+    private async Task InstallBrainModelAsync(BrainModel model)
     {
-        if (await _brain.InstallModelAsync() is { } problem)
+        if (await _brain.InstallModelAsync(model) is { } problem)
             MessageBox.Show(problem, "Nothing Shell", MessageBoxButton.OK, MessageBoxImage.Warning);
+        await FindAssistantModelAsync();
     }
 
     /// <summary>

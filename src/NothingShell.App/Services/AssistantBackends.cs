@@ -141,8 +141,28 @@ public sealed class AssistantRunner : IAssistantRunner
     }
 }
 
+/// <summary>Il modello incorporato che legge i risultati e risponde, in un processo a sé (docs/15-comandi-cervello.md).</summary>
+public sealed class EmbeddedAssistantModel(BrainModel model) : IAssistantModel, IDisposable
+{
+    /// <summary>Basta anche per il primo turno, che carica il modello e legge tutto il prompt.</summary>
+    private static readonly TimeSpan AnswerLimit = TimeSpan.FromMinutes(3);
+
+    private readonly BrainWorkerClient _worker = new("--assistant");
+
+    public string Name => model.Name;
+
+    public void Dispose() => _worker.Dispose();
+
+    public async Task<string?> AskAsync(string system, IReadOnlyList<AssistantTurn> turns, CancellationToken token)
+    {
+        var answer = await _worker.AskAsync(model.LocalPath, JsonSerializer.Serialize(new AssistantChat(system, turns)), AnswerLimit, token);
+        token.ThrowIfCancellationRequested();
+        return answer;
+    }
+}
+
 /// <summary>
-/// Il modello che legge i risultati e risponde: Ollama su questo PC (docs/15-comandi-cervello.md). Nulla esce dalla
+/// Il modello che legge i risultati e risponde con Ollama su questo PC (docs/15-comandi-cervello.md). Nulla esce dalla
 /// macchina. Il modello piccolo incorporato non basta: nelle prove si inventava le risposte.
 /// </summary>
 public sealed class OllamaAssistantModel : IAssistantModel, IDisposable

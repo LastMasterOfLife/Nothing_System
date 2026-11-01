@@ -24,7 +24,7 @@ public static class BrainWorker
     /// Il caricatore di LLamaSharp 0.30 non trova da solo la variante per questa CPU: si caricano prima le DLL giuste,
     /// e le sue DllImport trovano il modulo già in memoria dal nome.
     /// </summary>
-    private static void LoadNativeLibraries()
+    internal static void LoadNativeLibraries()
     {
         var native = Path.Combine(AppContext.BaseDirectory, "runtimes");
         native = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64
@@ -76,11 +76,17 @@ public sealed class BrainWorkerClient : IDisposable
 {
     private static readonly TimeSpan IdleLimit = TimeSpan.FromMinutes(5);
 
+    private readonly string _mode;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Timer _idle;
     private Process? _process;
 
-    public BrainWorkerClient() => _idle = new Timer(_ => Stop());
+    /// <param name="mode">L'opzione di NothingShell.exe che fa partire il processo del modello.</param>
+    public BrainWorkerClient(string mode = "--brain")
+    {
+        _mode = mode;
+        _idle = new Timer(_ => Stop());
+    }
 
     public bool IsLoaded => _process is { HasExited: false };
 
@@ -145,7 +151,7 @@ public sealed class BrainWorkerClient : IDisposable
         _process = null;
     }
 
-    private static Process Launch(string modelPath)
+    private Process Launch(string modelPath)
     {
         var start = new ProcessStartInfo(Environment.ProcessPath ?? throw new InvalidOperationException("percorso dell'eseguibile sconosciuto"))
         {
@@ -156,7 +162,7 @@ public sealed class BrainWorkerClient : IDisposable
             StandardInputEncoding = new UTF8Encoding(false),
             StandardOutputEncoding = new UTF8Encoding(false),
         };
-        start.ArgumentList.Add("--brain");
+        start.ArgumentList.Add(_mode);
         start.ArgumentList.Add(modelPath);
         return Process.Start(start) ?? throw new InvalidOperationException("processo del modello non avviato");
     }

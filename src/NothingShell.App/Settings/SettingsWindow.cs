@@ -170,6 +170,15 @@ public interface IShellSettingsActions
 
     void ClearBrainMemory();
 
+    /// <summary>Le scorciatoie imparate, senza quelle di serie.</summary>
+    IReadOnlyList<Shortcut> LearnedShortcuts { get; }
+
+    /// <summary>True se il comando è nell'elenco dei comandi critici dell'utente.</summary>
+    bool IsUserCritical(string command);
+
+    /// <summary>Mette o toglie il comando dall'elenco dell'utente, con effetto immediato; il motivo se non riesce.</summary>
+    string? SetUserCritical(string command, bool critical);
+
     void OpenTerminal();
 
     /// <summary>Scorciatoie dei computer con Desktop remoto (docs/16-assistente-notch.md).</summary>
@@ -185,6 +194,10 @@ public interface IShellSettingsActions
     string AssistantStatus { get; }
 
     IReadOnlyList<string> AssistantModels { get; }
+
+    bool AssistantModelInstalled { get; }
+
+    void InstallAssistantModel();
 
     Task NextAssistantModelAsync();
 
@@ -203,6 +216,7 @@ public enum SettingsPage
     Mail,
     Agenda,
     Dev,
+    Shortcuts,
     Agents,
     Connectors,
     Access,
@@ -230,6 +244,7 @@ public sealed class SettingsWindow : Window
         (SettingsPage.Mail, "Posta", "Mail nel notch e casella collegata"),
         (SettingsPage.Agenda, "Agenda", "Appuntamenti, calendari e riepilogo"),
         (SettingsPage.Dev, "Sviluppo", "Build, appunti e server locali"),
+        (SettingsPage.Shortcuts, "Scorciatoie imparate", "Frasi diventate comandi nel terminale e nel notch"),
         (SettingsPage.Agents, "Agenti", "Claude Code e altri agenti al lavoro"),
         (SettingsPage.Connectors, "Connettori", "Dispositivi, servizi e automazioni"),
         (SettingsPage.Access, "Accesso", "Blocco e sblocco"),
@@ -254,6 +269,9 @@ public sealed class SettingsWindow : Window
 
     /// <summary>Connettore di cui si stanno impostando i costi LLM.</summary>
     private ConnectorManifest? _llmDraft;
+
+    /// <summary>Scorciatoia di cui si sta guardando il dettaglio.</summary>
+    private Shortcut? _shortcut;
     private string? _libraryCategory;
     private TextBlock? _mailStatus;
     private TextBlock? _calendarStatus;
@@ -280,7 +298,7 @@ public sealed class SettingsWindow : Window
         {
             if (e.Key == Key.Escape)
             {
-                if (_draft is not null || _llmDraft is not null)
+                if (_draft is not null || _llmDraft is not null || _shortcut is not null)
                 {
                     CloseForms();
                     Rebuild();
@@ -358,12 +376,23 @@ public sealed class SettingsWindow : Window
         _scroll.ScrollToTop();
     }
 
+    /// <summary>Dettaglio di una scorciatoia imparata (anche per le istantanee).</summary>
+    public void ShowShortcut(Shortcut shortcut)
+    {
+        _selected = SettingsPage.Shortcuts;
+        CloseForms();
+        _shortcut = shortcut ?? throw new ArgumentNullException(nameof(shortcut));
+        Rebuild();
+        _scroll.ScrollToTop();
+    }
+
     private void CloseForms()
     {
         _draft = null;
         _source = null;
         _duplicate = false;
         _llmDraft = null;
+        _shortcut = null;
     }
 
     /// <summary>Ridisegna il menù e la pagina aperta (dopo una ricarica dei plugin cambiano i widget e gli errori).</summary>
@@ -399,6 +428,12 @@ public sealed class SettingsWindow : Window
                 break;
             case SettingsPage.Dev:
                 DevPage();
+                break;
+            case SettingsPage.Shortcuts:
+                if (_shortcut is { } shortcut)
+                    ShortcutDetail(shortcut);
+                else
+                    ShortcutsPage();
                 break;
             case SettingsPage.Agents:
                 AgentsPage();
@@ -458,9 +493,132 @@ public sealed class SettingsWindow : Window
     /// <summary>Lavoro nel notch, appunti intelligenti e server locali (docs/12-sviluppo.md).</summary>
     private void OnBrainChanged() => Dispatcher.BeginInvoke(() =>
     {
-        if (_selected == SettingsPage.Dev)
+        if (_selected is SettingsPage.Dev or SettingsPage.Shortcuts)
             Rebuild();
     });
+
+    /// <summary>Le scorciatoie imparate, prima le più recenti (docs/15-comandi-cervello.md).</summary>
+    private void ShortcutsPage()
+    {
+        var learned = _shell.LearnedShortcuts;
+        Section("ELENCO");
+        if (learned.Count == 0)
+        {
+            Note("Ancora nessuna. Si impara ciò che confermi nel terminale, o che chiedi di ricordare nel notch: da lì in poi non serve più il modello.", Theme.GreyBrush);
+            return;
+        }
+        Note("Si impara solo ciò che hai confermato e che è riuscito. Le scorciatoie di serie non sono qui. Apri una scorciatoia per vedere cosa fa.", Theme.GreyBrush);
+        foreach (var shortcut in learned)
+            ShortcutRow(shortcut);
+    }
+
+    /// <summary>Riga dell'elenco: la frase e il comando; un clic apre il dettaglio.</summary>
+    private void ShortcutRow(Shortcut shortcut)
+    {
+        var row = new Grid { Margin = new Thickness(0, 8, 0, 8), Background = Brushes.Transparent, Cursor = Cursors.Hand };
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 90, 0) };
+        var phrase = Label(shortcut.Phrase, 14, Theme.WhiteBrush);
+        phrase.TextTrimming = TextTrimming.CharacterEllipsis;
+        text.Children.Add(phrase);
+        var command = Label(shortcut.Command, 12, Theme.GreyBrush);
+        command.Margin = new Thickness(0, 3, 0, 0);
+        command.TextTrimming = TextTrimming.CharacterEllipsis;
+        text.Children.Add(command);
+        row.Children.Add(text);
+        var critical = CommandSafety.Reason(shortcut.Command) is not null || _shell.IsUserCritical(shortcut.Command);
+        var end = Label(critical ? "CRITICA  ›" : "›", critical ? 10 : 14, critical ? Theme.RedBrush : Theme.GreyBrush);
+        end.HorizontalAlignment = HorizontalAlignment.Right;
+        end.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(end);
+        row.MouseEnter += (_, _) => command.Foreground = Theme.WhiteBrush;
+        row.MouseLeave += (_, _) => command.Foreground = Theme.GreyBrush;
+        row.MouseLeftButtonDown += (_, e) => e.Handled = true;
+        row.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            ShowShortcut(shortcut);
+        };
+        AddRow(row);
+    }
+
+    /// <summary>Cosa fa una scorciatoia, da quando c'è, e il pulsante che la mette fra i comandi critici.</summary>
+    private void ShortcutDetail(Shortcut shortcut)
+    {
+        var back = Label("‹  SCORCIATOIE", 11, Theme.GreyBrush);
+        back.Cursor = Cursors.Hand;
+        back.Margin = new Thickness(0, 0, 0, 14);
+        back.MouseLeftButtonDown += (_, e) => e.Handled = true;
+        back.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            CloseForms();
+            Rebuild();
+        };
+        _page.Children.Add(back);
+
+        Section("COSA FA");
+        CardTitle(shortcut.Phrase, shortcut.IsTemplate ? "CON UN VALORE" : null, Theme.GreyBrush);
+        DetailRow("Descrizione", CommandExplainer.Describe(shortcut.Command));
+        DetailRow("Comando", shortcut.Command);
+        DetailRow("Quando parte", CommandExplainer.Effect(shortcut));
+        if (shortcut.IsTemplate)
+            Note($"{ShortcutMemory.Slot} è la parola che cambia nella frase.", Theme.GreyBrush);
+
+        Section("STORIA");
+        DetailRow("Creata", shortcut.Created is { } created ? Moment(created) : "Non registrata: è stata imparata prima che si salvasse la data");
+        DetailRow("Ultimo uso", Moment(shortcut.LastUsed));
+        var runs = shortcut.Successes == 1 ? "1 riuscita" : $"{shortcut.Successes} riuscite";
+        DetailRow("Esecuzioni", shortcut.Failures switch
+        {
+            0 => runs,
+            1 => $"{runs}, l'ultima volta è fallita",
+            var failures => $"{runs}, le ultime {failures} volte è fallita",
+        });
+
+        Section("COMANDI CRITICI");
+        var result = Note(string.Empty, Theme.RedBrush);
+        result.Visibility = Visibility.Collapsed;
+        void Set(bool critical)
+        {
+            if (_shell.SetUserCritical(shortcut.Command, critical) is { } error)
+            {
+                result.Text = error;
+                result.Visibility = Visibility.Visible;
+                return;
+            }
+            Rebuild();
+        }
+        if (_shell.IsUserCritical(shortcut.Command))
+        {
+            Note("È nel tuo elenco: parte solo dopo una conferma esplicita, due clic nel notch e scrivere SI nel terminale.", Theme.WhiteBrush);
+            ButtonRow(("TOGLI DALL'ELENCO", () => Set(false)));
+        }
+        else if (CommandSafety.Reason(shortcut.Command) is { } reason)
+        {
+            Note($"È già critico: {reason}.", Theme.WhiteBrush);
+        }
+        else
+        {
+            Note("Da subito, questo comando chiederà una conferma esplicita: due clic nel notch, scrivere SI quando il terminale lo propone. " +
+                 "Scritto a mano nel terminale parte comunque com'è. Vale per il comando esatto, non per quelli che gli somigliano.", Theme.GreyBrush);
+            ButtonRow(primary: true, ("AGGIUNGI AI COMANDI CRITICI", () => Set(true)));
+        }
+    }
+
+    /// <summary>Riga con un'etichetta grigia e sotto il valore, su più righe se serve.</summary>
+    private void DetailRow(string label, string value)
+    {
+        var row = new StackPanel { Margin = new Thickness(0, 8, 0, 8) };
+        row.Children.Add(Label(label, 11, Theme.GreyBrush));
+        var text = Label(value, 14, Theme.WhiteBrush);
+        text.Margin = new Thickness(0, 3, 0, 0);
+        text.TextWrapping = TextWrapping.Wrap;
+        row.Children.Add(text);
+        AddRow(row);
+    }
+
+    private static string Moment(DateTimeOffset at) =>
+        at.ToLocalTime().ToString("d MMMM yyyy, HH:mm", System.Globalization.CultureInfo.GetCultureInfo("it-IT"));
 
     /// <summary>Terminale PowerShell con il cervello dei comandi (docs/15-comandi-cervello.md).</summary>
     private void BrainSection()
@@ -469,7 +627,7 @@ public sealed class SettingsWindow : Window
         Note("Il terminale Nothing è PowerShell vero: ogni comando parte com'è. Le frasi che PowerShell non capisce passano dalle " +
              "scorciatoie imparate e poi dal modello locale; nel launcher si scrive > e il comando o la frase.", Theme.GreyBrush);
         Note($"{_shell.BrainStatus} · {_shell.BrainLearned} scorciatoie imparate", Theme.WhiteBrush);
-        ButtonRow(("APRI TERMINALE", _shell.OpenTerminal),
+        ButtonRow(("APRI TERMINALE", _shell.OpenTerminal), ("VEDI LE SCORCIATOIE", () => Show(SettingsPage.Shortcuts)),
             _shell.BrainInstalling ? ("ANNULLA DOWNLOAD", _shell.CancelBrainInstall)
             : _shell.BrainModelInstalled ? ("DIMENTICA LE SCORCIATOIE", _shell.ClearBrainMemory)
             : ("SCARICA IL MODELLO", _shell.InstallBrainModel));
@@ -478,14 +636,17 @@ public sealed class SettingsWindow : Window
         Note("Il pulsante in basso a destra nel notch apre una casella: scrivi cosa ti serve e i comandi di sola lettura partono da " +
              "soli, fino alla risposta. Tutto resta su questo PC.", Theme.GreyBrush);
         Note(_shell.AssistantStatus, Theme.WhiteBrush);
+        static Func<Task> Now(Action action) => () =>
+        {
+            action();
+            return Task.CompletedTask;
+        };
+        var actions = new List<(string Text, Func<Task> Click)> { ("APRI", Now(_shell.OpenAssistant)) };
         if (_shell.AssistantModels.Count > 1)
-            ButtonRow(("APRI", () =>
-            {
-                _shell.OpenAssistant();
-                return Task.CompletedTask;
-            }), ("CAMBIA MODELLO", _shell.NextAssistantModelAsync));
-        else
-            ButtonRow(("APRI", _shell.OpenAssistant));
+            actions.Add(("CAMBIA MODELLO", _shell.NextAssistantModelAsync));
+        if (!_shell.AssistantModelInstalled)
+            actions.Add(_shell.BrainInstalling ? ("ANNULLA DOWNLOAD", Now(_shell.CancelBrainInstall)) : ("SCARICA IL MODELLO (2,6 GB)", Now(_shell.InstallAssistantModel)));
+        ButtonRow([.. actions]);
 
         Section("COMANDI CRITICI");
         Note("Partono solo dopo una conferma esplicita, anche se sono scorciatoie imparate: nel notch due clic, nel terminale bisogna scrivere SI. " +
@@ -1402,6 +1563,7 @@ public sealed class SettingsWindow : Window
             {
                 SettingsPage.Connectors => _shell.ConnectorResults.Count,
                 SettingsPage.Plugins => _shell.PluginResults.Count(r => r.Manifest is not null),
+                SettingsPage.Shortcuts => _shell.LearnedShortcuts.Count,
                 _ => 0,
             };
             if (count > 0)

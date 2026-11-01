@@ -108,8 +108,61 @@ public static class CriticalCommands
     /// <summary>Il testo con cui si crea il file dell'utente, da aprire con le impostazioni.</summary>
     public static string UserFileTemplate { get; } =
         "# Comandi critici aggiuntivi di Nothing Shell: uno per riga, come al prompt, * in fondo a una parola per una famiglia.\n" +
-        "# Si aggiungono a quelli di serie, che non si possono togliere. Valgono dal prossimo avvio.\n" +
+        "# Si aggiungono a quelli di serie, che non si possono togliere. Scritti qui a mano valgono dal prossimo avvio.\n" +
         "# Per esempio:\n# kubectl delete\n# terraform destroy\n";
+
+    /// <summary>
+    /// La voce dell'elenco per il comando di una scorciatoia: il comando esatto, scritto come lo confronta <see cref="Reason"/>;
+    /// il valore di un modello ("Get-Process {0}") diventa <c>*</c>. Null se non si può scrivere come voce.
+    /// </summary>
+    public static string? UserEntry(string command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var entry = Normalize(command).Replace(ShortcutMemory.Slot, "*", StringComparison.Ordinal);
+        return entry.Length == 0 || entry.StartsWith('#') ? null : entry;
+    }
+
+    /// <summary>True se la voce di <paramref name="command"/> è nel file dell'utente.</summary>
+    public static bool IsInUserFile(string path, string command)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        return UserEntry(command) is { } entry && (AtomicFile.TryReadAllText(path) ?? string.Empty).Split('\n').Any(line => IsEntry(line, entry));
+    }
+
+    /// <summary>Aggiunge la voce al file dell'utente e vale da subito; false se il comando non si può scrivere come voce.</summary>
+    public static bool AddToUserFile(string path, string command)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        if (UserEntry(command) is not { } entry)
+            return false;
+        if (!IsInUserFile(path, command))
+        {
+            var text = AtomicFile.TryReadAllText(path) ?? UserFileTemplate;
+            AtomicFile.WriteAllText(path, $"{text}{(text.EndsWith('\n') ? string.Empty : "\n")}{entry}\n");
+        }
+        LoadUserFile(path);
+        return true;
+    }
+
+    /// <summary>Toglie la voce dal file dell'utente e vale da subito. Quelle di serie non stanno lì e restano.</summary>
+    public static void RemoveFromUserFile(string path, string command)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        if (UserEntry(command) is not { } entry || AtomicFile.TryReadAllText(path) is not { } text)
+            return;
+        AtomicFile.WriteAllText(path, string.Join('\n', text.Split('\n').Where(line => !IsEntry(line, entry))));
+        LoadUserFile(path);
+    }
+
+    /// <summary>True se <paramref name="entry"/>, scritta come una voce dell'elenco, vale per <paramref name="command"/>.</summary>
+    public static bool Covers(string entry, string command)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentNullException.ThrowIfNull(command);
+        return Compile([entry]).IsMatch(Normalize(command));
+    }
+
+    private static bool IsEntry(string line, string entry) => line.Trim().Equals(entry, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Il motivo per cui <paramref name="normalized"/> è critico, o null. Il testo è quello di <see cref="Normalize"/>.</summary>
     public static string? Reason(string normalized, bool readOnly)
@@ -183,8 +236,9 @@ public static class CriticalCommands
         return isCmdlet ? $@"(?<![\w-]){body}{WordEnd}" : $@"{CommandStart}{body}(?:\.(?:exe|com|cmd|bat))?{WordEnd}";
     }
 
+    /// <summary><c>*</c> vale anche per un <c>*</c> scritto davvero nel comando: la voce di <c>dir *.txt</c> deve coprire <c>dir *.txt</c>.</summary>
     private static string Word(string word) =>
-        word.EndsWith('*') ? Regex.Escape(word[..^1]) + @"[\w-]*" : Regex.Escape(word);
+        string.Join(@"[\w.*-]*", word.Split('*').Select(Regex.Escape));
 
     private static Regex CmdletName() => new(@"^[A-Za-z]+-[A-Za-z*]+$", RegexOptions.CultureInvariant);
 

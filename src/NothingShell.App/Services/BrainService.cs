@@ -41,6 +41,8 @@ public sealed class BrainService : IDisposable
 
     public bool ModelInstalled => File.Exists(_model.LocalPath);
 
+    public static bool AssistantInstalled => File.Exists(BrainModel.Assistant.LocalPath);
+
     public bool Installing => _install is not null;
 
     /// <summary>Stato del modello per le impostazioni. Può cambiare da un thread qualsiasi.</summary>
@@ -95,7 +97,7 @@ public sealed class BrainService : IDisposable
         return BrainProtocol.Reply(decision, clock.Elapsed.TotalMilliseconds);
     }
 
-    /// <summary>Un comando dal modello piccolo per l'assistente, se non c'è Ollama: solo se esiste, non una frase.</summary>
+    /// <summary>Un comando dal modello piccolo per l'assistente, se non c'è un modello che sa rispondere: solo se esiste, non una frase.</summary>
     public async Task<string?> ProposeAsync(string input, CancellationToken token)
     {
         if (!ModelInstalled)
@@ -118,21 +120,23 @@ public sealed class BrainService : IDisposable
         Changed?.Invoke();
     }
 
-    /// <summary>Scarica il modello riprendendo dal punto in cui si era fermato; null se riuscito, altrimenti il motivo.</summary>
-    public async Task<string?> InstallModelAsync()
+    /// <summary>Scarica un modello riprendendo dal punto in cui si era fermato; null se riuscito, altrimenti il motivo.</summary>
+    /// <param name="model">Quello piccolo del terminale, se non si dice altro.</param>
+    public async Task<string?> InstallModelAsync(BrainModel? model = null)
     {
-        if (ModelInstalled)
+        model ??= _model;
+        if (File.Exists(model.LocalPath))
             return null;
         if (_install is not null)
             return "download già in corso";
         _install = new CancellationTokenSource();
         var token = _install.Token;
-        var part = _model.LocalPath + ".part";
+        var part = model.LocalPath + ".part";
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(part)!);
             using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-            using var request = new HttpRequestMessage(HttpMethod.Get, _model.Url);
+            using var request = new HttpRequestMessage(HttpMethod.Get, model.Url);
             var have = File.Exists(part) ? new FileInfo(part).Length : 0;
             if (have > 0)
                 request.Headers.Range = new RangeHeaderValue(have, null);
@@ -151,17 +155,17 @@ public sealed class BrainService : IDisposable
                     if (last.ElapsedMilliseconds < 1000)
                         continue;
                     last.Restart();
-                    Progress($"Scarico {_model.Name}: {file.Length / (1024 * 1024)} di {_model.Bytes / (1024 * 1024)} MB");
+                    Progress($"Scarico {model.Name}: {file.Length / (1024 * 1024)} di {model.Bytes / (1024 * 1024)} MB");
                 }
             }
 
-            Progress($"Controllo {_model.Name}…");
-            if (!await HashMatchesAsync(part, _model.Sha256, token))
+            Progress($"Controllo {model.Name}…");
+            if (!await HashMatchesAsync(part, model.Sha256, token))
             {
                 File.Delete(part);
                 return "il file scaricato non corrisponde all'hash atteso";
             }
-            File.Move(part, _model.LocalPath, overwrite: true);
+            File.Move(part, model.LocalPath, overwrite: true);
             return null;
         }
         catch (OperationCanceledException)

@@ -41,6 +41,14 @@ public static partial class CommandSafety
         "status", "log", "diff", "show", "blame", "shortlog", "describe", "rev-parse",
     };
 
+    private static readonly HashSet<string> GitLists = new(StringComparer.Ordinal) { "branch", "tag", "remote" };
+
+    /// <summary>Le stesse di tools/NothingShell.Agent.ps1. Le maiuscole contano: <c>-d</c> e <c>-D</c> non elencano.</summary>
+    private static readonly HashSet<string> GitListOptions = new(StringComparer.Ordinal)
+    {
+        "-a", "-r", "-l", "-v", "-vv", "--list", "--all", "--remotes", "--show-current",
+    };
+
     /// <summary>Separatori di comandi, reindirizzamenti, sottoespressioni, assegnazioni e chiamate a .NET.</summary>
     [GeneratedRegex(@"[;&<>`]|\$\(|::|\.\w+\(|\$[\w:]+\s*=|@\{", RegexOptions.CultureInvariant)]
     private static partial Regex CompoundPattern();
@@ -68,6 +76,13 @@ public static partial class CommandSafety
         return CriticalCommands.Reason(CriticalCommands.Normalize(text), readOnly);
     }
 
+    /// <summary><c>git branch</c>, <c>tag</c> e <c>remote</c>, a partire dal sottocomando: leggono solo se elencano, con un nome creano o cancellano.</summary>
+    public static bool IsGitListing(IReadOnlyList<string> words)
+    {
+        ArgumentNullException.ThrowIfNull(words);
+        return words.Count > 0 && GitLists.Contains(words[0]) && words.Skip(1).All(GitListOptions.Contains);
+    }
+
     private static bool IsReadOnly(string text)
     {
         if (CompoundPattern().IsMatch(text.Replace("[math]::", string.Empty, StringComparison.OrdinalIgnoreCase)))
@@ -91,7 +106,7 @@ public static partial class CommandSafety
         if (dash > 0 && ReadVerbs.Contains(name[..dash]))
             return !words.Any(w => w.StartsWith("-OutFile", StringComparison.OrdinalIgnoreCase));
         if (name.Equals("git", StringComparison.OrdinalIgnoreCase))
-            return words.Length > 1 && ReadGit.Contains(words[1]);
+            return words.Length > 1 && (ReadGit.Contains(words[1]) || IsGitListing(words[1..]));
         if (name.Equals("ipconfig", StringComparison.OrdinalIgnoreCase))
             return words.Length == 1 || (words.Length == 2 && words[1].Equals("/all", StringComparison.OrdinalIgnoreCase));
         return ReadPrograms.Contains(name) && !words.Skip(1).Any(w => w.StartsWith('/'));

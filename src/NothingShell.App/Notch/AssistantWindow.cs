@@ -141,7 +141,7 @@ public sealed class AssistantWindow : Window, IAssistantView
         ArgumentNullException.ThrowIfNull(fill);
         Motion.Suspended = true;
         _log.Children.Clear();
-        _who.Text = "qwen3:8b · su questo PC";
+        _who.Text = "Qwen3.5 4B · su questo PC";
         fill(this);
         var root = (FrameworkElement)Content;
         root.Width = Width;

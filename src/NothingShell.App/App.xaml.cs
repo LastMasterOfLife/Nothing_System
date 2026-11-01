@@ -108,6 +108,10 @@ public partial class App : Application
                 await BrainWorker.RunAsync(model);
                 Shutdown();
                 return;
+            case ["--assistant", var model]:
+                await AssistantWorker.RunAsync(model);
+                Shutdown();
+                return;
             case ["--brain-check", var report]:
                 await BrainCheck(report);
                 Shutdown();
@@ -128,6 +132,11 @@ public partial class App : Application
             case ["--brain-install"]:
                 using (var brain = new BrainService())
                     Console.WriteLine(await brain.InstallModelAsync() ?? "installato");
+                Shutdown();
+                return;
+            case ["--assistant-install"]:
+                using (var brain = new BrainService())
+                    Console.WriteLine(await brain.InstallModelAsync(BrainModel.Assistant) ?? "installato");
                 Shutdown();
                 return;
             case ["--restore-taskbar"]:
@@ -595,11 +604,11 @@ public partial class App : Application
             memory.Decide("mi mostri quanta ram è libera?");
         lines.Add($"scorciatoia: {clock.Elapsed.TotalMilliseconds * 1000 / Rounds:0.0} µs a decisione");
 
+        var runner = new AssistantRunner();
         foreach (var command in ShortcutSeeds.All.Select(s => s.Command).Distinct())
         {
-            var encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(command + " | Out-Null"));
-            var result = await DevTools.RunAsync("powershell.exe", $"-NoProfile -EncodedCommand {encoded}", Environment.CurrentDirectory, TimeSpan.FromSeconds(30));
-            lines.Add($"{(result is { ExitCode: 0 } ? "ok " : "NO ")} {command}");
+            var run = await runner.RunReadOnlyAsync(command, CancellationToken.None);
+            lines.Add(run.Status == AssistantRunStatus.Ok ? $"ok  {command}" : $"NO  {command} ({run.Status}: {run.Reason}{run.Error})");
         }
 
         using var brain = new BrainService();
@@ -617,15 +626,17 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// L'assistente vero, con Ollama e l'esecutore limitato, senza interfaccia. Non conferma mai nulla e non impara: ogni
-    /// richiesta di conferma risponde no, così quello che non è sola lettura non parte.
+    /// L'assistente vero, col modello incorporato o Ollama e l'esecutore limitato, senza interfaccia. Non conferma mai nulla e
+    /// non impara: ogni richiesta di conferma risponde no, così quello che non è sola lettura non parte.
     /// </summary>
     private static async Task AssistantCheck(string file, string[] questions)
     {
         var lines = new List<string>();
         var models = await OllamaAssistantModel.InstalledAsync(CancellationToken.None);
-        using var model = models.Count > 0 ? new OllamaAssistantModel(models[0]) : null;
-        lines.Add(model is null ? "Ollama non trovato" : $"modello: {model.Name}");
+        IAssistantModel? model = File.Exists(BrainModel.Assistant.LocalPath) ? new EmbeddedAssistantModel(BrainModel.Assistant)
+            : models.Count > 0 ? new OllamaAssistantModel(models[0]) : null;
+        using var disposal = model as IDisposable;
+        lines.Add(model is null ? "nessun modello trovato" : $"modello: {model.Name}");
         foreach (var question in questions)
         {
             var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -688,6 +699,12 @@ public partial class App : Application
         {
             settings.Show(page);
             SaveSnapshot(root, Path.Combine(folder, $"settings-{page.ToString().ToLowerInvariant()}.png"));
+        }
+        var learned = new SnapshotSettings(plugins.Results).LearnedShortcuts;
+        foreach (var (shortcut, name) in new[] { (learned[0], "old"), (learned[1], "ok"), (learned[2], "template"), (learned[3], "builtin"), (learned[4], "user") })
+        {
+            settings.ShowShortcut(shortcut);
+            SaveSnapshot(root, Path.Combine(folder, $"settings-shortcut-{name}.png"));
         }
         settings.ShowConnectorTemplate("homeassistant");
         root.Height = settings.Height;
@@ -1042,9 +1059,28 @@ public partial class App : Application
         {
         }
 
-        public string AssistantStatus => "Risponde qwen3:8b, con Ollama su questo PC";
+        public IReadOnlyList<Shortcut> LearnedShortcuts { get; } =
+        [
+            new(["spazio", "libero", "pc"], "Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{n='LiberoGB';e={$_.Free/1GB}}, @{n='UsatoGB';e={$_.Used/1GB}}", 2, 0, new DateTimeOffset(2026, 10, 31, 21, 32, 0, TimeSpan.FromHours(1))),
+            new(["servizi", "attivi", "windows"], "Get-Service | Where-Object Status -eq Running", 4, 0, new DateTimeOffset(2026, 10, 31, 19, 52, 0, TimeSpan.FromHours(1)), Created: new DateTimeOffset(2026, 10, 20, 9, 15, 0, TimeSpan.FromHours(2))),
+            new(["processo", ShortcutMemory.Slot], "Get-Process {0}", 2, 0, new DateTimeOffset(2026, 10, 29, 11, 0, 0, TimeSpan.FromHours(1)), Created: new DateTimeOffset(2026, 10, 29, 11, 0, 0, TimeSpan.FromHours(1))),
+            new(["svuota", "cestino"], "Clear-RecycleBin -Force", 1, 0, new DateTimeOffset(2026, 10, 25, 18, 0, 0, TimeSpan.FromHours(2)), Created: new DateTimeOffset(2026, 10, 25, 18, 0, 0, TimeSpan.FromHours(2))),
+            new(["spegni", "vm"], "vmctl stop lavoro", 1, 1, new DateTimeOffset(2026, 10, 24, 18, 0, 0, TimeSpan.FromHours(2)), Created: new DateTimeOffset(2026, 10, 22, 8, 30, 0, TimeSpan.FromHours(2))),
+        ];
 
-        public IReadOnlyList<string> AssistantModels => ["qwen3:8b"];
+        public bool IsUserCritical(string command) => command.StartsWith("vmctl", StringComparison.Ordinal);
+
+        public string? SetUserCritical(string command, bool critical) => null;
+
+        public bool AssistantModelInstalled => true;
+
+        public void InstallAssistantModel()
+        {
+        }
+
+        public string AssistantStatus => "Risponde Qwen3.5 4B, incorporato: occupa circa 3 GB mentre lavora";
+
+        public IReadOnlyList<string> AssistantModels => ["Qwen3.5 4B"];
 
         public Task NextAssistantModelAsync() => Task.CompletedTask;
 
@@ -1268,7 +1304,7 @@ public partial class App : Application
     {
         public CommandAssistant Assistant { get; } = new(new ShortcutMemory(null, []), new AssistantRunner(), string.Empty);
 
-        public Task<string> PrepareAsync(CancellationToken token) => Task.FromResult("qwen3:8b · su questo PC");
+        public Task<string> PrepareAsync(CancellationToken token) => Task.FromResult("Qwen3.5 4B · su questo PC");
 
         public void OpenTerminal()
         {
