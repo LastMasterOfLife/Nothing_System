@@ -32,6 +32,9 @@ public sealed record ConnectorField(string Key, string Label, FieldKind Kind = F
 
     /// <summary>Forma che il valore deve avere: i valori entrano in comandi e indirizzi.</summary>
     public string? Pattern { get; init; }
+
+    /// <summary>Controllo in più sul valore (una query di sola lettura): il motivo dell'errore, null se va bene.</summary>
+    public Func<string, string?>? Validate { get; init; }
 }
 
 /// <summary>Valori del modulo, già controllati: vuoti per i campi facoltativi lasciati in bianco.</summary>
@@ -214,6 +217,137 @@ public static partial class ConnectorCatalog
             Permission = "Esegue PowerShell per leggere i file della cartella e calcolarne l'impronta (Get-FileHash); non cancella niente.",
         },
 
+        // ── Questo PC: programmi, code e attività (docs/18-connettori-diagnostica.md) ──
+        new("processo-dettaglio", "Programma: salute", "Questo PC", "Un programma in esecuzione: CPU, memoria, thread, handle e da quanto è partito (un riavvio improvviso si vede).",
+            [
+                new("process", "Nome del processo") { Hint = "w3wp", Pattern = @"^[\w.\-]+$" },
+                new("cpu", "Avvisa sopra (% CPU)", FieldKind.Number) { Optional = true },
+                new("mem", "Avvisa sopra (MB di memoria)", FieldKind.Number) { Optional = true },
+                new("handles", "Avvisa sopra (handle)", FieldKind.Number) { Optional = true },
+                new("restart", "Avvisa se è partito da meno di (minuti)", FieldKind.Number) { Optional = true },
+            ],
+            v =>
+            {
+                var name = Quote(Regex.Replace(v["process"], @"\.exe$", string.Empty, RegexOptions.IgnoreCase));
+                return PowerShell(
+                    $"$p = @(Get-Process -Name {name} -ErrorAction SilentlyContinue); " +
+                    "if ($p.Count -eq 0) { $o = @{ stato = 'FERMO'; istanze = 0; cpu = 0; memoria = 0; thread = 0; handle = 0; minuti = 'n.d.' } } else { " +
+                    "$t1 = ($p | Measure-Object CPU -Sum).Sum; Start-Sleep -Seconds 1; " +
+                    $"$q = @(Get-Process -Name {name} -ErrorAction SilentlyContinue); if ($q.Count -eq 0) {{ $q = $p }}; " +
+                    "$t2 = ($q | Measure-Object CPU -Sum).Sum; " +
+                    "$st = @($q | ForEach-Object { try { $_.StartTime } catch { $null } } | Where-Object { $_ } | Sort-Object -Descending); " +
+                    "$o = @{ stato = 'ATTIVO'; istanze = $q.Count; cpu = [math]::Round(([double]$t2 - [double]$t1) / [Environment]::ProcessorCount * 100); " +
+                    "memoria = [math]::Round(($q | Measure-Object WorkingSet64 -Sum).Sum / 1MB); thread = [int](($q | ForEach-Object { $_.Threads.Count } | Measure-Object -Sum).Sum); " +
+                    "handle = [int](($q | Measure-Object HandleCount -Sum).Sum); minuti = $(if ($st.Count) { [math]::Round(((Get-Date) - $st[0]).TotalMinutes) } else { 'n.d.' }) } }; $o | ConvertTo-Json",
+                    30,
+                    Reading("Stato", "{stato}").With("alertOn", "FERMO"),
+                    Reading("Istanze", "{istanze}"),
+                    Reading("CPU", "{cpu}", "%").With("above", v.Number("cpu")),
+                    Reading("Memoria", "{memoria}", "MB").With("above", v.Number("mem")),
+                    Reading("Thread", "{thread}"),
+                    Reading("Handle", "{handle}").With("above", v.Number("handles")),
+                    Reading("In esecuzione da", "{minuti}", "min").With("below", v.Number("restart")));
+            })
+        {
+            Permission = "Esegue PowerShell per leggere i contatori del processo (Get-Process): non lo tocca.",
+        },
+        new("log-errori", "Log: errori e attività", "Questo PC", "Quante delle ultime righe di un log contengono errori, l'ultima di queste e da quanto il file non cambia (programma fermo).",
+            [
+                new("path", "Percorso del file") { Hint = @"C:\app\logs\app.log" },
+                new("pattern", "Espressione da cercare") { Default = "error|errore|exception|fail|fatal", Hint = "espressione regolare, senza distinguere maiuscole", Pattern = @"^[^\r\n]+$" },
+                new("lines", "Righe da guardare", FieldKind.Number) { Default = "1000" },
+                new("max", "Avvisa sopra (righe trovate)", FieldKind.Number) { Optional = true },
+                new("stale", "Avvisa se non cambia da (minuti)", FieldKind.Number) { Optional = true },
+            ],
+            v => PowerShell(
+                $"$f = Get-Item -LiteralPath {Quote(v["path"])} -ErrorAction Stop; $l = @(Get-Content -LiteralPath {Quote(v["path"])} -Tail {(int)Math.Clamp(v.Number("lines") ?? 1000, 1, 20000)} -ErrorAction Stop); " +
+                $"$m = @($l | Where-Object {{ $_ -match {Quote(v["pattern"])} }}); $u = $(if ($m.Count) {{ \"$($m[-1])\".Trim() }} else {{ '' }}); if ($u.Length -gt 160) {{ $u = $u.Substring(0, 160) }}; " +
+                "@{ trovate = $m.Count; ultima = $u; fermo = [math]::Round(((Get-Date) - $f.LastWriteTime).TotalMinutes) } | ConvertTo-Json",
+                60,
+                Reading("Righe con errori", "{trovate}").With("above", v.Number("max")),
+                Reading("Ultima", "{ultima}"),
+                Reading("Non cambia da", "{fermo}", "min").With("above", v.Number("stale"))))
+        {
+            Permission = "Esegue PowerShell per leggere le ultime righe del file (Get-Content): non lo modifica.",
+        },
+        new("cartella-coda", "Cartella di coda", "Questo PC", "File in attesa in una cartella (spool, importazioni, posta in uscita) e da quanto aspetta il più vecchio: una coda ferma diventa un avviso.",
+            [
+                new("path", "Cartella") { Hint = @"C:\spool\in o \\server\scambio\in" },
+                new("filter", "Solo i file") { Default = "*", Hint = "*.xml", Pattern = @"^[\w.*?\-]+$" },
+                new("max", "Avvisa sopra (file)", FieldKind.Number) { Optional = true },
+                new("age", "Avvisa se il più vecchio aspetta da (minuti)", FieldKind.Number) { Optional = true },
+            ],
+            v => PowerShell(
+                $"$f = @(Get-ChildItem -LiteralPath {Quote(v["path"])} -File -Force -Filter {Quote(v["filter"])} -ErrorAction Stop); $old = $f | Sort-Object LastWriteTime | Select-Object -First 1; " +
+                "@{ file = $f.Count; minuti = $(if ($old) { [math]::Round(((Get-Date) - $old.LastWriteTime).TotalMinutes) } else { 0 }); nome = $(if ($old) { $old.Name } else { '' }) } | ConvertTo-Json",
+                60,
+                Reading("In coda", "{file}", "file").With("above", v.Number("max")),
+                Reading("Il più vecchio aspetta", "{minuti}", "min").With("above", v.Number("age")),
+                Reading("Nome", "{nome}")))
+        {
+            Permission = "Esegue PowerShell per elencare i file della cartella (Get-ChildItem): non li apre, non li sposta e non li cancella.",
+        },
+        new("file-recente", "File più recente", "Questo PC", "Quanto è vecchio l'ultimo file di una cartella (backup, esportazioni): \"l'ultimo backup ha 3 giorni\" diventa un avviso.",
+            [
+                new("path", "Cartella") { Hint = @"D:\backup" },
+                new("filter", "Solo i file") { Default = "*", Hint = "*.bak", Pattern = @"^[\w.*?\-]+$" },
+                new("max", "Avvisa oltre (ore)", FieldKind.Number) { Default = "26" },
+                new("minmb", "Avvisa sotto (MB)", FieldKind.Number) { Optional = true },
+            ],
+            v => PowerShell(
+                $"$f = Get-ChildItem -LiteralPath {Quote(v["path"])} -File -Force -Filter {Quote(v["filter"])} -ErrorAction Stop | Sort-Object LastWriteTime -Descending | Select-Object -First 1; " +
+                "$o = if ($f) { @{ stato = 'OK'; nome = $f.Name; ore = [math]::Round(((Get-Date) - $f.LastWriteTime).TotalHours, 1); mb = [math]::Round($f.Length / 1MB, 1) } } else { @{ stato = 'NESSUN FILE'; nome = ''; ore = 'n.d.'; mb = 0 } }; $o | ConvertTo-Json",
+                300,
+                Reading("Stato", "{stato}").With("alertOn", "NESSUN FILE"),
+                Reading("Ultimo file", "{nome}"),
+                Reading("Età", "{ore}", "ore").With("above", v.Number("max")),
+                Reading("Dimensione", "{mb}", "MB").With("below", v.Number("minmb"))))
+        {
+            Permission = "Esegue PowerShell per elencare i file della cartella (Get-ChildItem): non li apre, non li sposta e non li cancella.",
+        },
+        new("attivita-pianificata", "Attività pianificata", "Questo PC", "Una attività di Windows (Utilità di pianificazione): stato, ultimo esito, da quanto non gira e quando riparte.",
+            [
+                new("task", "Nome dell'attività") { Hint = "Backup notturno", Pattern = @"^[\w.\- ]+$" },
+                new("hours", "Avvisa se non gira da (ore)", FieldKind.Number) { Optional = true },
+            ],
+            v => PowerShell(
+                $"$t = Get-ScheduledTask -TaskName {Quote(v["task"])} -ErrorAction Stop | Select-Object -First 1; $i = $t | Get-ScheduledTaskInfo; $r = [int64]$i.LastTaskResult; " +
+                // 0 = riuscita, 267009 = in corso, 267011 = mai partita: gli altri codici sono errori
+                "$e = if ($r -eq 0 -or $r -eq 267009 -or $r -eq 267011) { 'OK' } else { 'ERRORE' }; " +
+                "$ore = if ($i.LastRunTime -and $i.LastRunTime.Year -gt 2000) { [math]::Round(((Get-Date) - $i.LastRunTime).TotalHours, 1) } else { 'mai' }; " +
+                "$next = if ($i.NextRunTime -and $i.NextRunTime.Year -gt 2000) { $i.NextRunTime.ToString('dd/MM HH:mm') } else { 'nessuna' }; " +
+                "@{ stato = \"$($t.State)\"; esito = $e; codice = ('0x{0:X}' -f $r); ore = $ore; prossima = $next } | ConvertTo-Json",
+                120,
+                Reading("Stato", "{stato}").With("alertOn", "Disabled"),
+                Reading("Ultimo esito", "{esito}").With("alertOn", "ERRORE"),
+                Reading("Codice", "{codice}"),
+                Reading("Ultima esecuzione", "{ore}", "ore fa").With("above", v.Number("hours")),
+                Reading("Prossima", "{prossima}")))
+        {
+            Permission = "Esegue PowerShell per leggere l'attività (Get-ScheduledTask): non la avvia e non la modifica.",
+        },
+        new("registro-eventi", "Registro eventi di Windows", "Questo PC", "Errori e arresti anomali delle applicazioni nelle ultime ore, con l'ultimo messaggio.",
+            [
+                new("log", "Registro") { Default = "Application", Hint = "Application o System", Pattern = "^(Application|System)$" },
+                new("source", "Sorgente (vuoto = tutte)") { Hint = ".NET Runtime, Application Error, MSSQLSERVER", Optional = true, Pattern = @"^[\w.\- /]+$" },
+                new("hours", "Ore da guardare", FieldKind.Number) { Default = "24" },
+                new("max", "Avvisa sopra (errori)", FieldKind.Number) { Default = "0" },
+            ],
+            v => PowerShell(
+                $"$q = @{{ LogName = {Quote(v["log"])}; Level = 1, 2; StartTime = (Get-Date).AddHours(-{(int)Math.Clamp(v.Number("hours") ?? 24, 1, 720)}) }}; " +
+                (v.Has("source") ? $"$q['ProviderName'] = {Quote(v["source"])}; " : string.Empty) +
+                "$e = @(Get-WinEvent -FilterHashtable $q -MaxEvents 500 -ErrorAction SilentlyContinue); $u = $e | Select-Object -First 1; " +
+                "$msg = if ($u) { (\"$($u.Message)\" -split '\\r?\\n')[0] } else { '' }; if ($msg.Length -gt 140) { $msg = $msg.Substring(0, 140) }; " +
+                "@{ errori = $e.Count; ultimo = $msg; quando = $(if ($u) { $u.TimeCreated.ToString('dd/MM HH:mm') } else { '—' }); fonte = $(if ($u) { $u.ProviderName } else { '' }) } | ConvertTo-Json",
+                120,
+                Reading("Errori", "{errori}").With("above", v.Number("max")),
+                Reading("Ultimo", "{ultimo}"),
+                Reading("Quando", "{quando}"),
+                Reading("Sorgente", "{fonte}")))
+        {
+            Permission = "Esegue PowerShell per leggere il registro eventi (Get-WinEvent): solo errori e critici, non lo modifica.",
+        },
+
         // ── Rete e web ────────────────────────────────────────────────────────────
         new("ping", "Dispositivo in rete", "Rete e web", "Online o offline e latenza di router, NAS, stampante, telecamera…",
             [new("host", "Indirizzo o nome") { Hint = "192.168.1.1", Pattern = HostName }],
@@ -230,6 +364,62 @@ public static partial class ConnectorCatalog
                 ("readings", new JsonArray(
                     Reading("Stato", "{status.description}"),
                     Reading("Gravità", "{status.indicator}").With("alertOn", "major"))))),
+        new("sito-contenuto", "Contenuto di una pagina", "Rete e web", "Scarica una pagina e controlla il codice, il tempo e che contenga (o non contenga) un certo testo: prende le pagine che rispondono ma sono sbagliate.",
+            [
+                new("url", "Indirizzo") { Hint = "https://miosito.it/login", Pattern = HttpUrl },
+                new("contains", "Deve contenere") { Hint = "Accedi", Optional = true, Pattern = @"^[^\r\n]+$" },
+                new("absent", "Non deve contenere") { Hint = "Fatal error", Optional = true, Pattern = @"^[^\r\n]+$" },
+                new("max", "Avvisa sopra (ms)", FieldKind.Number) { Optional = true },
+                new("token", "Token (Authorization: Bearer)", FieldKind.Secret) { Optional = true },
+            ],
+            v => PowerShell(
+                "$ErrorActionPreference = 'Stop'; $h = @{}; if ($env:NOTHING_SECRET) { $h['Authorization'] = 'Bearer ' + $env:NOTHING_SECRET }; $code = 0; $body = ''; $sw = [Diagnostics.Stopwatch]::StartNew(); " +
+                $"try {{ $r = Invoke-WebRequest -UseBasicParsing -Uri {Quote(v["url"])} -Headers $h -TimeoutSec 15 -MaximumRedirection 5; $code = [int]$r.StatusCode; $body = [string]$r.Content }} " +
+                "catch { if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode } else { throw } }; $sw.Stop(); " +
+                (v.Has("contains") ? $"$c = if ($body.IndexOf({Quote(v["contains"])}, [StringComparison]::OrdinalIgnoreCase) -ge 0) {{ 'TROVATO' }} else {{ 'MANCANTE' }}; " : "$c = ''; ") +
+                (v.Has("absent") ? $"$a = if ($body.IndexOf({Quote(v["absent"])}, [StringComparison]::OrdinalIgnoreCase) -ge 0) {{ 'PRESENTE' }} else {{ 'ASSENTE' }}; " : "$a = ''; ") +
+                "@{ codice = $code; ms = $sw.ElapsedMilliseconds; kb = [math]::Round($body.Length / 1KB, 1); contiene = $c; vietato = $a } | ConvertTo-Json",
+                60,
+                new[]
+                {
+                    Reading("Codice", "{codice}").With("above", 399),
+                    Reading("Risposta", "{ms}", "ms").With("above", v.Number("max")),
+                    Reading("Dimensione", "{kb}", "KB"),
+                    v.Has("contains") ? Reading("Contiene", "{contiene}").With("alertOn", "MANCANTE") : null,
+                    v.Has("absent") ? Reading("Testo vietato", "{vietato}").With("alertOn", "PRESENTE") : null,
+                }.OfType<JsonObject>().ToArray()))
+        {
+            Permission = "Esegue PowerShell per scaricare la pagina (Invoke-WebRequest, solo lettura) e cercarci il testo indicato.",
+        },
+        new("salute-api", "Salute di un'API", "Rete e web", "Legge l'indirizzo di salute di un servizio (/health, /actuator/health, /healthz): stato complessivo e componenti in errore, anche quando risponde 503.",
+            [
+                new("url", "Indirizzo di salute") { Hint = "https://miosito.it/actuator/health", Pattern = HttpUrl },
+                new("max", "Avvisa sopra (ms)", FieldKind.Number) { Optional = true },
+                new("token", "Token (Authorization: Bearer)", FieldKind.Secret) { Optional = true },
+            ],
+            v => PowerShell(
+                "$ErrorActionPreference = 'Stop'; $h = @{}; if ($env:NOTHING_SECRET) { $h['Authorization'] = 'Bearer ' + $env:NOTHING_SECRET }; $code = 0; $body = ''; $sw = [Diagnostics.Stopwatch]::StartNew(); " +
+                $"try {{ $r = Invoke-WebRequest -UseBasicParsing -Uri {Quote(v["url"])} -Headers $h -TimeoutSec 15 -MaximumRedirection 5; $code = [int]$r.StatusCode; $body = [string]$r.Content }} " +
+                // un servizio malato risponde 503 con il dettaglio nel corpo: si legge anche quello
+                "catch { if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode; $sr = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $body = $sr.ReadToEnd(); $sr.Dispose() } else { throw } }; $sw.Stop(); " +
+                "$j = $null; try { $j = $body | ConvertFrom-Json } catch { }; " +
+                "$risposta = if ($j -and $j.status) { \"$($j.status)\" } elseif ($body.Length -gt 0 -and $body.Length -lt 40) { $body.Trim() } else { '' }; " +
+                "$comp = $null; if ($j) { $comp = $j.components; if (-not $comp) { $comp = $j.entries } }; $bad = @(); $all = @(); " +
+                "if ($comp -and $comp -isnot [array]) { foreach ($p in $comp.PSObject.Properties) { $cs = \"$($p.Value.status)\"; $all += \"$($p.Name)=$cs\"; if ($cs -match 'down|unhealthy|fail|error|critical|out_of_service') { $bad += $p.Name } } }; " +
+                "$ko = ($code -ge 400) -or ($risposta -match 'down|unhealthy|fail|error|critical|out_of_service'); " +
+                "$stato = if ($ko) { 'KO' } elseif ($risposta -match 'degraded|warn') { 'DEGRADATO' } else { 'OK' }; " +
+                "@{ stato = $stato; codice = $code; ms = $sw.ElapsedMilliseconds; risposta = $risposta; guasti = $bad.Count; dettaglio = ($bad -join ', '); componenti = ($all -join ', ') } | ConvertTo-Json",
+                30,
+                Reading("Stato", "{stato}").With("alertOn", "KO"),
+                Reading("Risposta", "{risposta}"),
+                Reading("Codice", "{codice}"),
+                Reading("Tempo", "{ms}", "ms").With("above", v.Number("max")),
+                Reading("Componenti in errore", "{guasti}").With("above", 0),
+                Reading("In errore", "{dettaglio}"),
+                Reading("Componenti", "{componenti}")))
+        {
+            Permission = "Esegue PowerShell per leggere l'indirizzo di salute (Invoke-WebRequest, solo lettura).",
+        },
 
         // ── Casa ──────────────────────────────────────────────────────────────────
         new("homeassistant", "Home Assistant", "Casa", "Sensori e interruttori di casa; un pulsante per accendere o spegnere un'entità.",
@@ -384,7 +574,7 @@ public static partial class ConnectorCatalog
                 new("database", "Database") { Hint = "solo SQL Server", Optional = true, Pattern = @"^[\w.\-]+$" },
                 new("username", "Utente") { Hint = "vuoto = accesso integrato di Windows (SQL Server)", Optional = true, Pattern = @"^[^\s'""`$;]+$" },
                 new("password", "Password", FieldKind.Secret) { Optional = true },
-                new("query", "Query di controllo") { Default = "SELECT 1", Hint = "SELECT COUNT(*) FROM ordini (solo SQL Server, un valore solo)", Optional = true },
+                new("query", "Query di controllo") { Default = "SELECT 1", Hint = "SELECT COUNT(*) FROM ordini (solo SQL Server, un valore solo)", Optional = true, Validate = SqlGuard.Check },
                 new("max", "Avvisa sopra (valore della query)", FieldKind.Number) { Optional = true },
             ],
             v =>
@@ -403,14 +593,8 @@ public static partial class ConnectorCatalog
                         Reading("Risposta", "{ms}", "ms"));
                 }
                 var query = v.Has("query") ? v["query"] : "SELECT 1";
-                var connection =
-                    "$ErrorActionPreference = 'Stop'; $b = New-Object Data.SqlClient.SqlConnectionStringBuilder; " +
-                    $"$b['Data Source'] = {Quote(v["host"] + "," + port.ToString(CultureInfo.InvariantCulture))}; $b['Connect Timeout'] = 8; " +
-                    (v.Has("database") ? $"$b['Initial Catalog'] = {Quote(v["database"])}; " : string.Empty) +
-                    (v.Has("username") ? $"$b['User ID'] = {Quote(v["username"])}; $b['Password'] = $env:NOTHING_SECRET; " : "$b['Integrated Security'] = $true; ");
                 return PowerShell(
-                    connection +
-                    "$sw = [Diagnostics.Stopwatch]::StartNew(); $c = New-Object Data.SqlClient.SqlConnection($b.ConnectionString); $c.Open(); $sw.Stop(); $ms = $sw.ElapsedMilliseconds; " +
+                    SqlOpen(v, port) +
                     $"$m = $c.CreateCommand(); $m.CommandTimeout = 10; $m.CommandText = {Quote(query)}; $sw.Restart(); $x = $m.ExecuteScalar(); $sw.Stop(); $ver = $c.ServerVersion; $c.Close(); " +
                     "@{ stato = 'ONLINE'; connessione = $ms; query = $sw.ElapsedMilliseconds; versione = $ver; valore = \"$x\" } | ConvertTo-Json",
                     60,
@@ -422,6 +606,49 @@ public static partial class ConnectorCatalog
             })
         {
             Permission = "Esegue PowerShell per collegarsi al database con l'utente e la password indicati ed eseguire la query scritta nel modulo a ogni aggiornamento: scegli una query di sola lettura.",
+        },
+        new("db-conteggio", "Database: conteggio con soglia", "Server", "SQL Server: una query che restituisce un numero (ordini bloccati, errori nuovi, code) con avviso sopra o sotto una soglia.",
+            [
+                .. SqlFields(),
+                new("query", "Query (un numero)") { Hint = "SELECT COUNT(*) FROM ordini WHERE stato = 'bloccato'", Validate = SqlGuard.Check },
+                new("label", "Nome del valore") { Default = "Valore", Hint = "Ordini bloccati" },
+                new("above", "Avvisa sopra", FieldKind.Number) { Optional = true },
+                new("below", "Avvisa sotto", FieldKind.Number) { Optional = true },
+            ],
+            v => PowerShell(
+                SqlOpen(v, (int)(v.Number("port") ?? 1433)) +
+                $"$m = $c.CreateCommand(); $m.CommandTimeout = 10; $m.CommandText = {Quote(v["query"])}; $sw.Restart(); $x = $m.ExecuteScalar(); $sw.Stop(); $c.Close(); " +
+                "if ($null -eq $x -or $x -is [DBNull]) { throw 'la query non restituisce un valore' }; " +
+                "@{ connessione = $ms; query = $sw.ElapsedMilliseconds; valore = [double]$x } | ConvertTo-Json",
+                60,
+                Reading(v["label"], "{valore}").With("above", v.Number("above")).With("below", v.Number("below")),
+                Reading("Query", "{query}", "ms"),
+                Reading("Connessione", "{connessione}", "ms")))
+        {
+            Permission = SqlPermission,
+        },
+        new("db-freschezza", "Database: freschezza dei dati", "Server", "SQL Server: una query che restituisce una data (l'ultimo ordine, l'ultima sincronizzazione): se è troppo vecchia il processo che scrive si è fermato.",
+            [
+                .. SqlFields(),
+                new("query", "Query (una data)") { Hint = "SELECT MAX(aggiornato_il) FROM ordini", Validate = SqlGuard.Check },
+                new("hours", "Avvisa oltre (ore)", FieldKind.Number) { Default = "24" },
+                new("utc", "La data è in UTC") { Default = "no", Hint = "si o no (no = ora del PC)", Pattern = "^(si|no)$" },
+            ],
+            v => PowerShell(
+                SqlOpen(v, (int)(v.Number("port") ?? 1433)) +
+                $"$m = $c.CreateCommand(); $m.CommandTimeout = 10; $m.CommandText = {Quote(v["query"])}; $sw.Restart(); $x = $m.ExecuteScalar(); $sw.Stop(); $c.Close(); " +
+                "$o = if ($null -eq $x -or $x -is [DBNull]) { @{ stato = 'NESSUN DATO'; ultimo = '—'; ore = 'n.d.' } } else { $d = [datetime]$x; " +
+                $"$now = {(v["utc"] == "si" ? "[datetime]::UtcNow" : "(Get-Date)")}; " +
+                "@{ stato = 'OK'; ultimo = $d.ToString('dd/MM/yyyy HH:mm'); ore = [math]::Round(($now - $d).TotalHours, 1) } }; " +
+                "$o['connessione'] = $ms; $o['query'] = $sw.ElapsedMilliseconds; $o | ConvertTo-Json",
+                120,
+                Reading("Stato", "{stato}").With("alertOn", "NESSUN DATO"),
+                Reading("Ultimo dato", "{ultimo}"),
+                Reading("Età", "{ore}", "ore").With("above", v.Number("hours")),
+                Reading("Query", "{query}", "ms"),
+                Reading("Connessione", "{connessione}", "ms")))
+        {
+            Permission = SqlPermission,
         },
 
         // ── Sviluppo e AI ─────────────────────────────────────────────────────────
@@ -783,6 +1010,8 @@ public static partial class ConnectorCatalog
                 return Fail($"manca «{field.Label}»");
             if (field.Pattern is { } pattern && parts.FirstOrDefault(p => !Regex.IsMatch(p, pattern)) is { } bad)
                 return Fail($"«{bad}» non va bene come {field.Label.ToLowerInvariant()}{(field.Hint is { } h ? $" (es. {h})" : string.Empty)}");
+            if (field.Validate?.Invoke(value) is { } problem)
+                return Fail($"«{field.Label}»: {problem}");
             if (field.Kind == FieldKind.Secret)
                 secret = value;
             clean[field.Key] = value;
@@ -898,6 +1127,29 @@ public static partial class ConnectorCatalog
 
     /// <summary>Stringa PowerShell tra apici singoli: un apice nel testo si raddoppia.</summary>
     private static string Quote(string text) => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'";
+
+    /// <summary>
+    /// Le prime righe di uno script che apre una connessione a SQL Server (utente e password da <c>NOTHING_SECRET</c> o accesso
+    /// integrato): lascia <c>$c</c> aperta, <c>$sw</c> fermo e <c>$ms</c> con il tempo di connessione.
+    /// </summary>
+    private static string SqlOpen(TemplateInput v, int port) =>
+        "$ErrorActionPreference = 'Stop'; $b = New-Object Data.SqlClient.SqlConnectionStringBuilder; " +
+        $"$b['Data Source'] = {Quote(v["host"] + "," + port.ToString(CultureInfo.InvariantCulture))}; $b['Connect Timeout'] = 8; $b['Application Name'] = 'Nothing Shell'; " +
+        (v.Has("database") ? $"$b['Initial Catalog'] = {Quote(v["database"])}; " : string.Empty) +
+        (v.Has("username") ? $"$b['User ID'] = {Quote(v["username"])}; $b['Password'] = $env:NOTHING_SECRET; " : "$b['Integrated Security'] = $true; ") +
+        "$sw = [Diagnostics.Stopwatch]::StartNew(); $c = New-Object Data.SqlClient.SqlConnection($b.ConnectionString); $c.Open(); $sw.Stop(); $ms = $sw.ElapsedMilliseconds; ";
+
+    /// <summary>I campi di connessione a SQL Server dei connettori che eseguono una query.</summary>
+    private static ConnectorField[] SqlFields() =>
+    [
+        new("host", "Server") { Hint = "db.miosito.it", Pattern = HostName },
+        new("port", "Porta", FieldKind.Number) { Default = "1433", Optional = true },
+        new("database", "Database") { Hint = "gestionale", Pattern = @"^[\w.\-]+$" },
+        new("username", "Utente") { Hint = "vuoto = accesso integrato di Windows; meglio un utente di sola lettura", Optional = true, Pattern = @"^[^\s'""`$;]+$" },
+        new("password", "Password", FieldKind.Secret) { Optional = true },
+    ];
+
+    private const string SqlPermission = "Esegue PowerShell per collegarsi a SQL Server con l'utente e la password indicati ed eseguire la query scritta nel modulo a ogni aggiornamento (solo SELECT: una sola istruzione, niente scritture).";
 
     private static string Coord(string text) => text.Replace(',', '.');
 
