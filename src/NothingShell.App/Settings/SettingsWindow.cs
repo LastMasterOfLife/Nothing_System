@@ -204,6 +204,9 @@ public interface IShellSettingsActions
 
     bool AssistantModelInstalled { get; }
 
+    /// <summary>Per i PC potenti: Qwen3.5 9B invece del 4B.</summary>
+    bool PowerfulAssistant { get; set; }
+
     void InstallAssistantModel();
 
     Task NextAssistantModelAsync();
@@ -725,6 +728,13 @@ public sealed partial class SettingsWindow : Window
         Note("Il pulsante in basso a destra nel notch apre una casella: scrivi cosa ti serve e i comandi di sola lettura partono da " +
              "soli, fino alla risposta. Tutto resta su questo PC.", Theme.MutedBrush);
         Note(_shell.AssistantStatus, Theme.InkBrush);
+        ToggleRow("Assistente potente (Qwen3.5 9B)",
+            "Per i PC con almeno 16 GB di RAM e un processore recente: risponde meglio del 4B ma è più lento e occupa circa 7 GB. Spento usa il 4B",
+            _shell.PowerfulAssistant, v =>
+            {
+                _shell.PowerfulAssistant = v;
+                Show(SettingsPage.Dev);
+            });
         static Func<Task> Now(Action action) => () =>
         {
             action();
@@ -734,7 +744,7 @@ public sealed partial class SettingsWindow : Window
         if (_shell.AssistantModels.Count > 1)
             actions.Add(("CAMBIA MODELLO", _shell.NextAssistantModelAsync));
         if (!_shell.AssistantModelInstalled)
-            actions.Add(_shell.BrainInstalling ? ("ANNULLA DOWNLOAD", Now(_shell.CancelBrainInstall)) : ("SCARICA IL MODELLO (2,6 GB)", Now(_shell.InstallAssistantModel)));
+            actions.Add(_shell.BrainInstalling ? ("ANNULLA DOWNLOAD", Now(_shell.CancelBrainInstall)) : ($"SCARICA IL MODELLO ({(_shell.PowerfulAssistant ? "5,3" : "2,6")} GB)", Now(_shell.InstallAssistantModel)));
         ButtonRow([.. actions]);
 
         Section("COMANDI CRITICI");

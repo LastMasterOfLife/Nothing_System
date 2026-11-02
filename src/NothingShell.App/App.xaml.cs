@@ -57,7 +57,7 @@ public partial class App : Application
                 await RenderLauncherSnapshot(folder);
                 await RenderBarSnapshots(folder);
                 await RenderPluginAndSettingsSnapshots(folder);
-                RenderNotchSnapshots(folder);
+                await RenderNotchSnapshots(folder);
                 RenderRemoteSnapshots(folder);
                 await RenderAccessSnapshots(folder);
                 Shutdown();
@@ -307,10 +307,29 @@ public partial class App : Application
         window.Close();
     }
 
+    /// <summary>Accoda l'errore a ~/.nothing-shell/crash.log; il log non deve mai causare un altro errore.</summary>
+    private static void LogError(Exception ex)
+    {
+        try
+        {
+            var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nothing-shell");
+            Directory.CreateDirectory(folder);
+            File.AppendAllText(Path.Combine(folder, "crash.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}{Environment.NewLine}{ex}{Environment.NewLine}{Environment.NewLine}");
+        }
+        catch
+        {
+        }
+    }
+
     /// <summary>Qualunque crash deve lasciare la taskbar di Windows visibile.</summary>
     private void RestoreTaskbarOnCrash()
     {
-        DispatcherUnhandledException += (_, _) => WindowsTaskbar.ForceShow();
+        // Un errore in un handler UI non deve chiudere la shell: lo registro e vado avanti.
+        DispatcherUnhandledException += (_, e) =>
+        {
+            LogError(e.Exception);
+            e.Handled = true;
+        };
         AppDomain.CurrentDomain.UnhandledException += (_, _) => WindowsTaskbar.ForceShow();
         AppDomain.CurrentDomain.ProcessExit += (_, _) => WindowsTaskbar.ForceShow();
     }
@@ -352,7 +371,7 @@ public partial class App : Application
         File.WriteAllLines(report, lines);
     }
 
-    private static void RenderNotchSnapshots(string folder)
+    private static async Task RenderNotchSnapshots(string folder)
     {
         using var media = new MediaService(); // non avviato: nessuna sessione, Home mostra l'ora
         var notch = new NotchWindow(media, DevPageActions.None, ConnectedPageActions.None);
@@ -373,6 +392,17 @@ public partial class App : Application
             new("Newsletter", "Le novità di ottobre", "Casella collegata", now.AddDays(-2)),
             new("Marco Neri", "Re: preventivo", "Casella collegata", now.AddDays(-3)),
         ];
+        await notch.LookupDnsForSnapshot("sinapsi.it");
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Dns), Path.Combine(folder, "notch-dns-risultati.png"));
+        var dbTemplate = NothingShell.Core.Connectors.ConnectorCatalog.Find("database")!;
+        var dbJson = NothingShell.Core.Connectors.ConnectorCatalog.Create(dbTemplate, "Gestionale", new Dictionary<string, string> { ["host"] = "sql.azienda.local", ["database"] = "gestionale", ["username"] = "monitor" }, []);
+        var db = NothingShell.Core.Connectors.ConnectorParser.Parse(dbJson.Id!, dbJson.Json!).Manifest!;
+        notch.SetConnectors([new NothingShell.Core.Connectors.ConnectorState(db, NothingShell.Core.Connectors.ConnectorStatus.Ok,
+            [new("Stato", "ONLINE", null, NothingShell.Core.Connectors.ReadingLevel.Normal), new("Connessione", "42", "ms", NothingShell.Core.Connectors.ReadingLevel.Normal),
+             new("Query", "8", "ms", NothingShell.Core.Connectors.ReadingLevel.Normal), new("Versione", "16.00.1000", null, NothingShell.Core.Connectors.ReadingLevel.Normal),
+             new("Valore", "1250", null, NothingShell.Core.Connectors.ReadingLevel.Warning)], null, DateTimeOffset.Now) { Granted = true }]);
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Database), Path.Combine(folder, "notch-database-connettore.png"));
+        notch.SetConnectors([]);
         notch.SetPhone(new PhonePageData(true,
             new NothingShell.Core.Phone.PhoneDevice("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", "Nothing Phone (2)", true, true)
             {
@@ -1086,6 +1116,8 @@ public partial class App : Application
         public string? SetUserCritical(string command, bool critical) => null;
 
         public bool AssistantModelInstalled => true;
+
+        public bool PowerfulAssistant { get; set; }
 
         public void InstallAssistantModel()
         {

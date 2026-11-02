@@ -43,6 +43,12 @@ public sealed class BrainService : IDisposable
 
     public static bool AssistantInstalled => File.Exists(BrainModel.Assistant.LocalPath);
 
+    /// <summary>Il modello incorporato da usare: il 9B solo se l'impostazione è accesa e il file c'è, altrimenti il 4B se c'è.</summary>
+    public static BrainModel? EmbeddedAssistant(bool powerful) =>
+        powerful && File.Exists(BrainModel.AssistantLarge.LocalPath) ? BrainModel.AssistantLarge
+        : AssistantInstalled ? BrainModel.Assistant
+        : null;
+
     public bool Installing => _install is not null;
 
     /// <summary>Stato del modello per le impostazioni. Può cambiare da un thread qualsiasi.</summary>

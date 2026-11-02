@@ -24,7 +24,8 @@ public sealed record ShellSettings(
     IReadOnlyList<string>? ConnectorWidgets = null,
     MailReaderLayout? MailReader = null,
     string? AssistantModel = null,
-    AppearanceSettings? Appearance = null)
+    AppearanceSettings? Appearance = null,
+    bool PowerfulAssistant = false)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
 

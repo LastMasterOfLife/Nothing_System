@@ -30,9 +30,21 @@ public sealed partial class ShellController : IAssistantPanelActions
 
     public void InstallBrainModel() => _ = InstallBrainModelAsync(BrainModel.Default);
 
-    public bool AssistantModelInstalled => BrainService.AssistantInstalled;
+    /// <summary>Il modello che l'impostazione chiede è sul disco.</summary>
+    public bool AssistantModelInstalled => File.Exists(BrainModel.ForAssistant(_settings.PowerfulAssistant).LocalPath);
 
-    public void InstallAssistantModel() => _ = InstallBrainModelAsync(BrainModel.Assistant);
+    public void InstallAssistantModel() => _ = InstallBrainModelAsync(BrainModel.ForAssistant(_settings.PowerfulAssistant));
+
+    /// <summary>Per i PC potenti: usa Qwen3.5 9B al posto del 4B. Se non è scaricato resta il 4B finché non lo si scarica.</summary>
+    public bool PowerfulAssistant
+    {
+        get => _settings.PowerfulAssistant;
+        set
+        {
+            Update(_settings with { PowerfulAssistant = value });
+            _ = FindAssistantModelAsync();
+        }
+    }
 
     public void CancelBrainInstall() => _brain.CancelInstall();
 
@@ -70,7 +82,7 @@ public sealed partial class ShellController : IAssistantPanelActions
     public string AssistantStatus => _assistantModel switch
     {
         OllamaAssistantModel model => $"Risponde {model.Name}, con Ollama su questo PC",
-        { } model => $"Risponde {model.Name}, incorporato: occupa circa 3 GB mentre lavora",
+        { } model => $"Risponde {model.Name}, incorporato: occupa circa {(model.Name == BrainModel.AssistantLarge.Name ? 7 : 3)} GB mentre lavora",
         null => "Senza modello il pannello usa le scorciatoie e il modello piccolo, che propone comandi ma non scrive risposte",
     };
 
@@ -133,14 +145,14 @@ public sealed partial class ShellController : IAssistantPanelActions
     /// </summary>
     private async Task RefreshAssistantModelAsync(CancellationToken token)
     {
-        var embedded = BrainModel.Assistant;
+        var embedded = BrainService.EmbeddedAssistant(_settings.PowerfulAssistant);
         var fromOllama = await OllamaAssistantModel.InstalledAsync(token);
-        _assistantModels = BrainService.AssistantInstalled ? [embedded.Name, .. fromOllama] : fromOllama;
+        _assistantModels = embedded is null ? fromOllama : [embedded.Name, .. fromOllama];
         var name = _assistantModels.Contains(_settings.AssistantModel ?? string.Empty) ? _settings.AssistantModel : _assistantModels.Count > 0 ? _assistantModels[0] : null;
         if (_assistantModel?.Name != name)
         {
             (_assistantModel as IDisposable)?.Dispose();
-            _assistantModel = name is null ? null : name == embedded.Name ? new EmbeddedAssistantModel(embedded) : new OllamaAssistantModel(name);
+            _assistantModel = name is null ? null : embedded is not null && name == embedded.Name ? new EmbeddedAssistantModel(embedded) : new OllamaAssistantModel(name);
         }
         var assistant = ((IAssistantPanelActions)this).Assistant;
         assistant.Model = _assistantModel;

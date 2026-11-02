@@ -349,6 +349,81 @@ public static partial class ConnectorCatalog
                         Reading("Disco /", null, "%").With("query", $"100 * (1 - sum(node_filesystem_avail_bytes{{mountpoint=\"/\"{filter}}}) / sum(node_filesystem_size_bytes{{mountpoint=\"/\"{filter}}}))").With("decimals", 0).With("above", 90))));
             }),
 
+        new("ftp", "Server FTP", "Server", "Si collega a un server FTP o FTPS, elenca una cartella e dice quanti elementi ci sono e quanto ci mette a rispondere.",
+            [
+                new("host", "Server") { Hint = "ftp.miosito.it", Pattern = HostName },
+                new("port", "Porta", FieldKind.Number) { Default = "21" },
+                new("username", "Utente") { Hint = "vuoto = accesso anonimo", Optional = true, Pattern = @"^[^\s'""`$]+$" },
+                new("password", "Password", FieldKind.Secret) { Optional = true },
+                new("folder", "Cartella da elencare") { Default = "/", Pattern = @"^/\S*$" },
+                new("tls", "Connessione cifrata (FTPS)") { Default = "no", Hint = "si o no", Pattern = "^(si|no)$" },
+                new("min", "Avvisa sotto (elementi)", FieldKind.Number) { Optional = true },
+            ],
+            v => PowerShell(
+                "$ErrorActionPreference = 'Stop'; " +
+                $"$r = [Net.FtpWebRequest]::Create('ftp://' + {Quote(v["host"])} + ':{(int)(v.Number("port") ?? 21)}' + {Quote(v["folder"])}); " +
+                "$r.Method = [Net.WebRequestMethods+Ftp]::ListDirectory; $r.UsePassive = $true; $r.Timeout = 10000; $r.ReadWriteTimeout = 10000; " +
+                $"$r.EnableSsl = ${(v["tls"] == "si" ? "true" : "false")}; " +
+                (v.Has("username") ? $"$r.Credentials = New-Object Net.NetworkCredential({Quote(v["username"])}, $env:NOTHING_SECRET); " : string.Empty) +
+                "$sw = [Diagnostics.Stopwatch]::StartNew(); $resp = $r.GetResponse(); $rd = New-Object IO.StreamReader($resp.GetResponseStream()); " +
+                "$n = @($rd.ReadToEnd() -split '\\r?\\n' | Where-Object { $_ }).Count; $sw.Stop(); $msg = \"$($resp.StatusDescription)\".Trim(); $rd.Dispose(); $resp.Close(); " +
+                "@{ stato = 'ONLINE'; ms = $sw.ElapsedMilliseconds; elementi = $n; risposta = $msg } | ConvertTo-Json",
+                120,
+                Reading("Stato", "{stato}"),
+                Reading("Risposta", "{ms}", "ms"),
+                Reading("Elementi", "{elementi}").With("below", v.Number("min")),
+                Reading("Esito", "{risposta}")))
+        {
+            Permission = "Esegue PowerShell per collegarsi al server FTP con l'utente e la password indicati ed elencare la cartella: non carica, non scarica e non cancella nulla.",
+        },
+        new("database", "Database", "Server", "SQL Server: apre la connessione, misura i tempi, legge la versione ed esegue una query di controllo. PostgreSQL e MySQL: raggiungibilità della porta.",
+            [
+                new("engine", "Tipo") { Default = "sqlserver", Hint = "sqlserver, postgres, mysql o mariadb", Pattern = "^(sqlserver|postgres|mysql|mariadb)$" },
+                new("host", "Server") { Hint = "db.miosito.it", Pattern = HostName },
+                new("port", "Porta (vuota = quella del tipo)", FieldKind.Number) { Optional = true },
+                new("database", "Database") { Hint = "solo SQL Server", Optional = true, Pattern = @"^[\w.\-]+$" },
+                new("username", "Utente") { Hint = "vuoto = accesso integrato di Windows (SQL Server)", Optional = true, Pattern = @"^[^\s'""`$;]+$" },
+                new("password", "Password", FieldKind.Secret) { Optional = true },
+                new("query", "Query di controllo") { Default = "SELECT 1", Hint = "SELECT COUNT(*) FROM ordini (solo SQL Server, un valore solo)", Optional = true },
+                new("max", "Avvisa sopra (valore della query)", FieldKind.Number) { Optional = true },
+            ],
+            v =>
+            {
+                var engine = v["engine"];
+                var host = Quote(v["host"]);
+                var port = (int)(v.Number("port") ?? engine switch { "sqlserver" => 1433, "postgres" => 5432, _ => 3306 });
+                if (engine != "sqlserver")
+                {
+                    return PowerShell(
+                        "$ErrorActionPreference = 'Stop'; $sw = [Diagnostics.Stopwatch]::StartNew(); $c = New-Object Net.Sockets.TcpClient; " +
+                        $"$ar = $c.BeginConnect({host}, {port}, $null, $null); if (-not $ar.AsyncWaitHandle.WaitOne(8000)) {{ $c.Close(); throw 'porta non raggiungibile' }}; $c.EndConnect($ar); $c.Close(); $sw.Stop(); " +
+                        "@{ stato = 'RAGGIUNGIBILE'; ms = $sw.ElapsedMilliseconds } | ConvertTo-Json",
+                        60,
+                        Reading("Stato", "{stato}"),
+                        Reading("Risposta", "{ms}", "ms"));
+                }
+                var query = v.Has("query") ? v["query"] : "SELECT 1";
+                var connection =
+                    "$ErrorActionPreference = 'Stop'; $b = New-Object Data.SqlClient.SqlConnectionStringBuilder; " +
+                    $"$b['Data Source'] = {Quote(v["host"] + "," + port.ToString(CultureInfo.InvariantCulture))}; $b['Connect Timeout'] = 8; " +
+                    (v.Has("database") ? $"$b['Initial Catalog'] = {Quote(v["database"])}; " : string.Empty) +
+                    (v.Has("username") ? $"$b['User ID'] = {Quote(v["username"])}; $b['Password'] = $env:NOTHING_SECRET; " : "$b['Integrated Security'] = $true; ");
+                return PowerShell(
+                    connection +
+                    "$sw = [Diagnostics.Stopwatch]::StartNew(); $c = New-Object Data.SqlClient.SqlConnection($b.ConnectionString); $c.Open(); $sw.Stop(); $ms = $sw.ElapsedMilliseconds; " +
+                    $"$m = $c.CreateCommand(); $m.CommandTimeout = 10; $m.CommandText = {Quote(query)}; $sw.Restart(); $x = $m.ExecuteScalar(); $sw.Stop(); $ver = $c.ServerVersion; $c.Close(); " +
+                    "@{ stato = 'ONLINE'; connessione = $ms; query = $sw.ElapsedMilliseconds; versione = $ver; valore = \"$x\" } | ConvertTo-Json",
+                    60,
+                    Reading("Stato", "{stato}"),
+                    Reading("Connessione", "{connessione}", "ms"),
+                    Reading("Query", "{query}", "ms"),
+                    Reading("Versione", "{versione}"),
+                    Reading("Valore", "{valore}").With("above", v.Number("max")));
+            })
+        {
+            Permission = "Esegue PowerShell per collegarsi al database con l'utente e la password indicati ed eseguire la query scritta nel modulo a ogni aggiornamento: scegli una query di sola lettura.",
+        },
+
         // ── Sviluppo e AI ─────────────────────────────────────────────────────────
         new("github-pr", "GitHub: PR da rivedere", "Sviluppo e AI", "Quante pull request aspettano la tua revisione, con avviso quando arriva la prima.",
             [

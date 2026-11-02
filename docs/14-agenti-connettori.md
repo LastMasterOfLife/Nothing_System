@@ -103,7 +103,7 @@ segreti), così ogni scheda ha **Modifica** (riscrive lo stesso connettore; il t
 | Questo PC | Spazio su disco, Servizio di Windows (Avvia, Riavvia), App in esecuzione (Termina), Docker, File di log, Dimensione di una cartella (Apri), Cestino (Svuota), Unità rimovibile (Espelli), File duplicati |
 | Rete e web | Dispositivo in rete (ping), Sito o servizio web, IP pubblico, Stato di un servizio online (Statuspage: Claude, GitHub…) |
 | Casa | Home Assistant (Accendi/spegni), Sensori MQTT, Presa Shelly, Presa Tasmota, Stampante 3D OctoPrint e Klipper |
-| Server | Server Linux via SSH e Raspberry Pi (Riavvia), Prometheus con node_exporter |
+| Server | Server Linux via SSH e Raspberry Pi (Riavvia), Prometheus con node_exporter, **Server FTP**, **Database** |
 | Sicurezza | Microsoft Defender (Scansione rapida), Firewall di Windows, Aggiornamenti di Windows, Integrità di un file (SHA-256), Certificato SSL di un sito, Intestazioni di sicurezza, Porte esposte, Amministratori del PC, Accessi SSH falliti, Vulnerabilità sfruttate (CISA KEV) |
 | Sviluppo e AI | Repository Git (Fetch, Apri), GitHub: PR da rivedere, GitHub: ultima CI, Ollama, Costi API Anthropic, Sito con LLM: costi |
 | Informazioni | Meteo e Qualità dell'aria (Open-Meteo), Cambio valuta (BCE), Criptovaluta (CoinGecko) |
@@ -118,6 +118,23 @@ file diventa un avviso (CAMBIATO). *Svuota* del Cestino chiede conferma.
 I valori del modulo entrano in comandi e indirizzi: ogni campo ha la sua forma (`Pattern`: un nome di servizio, un host,
 `utente@host`…) e i testi liberi passano a PowerShell tra apici. Il file generato passa comunque da `ConnectorParser`.
 Ogni connettore attivo ha la sua scheda con tipo, valori, permesso, token e *Rimuovi* (toglie file, segreto e permesso).
+
+### Dove compaiono nel notch
+La pagina **Dispositivi** mostra i connettori in generale. **Database** e **Server FTP** hanno invece **una pagina tutta
+loro** (*Database*, *FTP*), con le stesse schede: appare nel notch da sola quando ne attivi uno e sparisce quando li
+rimuovi (Core `ConnectorSections`, testato; dipende dal modello della libreria da cui nasce il file). Anche gli avvisi
+aprono la pagina giusta. La pagina **DNS**, dove si scrive l'indirizzo da cercare, è descritta in [17](17-dns-notch.md).
+
+### FTP e database
+- **Server FTP**: FTP o FTPS (`tls: si`), accesso anonimo o con utente e password; elenca una cartella e dice se risponde,
+  in quanti ms e quanti elementi contiene (avviso sotto una soglia). Non carica, non scarica, non cancella.
+- **Database**: *SQL Server* apre la connessione (utente e password o accesso integrato di Windows), misura connessione e
+  query, legge la versione ed esegue una query di controllo che restituisce un valore (di serie `SELECT 1`; scegline una di
+  sola lettura, con avviso sopra una soglia). *PostgreSQL*, *MySQL* e *MariaDB* controllano la raggiungibilità della porta
+  (Windows non ha i loro driver).
+
+Sono connettori `command` (PowerShell): servono i permessi. **Le password** vanno nel Gestore credenziali come per gli altri
+connettori e il comando le riceve nella variabile d'ambiente `NOTHING_SECRET`, mai negli argomenti né nel file.
 
 ### Tipi
 | `type` | Legge | Campi |

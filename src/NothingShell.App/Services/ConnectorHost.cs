@@ -310,7 +310,7 @@ public sealed class ConnectorHost : IDisposable
             }
             case ConnectorKind.Command:
             {
-                using var doc = ConnectorReadings.Document(await RunProcessAsync(m.Command!, m.Arguments, token));
+                using var doc = ConnectorReadings.Document(await RunProcessAsync(m.Command!, m.Arguments, token, SecretOf(m)));
                 return WithLlm(m, doc.RootElement, Specs(m).Select(r => ConnectorReadings.Evaluate(r, doc.RootElement, "Uscita")));
             }
             case ConnectorKind.File:
@@ -496,7 +496,7 @@ public sealed class ConnectorHost : IDisposable
         switch (action.Kind)
         {
             case ActionKind.Command:
-                await RunProcessAsync(action.Command!, action.Arguments, timeout.Token);
+                await RunProcessAsync(action.Command!, action.Arguments, timeout.Token, SecretOf(m));
                 return null;
             case ActionKind.Http or ActionKind.HomeAssistant:
             {
@@ -658,7 +658,12 @@ public sealed class ConnectorHost : IDisposable
     private static ConnectorReading[] Order(ConnectorManifest m, Dictionary<ReadingSpec, ConnectorReading> values) =>
         m.Readings.Where(values.ContainsKey).Select(r => values[r]).ToArray();
 
-    private static async Task<string> RunProcessAsync(string command, IReadOnlyList<string> arguments, CancellationToken token)
+    /// <summary>La password del connettore nel Gestore credenziali, per i comandi che ne hanno bisogno (FTP, database).</summary>
+    private static string? SecretOf(ConnectorManifest m) =>
+        m.Secret && CredentialStore.Read(m.CredentialTarget) is { Length: > 0 } secret ? secret : null;
+
+    /// <summary>Il comando riceve il segreto nella variabile d'ambiente <c>NOTHING_SECRET</c>: mai negli argomenti né nel file.</summary>
+    private static async Task<string> RunProcessAsync(string command, IReadOnlyList<string> arguments, CancellationToken token, string? secret = null)
     {
         var local = Path.Combine(Folder, command);
         ProcessStartInfo start;
@@ -678,6 +683,8 @@ public sealed class ConnectorHost : IDisposable
         start.WorkingDirectory = Folder;
         start.UseShellExecute = false;
         start.CreateNoWindow = true;
+        if (secret is not null)
+            start.Environment["NOTHING_SECRET"] = secret;
         start.RedirectStandardOutput = true;
         start.RedirectStandardError = true;
         start.StandardOutputEncoding = Encoding.UTF8;

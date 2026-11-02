@@ -21,6 +21,16 @@ public sealed record BrainModel(string Name, string FileName, Uri Url, string Sh
         "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
         2740937888L);
 
+    /// <summary>Per i PC potenti (impostazione "Assistente potente"): stesso formato del 4B, ma risponde molto meglio e occupa circa 7 GB di RAM.</summary>
+    public static BrainModel AssistantLarge { get; } = new(
+        "Qwen3.5 9B",
+        "Qwen3.5-9B-Q4_K_M.gguf",
+        new Uri("https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf"),
+        "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
+        5680522464L);
+
+    public static BrainModel ForAssistant(bool powerful) => powerful ? AssistantLarge : Assistant;
+
     public string LocalPath => Path.Combine(AtomicFile.DataFolder, "brain", FileName);
 }
 

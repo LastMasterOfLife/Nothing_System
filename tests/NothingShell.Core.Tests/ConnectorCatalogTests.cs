@@ -118,3 +118,28 @@ public class ConnectorCatalogTests
         Assert.Equal("ip-pubblico", ConnectorCatalog.Create(ip, "???", new Dictionary<string, string>(), []).Id);
     }
 }
+
+public class ConnectorSectionTests
+{
+    private static ConnectorManifest Made(string template)
+    {
+        var t = ConnectorCatalog.Find(template)!;
+        var values = t.Fields.Where(f => !f.Optional && f.Default is null).ToDictionary(f => f.Key, f => f.Key == "host" ? "db.local" : "x");
+        return ConnectorParser.Parse("c", ConnectorCatalog.Create(t, null, values, []).Json!).Manifest!;
+    }
+
+    [Fact]
+    public void DatabaseAndFtpGetTheirOwnPages()
+    {
+        Assert.Equal(NothingShell.Core.Notch.NotchPage.Database, ConnectorSections.Of(Made("database")));
+        Assert.Equal(NothingShell.Core.Notch.NotchPage.Ftp, ConnectorSections.Of(Made("ftp")));
+    }
+
+    [Fact]
+    public void EveryOtherConnectorStaysInDevices()
+    {
+        foreach (var t in ConnectorCatalog.All.Where(t => t.Id is not ("database" or "ftp")))
+            Assert.Null(ConnectorSections.Of(new ConnectorManifest("c", "n", ConnectorKind.Ping, TimeSpan.FromSeconds(5), []) { Template = t.Id }));
+        Assert.Equal(NothingShell.Core.Notch.NotchPage.Devices, ConnectorSections.PageOf(new ConnectorManifest("c", "n", ConnectorKind.Ping, TimeSpan.FromSeconds(5), [])));
+    }
+}

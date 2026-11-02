@@ -98,6 +98,9 @@ public sealed class NotchWindow : Window
     private readonly PhonePage _phone;
     private readonly AgentsPage _agents = new();
     private readonly DevicesPage _devices;
+    private readonly DevicesPage _database;
+    private readonly DevicesPage _ftp;
+    private readonly DnsPage _dns = new();
 
     private readonly DispatcherTimer _deadlineTimer = new();
     private readonly DispatcherTimer _equalizerTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
@@ -114,6 +117,8 @@ public sealed class NotchWindow : Window
     private DateTime _now = DateTime.Now;
     private string _alertMessage = string.Empty;
     private NotchPage? _alertPage;
+    private List<NotchPage> _allowedPages = [.. NotchPager.Pages];
+    private HashSet<NotchPage> _sectionsInUse = [];
     private int _alertOffset;
     private TimeSpan _lastFrame;
     private bool _animating;
@@ -126,6 +131,8 @@ public sealed class NotchWindow : Window
         ArgumentNullException.ThrowIfNull(connected);
         _phone = new PhonePage(connected);
         _devices = new DevicesPage(connected);
+        _database = new DevicesPage(connected, NotchPage.Database, "DATABASE", "Nessun database. Attiva il connettore Database in Impostazioni › CONNETTORI › LIBRERIA.");
+        _ftp = new DevicesPage(connected, NotchPage.Ftp, "FTP", "Nessun server FTP. Attiva il connettore Server FTP in Impostazioni › CONNETTORI › LIBRERIA.");
         _home = new HomePage(media);
         _work = new WorkPage(dev.OpenTask);
         _servers = new ServersPage(dev.OpenServer, dev.KillServer);
@@ -133,9 +140,11 @@ public sealed class NotchWindow : Window
         _agenda = new AgendaPage(e => AppointmentOpened?.Invoke(e));
         _timerPage = new TimerPage(StartTimer, StopTimer);
         _mail.Opened += mail => MailOpened?.Invoke(mail);
-        _home.AskClicked += BeginAsk;
+        _home.AskClicked += () => BeginAsk(_home.FocusAsk);
         _home.AskSubmitted += OnAskSubmitted;
         _home.AskCancelled += CancelAsk;
+        _dns.InputClicked += () => BeginAsk(_dns.FocusInput);
+        _dns.InputCancelled += () => CancelAsk(_dns.ClearInput);
 
         var idle = NotchLayout.For(NotchState.Idle);
         _width = new Spring(idle.Width);
@@ -326,7 +335,19 @@ public sealed class NotchWindow : Window
         OnActivitiesChanged();
     }
 
-    public void SetConnectors(IReadOnlyList<ConnectorState> states) => _devices.Update(states);
+    /// <summary>
+    /// Ogni connettore sta nella sua pagina: database e FTP nelle loro, che compaiono finché ne esiste uno (e il
+    /// ShellController le lascia accese), gli altri in Dispositivi.
+    /// </summary>
+    public void SetConnectors(IReadOnlyList<ConnectorState> states)
+    {
+        ArgumentNullException.ThrowIfNull(states);
+        _devices.Update(states.Where(s => ConnectorSections.Of(s.Manifest) is null).ToList());
+        _database.Update(states.Where(s => ConnectorSections.Of(s.Manifest) == NotchPage.Database).ToList());
+        _ftp.Update(states.Where(s => ConnectorSections.Of(s.Manifest) == NotchPage.Ftp).ToList());
+        _sectionsInUse = states.Select(s => ConnectorSections.Of(s.Manifest)).OfType<NotchPage>().ToHashSet();
+        ApplyAvailablePages();
+    }
 
     public void SetClipboard(IReadOnlyList<ClipEntry> entries) => _clipboard.Update(entries);
 
@@ -341,8 +362,14 @@ public sealed class NotchWindow : Window
     public void SetAvailablePages(IEnumerable<NotchPage> pages)
     {
         ArgumentNullException.ThrowIfNull(pages);
+        _allowedPages = pages.ToList();
+        ApplyAvailablePages();
+    }
+
+    private void ApplyAvailablePages()
+    {
         var current = _pager.Current;
-        _pager.SetAvailable(pages);
+        _pager.SetAvailable(_allowedPages.Where(p => !ConnectorSections.IsSection(p) || _sectionsInUse.Contains(p)));
         foreach (var (page, dot) in _indicatorDots)
             dot.Visibility = _pager.IsAvailable(page) ? Visibility.Visible : Visibility.Collapsed;
         if (current != _pager.Current)
@@ -377,9 +404,12 @@ public sealed class NotchWindow : Window
     /// <summary>Come il clic sul campo (per <c>--ask-demo</c>): true se ora la tastiera arriva davvero al campo.</summary>
     public bool BeginAskForDemo()
     {
-        BeginAsk();
+        BeginAsk(_home.FocusAsk);
         return WindowNative.GetForegroundWindow() == new WindowInteropHelper(this).Handle && _home.IsAskFocused;
     }
+
+    /// <summary>La pagina DNS con i risultati di una ricerca vera (per <c>--snapshot</c>).</summary>
+    public Task LookupDnsForSnapshot(string text) => _dns.LookupAsync(text);
 
     /// <summary>La Home con una richiesta scritta nel campo (per <c>--snapshot</c>).</summary>
     public void SetAskForSnapshot(string text) => _home.SetAskText(text);
@@ -499,7 +529,7 @@ public sealed class NotchWindow : Window
         _card.HorizontalAlignment = HorizontalAlignment.Center;
         _card.Padding = new Thickness(NotchUi.Padding, 14, NotchUi.Padding, 14);
 
-        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _phone, _work, _agents, _servers, _devices, _clipboard, _timerPage, _system }.OrderBy(p => p.Page))
+        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _phone, _work, _agents, _servers, _devices, _database, _ftp, _dns, _clipboard, _timerPage, _system }.OrderBy(p => p.Page))
         {
             _pages[page.Page] = page;
             page.Visibility = Visibility.Collapsed;
@@ -541,7 +571,7 @@ public sealed class NotchWindow : Window
         };
         _pill.PreviewMouseLeftButtonDown += (_, e) =>
         {
-            if (!_home.IsMouseOverAsk) // lì si seleziona il testo
+            if (!_home.IsMouseOverAsk && !_dns.IsMouseOverInput) // lì si seleziona il testo
                 _swipe.OnDragStart(e.GetPosition(_pill).X);
         };
         _pill.PreviewMouseMove += (_, e) =>
@@ -685,14 +715,14 @@ public sealed class NotchWindow : Window
     /// Il notch non prende mai il focus da solo, così passarci sopra col mouse non toglie la tastiera a chi sta scrivendo
     /// altrove. Lo chiede il clic sul campo, e finché si scrive il notch resta aperto.
     /// </summary>
-    private void BeginAsk()
+    private void BeginAsk(Action focus)
     {
         if (_machine.Held)
             return;
         _beforeAsk = WindowNative.GetForegroundWindow();
         WindowNative.BringToFront(new WindowInteropHelper(this).Handle);
         Activate();
-        _home.FocusAsk();
+        focus();
         _machine.Hold(true, _pill.IsMouseOver, _clock.Elapsed);
     }
 
@@ -706,9 +736,11 @@ public sealed class NotchWindow : Window
     }
 
     /// <summary>Esc: si butta il testo e la tastiera torna alla finestra di prima.</summary>
-    private void CancelAsk()
+    private void CancelAsk() => CancelAsk(_home.ClearAsk);
+
+    private void CancelAsk(Action clear)
     {
-        _home.ClearAsk();
+        clear();
         var before = _beforeAsk;
         ReleaseAsk();
         if (before != 0)

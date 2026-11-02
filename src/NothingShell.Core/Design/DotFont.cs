@@ -105,6 +105,10 @@ public static class DotFont
 
     private static char StripDiacritics(char c)
     {
+        // Metà di una coppia surrogata (emoji): Normalize lancia ArgumentException.
+        if (char.IsSurrogate(c))
+            return c;
+
         foreach (var d in c.ToString().Normalize(NormalizationForm.FormD))
             if (CharUnicodeInfo.GetUnicodeCategory(d) != UnicodeCategory.NonSpacingMark)
                 return d;

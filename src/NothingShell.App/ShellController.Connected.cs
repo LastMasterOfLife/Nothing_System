@@ -230,7 +230,7 @@ public sealed partial class ShellController
         {
             if (CanShow(LiveActivity.Connectors))
                 _notch.ShowHint(DotIcons.Device, Theme.Critical,
-                    $"{manifest.Name}: {reading.Label} {reading.Text}{(reading.Unit is { Length: > 0 } u ? " " + u : string.Empty)}", NotchPage.Devices);
+                    $"{manifest.Name}: {reading.Label} {reading.Text}{(reading.Unit is { Length: > 0 } u ? " " + u : string.Empty)}", ConnectorSections.PageOf(manifest));
         };
         _connectors.ActionFinished += (manifest, action, error) =>
             _notch.ShowNotice(DotIcons.Device, error is null ? Theme.Ink : Theme.Critical,
@@ -286,7 +286,10 @@ public sealed partial class ShellController
         if (!ActivityOn(LiveActivity.Agents))
             hidden.Add(NotchPage.Agents);
         if (!ActivityOn(LiveActivity.Connectors))
+        {
             hidden.Add(NotchPage.Devices);
+            hidden.AddRange(ConnectorSections.Pages); // le pagine di database e FTP compaiono da sole, se ci sono connettori
+        }
         if (!ActivityOn(LiveActivity.Phone) && !_settings.PhoneDirect)
             hidden.Add(NotchPage.Phone);
     }

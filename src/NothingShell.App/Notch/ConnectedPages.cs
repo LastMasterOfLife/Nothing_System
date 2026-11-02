@@ -417,17 +417,26 @@ public sealed class DevicesPage : NotchPageView
     private static readonly TimeSpan ConfirmTimeout = TimeSpan.FromSeconds(3);
 
     private readonly ConnectedPageActions _actions;
+    private readonly NotchPage _page;
+    private readonly string _emptyText;
     private readonly StackPanel _list = new();
     private readonly TextBlock _count;
     private readonly DispatcherTimer _confirmTimer = new() { Interval = ConfirmTimeout };
     private IReadOnlyList<ConnectorState> _states = [];
     private ConnectorAction? _confirming;
 
-    public DevicesPage(ConnectedPageActions actions)
+    /// <summary>
+    /// Dispositivi, oppure la pagina dedicata a un tipo di connettore (Database, FTP): stessa pagina, un titolo e un
+    /// elenco suoi (<see cref="ConnectorSections"/>).
+    /// </summary>
+    public DevicesPage(ConnectedPageActions actions, NotchPage page = NotchPage.Devices, string title = "DISPOSITIVI", string? emptyText = null)
     {
         ArgumentNullException.ThrowIfNull(actions);
         _actions = actions;
-        var (header, _, count) = DevRows.Header("DISPOSITIVI");
+        _page = page;
+        _emptyText = emptyText ?? "Nessun connettore. Aggiungi un file in .nothing-shell\\connectors (esempi in Impostazioni › CONNETTORI): " +
+                                  "Home Assistant, Prometheus, MQTT, ping, API http, file e comandi.";
+        var (header, _, count) = DevRows.Header(title);
         _count = count;
         var scroll = new NotchScrollList(_list) { Margin = new Thickness(0, 6, 0, 0) };
         var dock = new DockPanel();
@@ -444,7 +453,7 @@ public sealed class DevicesPage : NotchPageView
         Render();
     }
 
-    public override NotchPage Page => NotchPage.Devices;
+    public override NotchPage Page => _page;
 
     public void Update(IReadOnlyList<ConnectorState> states)
     {
@@ -463,8 +472,7 @@ public sealed class DevicesPage : NotchPageView
         if (_states.Count == 0)
         {
             var empty = DevRows.Empty();
-            empty.Text = "Nessun connettore. Aggiungi un file in .nothing-shell\\connectors (esempi in Impostazioni › CONNETTORI): " +
-                         "Home Assistant, Prometheus, MQTT, ping, API http, file e comandi.";
+            empty.Text = _emptyText;
             _list.Children.Add(empty);
             return;
         }
