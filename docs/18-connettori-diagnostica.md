@@ -1,7 +1,9 @@
 # 18 — Connettori di diagnostica (specifica)
 
-Stato: **proposta**, niente di questo è ancora nel codice. Completa [14](14-agenti-connettori.md) (connettori) e
-[17](17-dns-notch.md) (pagina DNS). Obiettivo: quando un portale web, un database o un programma "non va", il notch dice
+Stato: **giri 1 e 2 fatti**. Giro 1: W3, W5, D2, D3, P1, P2, P4, P5, P6, P9 (modelli della libreria, `SqlGuard`). Giro 2: W1, W2, W6,
+D1, D4, D6, P3 (pagina Diagnosi, driver PostgreSQL e MySQL; PostgreSQL provato su un server vero, MySQL no). Il resto è
+proposta. Completa [14](14-agenti-connettori.md) (connettori) e
+[17](17-dns-notch.md) (pagina Diagnosi). Obiettivo: quando un portale web, un database o un programma "non va", il notch dice
 **dove** si rompe (rete, DNS, certificato, applicazione, dati, processo) senza aprire una console.
 
 ## Cosa c'è già

@@ -19,11 +19,14 @@ public sealed partial class ShellController
     private readonly ClipboardWatcher _clipWatcher = new();
     private readonly ClipboardHistory _clipHistory = new();
     private readonly PortWatcher _ports = new();
+    private readonly WorkClock _work = new(new NothingShell.Core.Work.WorkStore(NothingShell.Core.Work.WorkStore.DefaultFolder));
 
     private DevPageActions DevActions => new(OpenTask, OpenServer, KillServer, CopyClip, ClipActionFor);
 
     private void WireDev()
     {
+        _notch.SetWorkStore(_work.Store);
+        _notch.HoursGroupClicked += OpenHoursDetail;
         _tasks.Changed += RefreshTasks;
         _tasks.Finished += OnTaskFinished;
         _tasks.Pushed += folder =>
@@ -79,10 +82,13 @@ public sealed partial class ShellController
         _notch.SetClipboard(_clipHistory.Entries);
 
         Toggle(LiveActivity.Servers, _ports.Start, _ports.Stop);
+        Toggle(LiveActivity.WorkHours, _work.Start, _work.Stop);
 
         var hidden = new List<NotchPage>();
         if (!tasks && !ci)
             hidden.Add(NotchPage.Work);
+        if (!ActivityOn(LiveActivity.WorkHours))
+            hidden.Add(NotchPage.Hours);
         if (!ActivityOn(LiveActivity.Servers))
             hidden.Add(NotchPage.Servers);
         if (!history)
@@ -91,12 +97,29 @@ public sealed partial class ShellController
         _notch.SetAvailablePages(NotchPager.Pages.Except(hidden));
     }
 
+    private readonly Dictionary<string, HoursDetailWindow> _hoursWindows = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Il widget con calendario e dettaglio di un gruppo: uno per gruppo, se è già aperto si porta davanti.</summary>
+    private void OpenHoursDetail(string group)
+    {
+        if (!_hoursWindows.TryGetValue(group, out var window))
+        {
+            window = new HoursDetailWindow(_work.Store, group);
+            window.Closed += (_, _) => _hoursWindows.Remove(group);
+            _hoursWindows[group] = window;
+        }
+        window.Present();
+    }
+
     private void DisposeDev()
     {
         _tasks.Dispose();
         _ci.Dispose();
         _clipWatcher.Dispose();
         _ports.Dispose();
+        _work.Dispose();
+        foreach (var window in _hoursWindows.Values.ToArray())
+            window.Close();
     }
 
     private void RefreshTasks()

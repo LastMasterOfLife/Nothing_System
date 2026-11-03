@@ -89,3 +89,10 @@ fida. Nulla viene eseguito dentro il processo della shell, e un plugin che va in
 - Spegnere la barra dalle impostazioni fa ricomparire subito la taskbar di Windows; riaccenderla la rinasconde.
 - I due plugin d'esempio compaiono sul desktop con dati veri; un manifest rotto è elencato con il motivo.
 - Le scelte sopravvivono al riavvio dell'app.
+
+## Aggiorna e riavvia
+Impostazioni › Generale › *Aggiorna e riavvia* (`SelfUpdate`): la shell si chiude, un PowerShell a parte aspetta che sia uscita
+(finché gira il suo file è bloccato e non si può ricompilare), ricompila con `dotnet build` e la riapre. La ricompilazione
+avviene solo se l'eseguibile sta nella cartella `bin\<Configurazione>` di una copia del sorgente, con la stessa configurazione
+con cui gira; altrimenti il pulsante si limita a riavviare. Se la compilazione fallisce riparte comunque la versione di prima
+(non si resta senza shell) e si apre il log degli errori, `%TEMP%\nothing-shell\aggiorna.log`.

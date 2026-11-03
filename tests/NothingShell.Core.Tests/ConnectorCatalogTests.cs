@@ -138,12 +138,14 @@ public class ConnectorSectionTests
         Assert.Equal(NothingShell.Core.Notch.NotchPage.Ftp, ConnectorSections.Of(Made("ftp")));
         Assert.Equal(NothingShell.Core.Notch.NotchPage.Database, ConnectorSections.Of(Made("db-conteggio")));
         Assert.Equal(NothingShell.Core.Notch.NotchPage.Database, ConnectorSections.Of(Made("db-freschezza")));
+        Assert.Equal(NothingShell.Core.Notch.NotchPage.Database, ConnectorSections.Of(Made("db-sessioni")));
+        Assert.Equal(NothingShell.Core.Notch.NotchPage.Database, ConnectorSections.Of(Made("db-backup")));
     }
 
     [Fact]
     public void EveryOtherConnectorStaysInDevices()
     {
-        foreach (var t in ConnectorCatalog.All.Where(t => t.Id is not ("database" or "db-conteggio" or "db-freschezza" or "ftp")))
+        foreach (var t in ConnectorCatalog.All.Where(t => t.Id is not ("database" or "db-conteggio" or "db-freschezza" or "db-sessioni" or "db-backup" or "ftp")))
             Assert.Null(ConnectorSections.Of(new ConnectorManifest("c", "n", ConnectorKind.Ping, TimeSpan.FromSeconds(5), []) { Template = t.Id }));
         Assert.Equal(NothingShell.Core.Notch.NotchPage.Devices, ConnectorSections.PageOf(new ConnectorManifest("c", "n", ConnectorKind.Ping, TimeSpan.FromSeconds(5), [])));
     }

@@ -143,6 +143,7 @@ public static partial class AssistantProtocol
 
         Comandi di lettura che partono da soli:
         Get-Process, Get-Service, Get-ChildItem, Get-Content, Get-PSDrive, Get-Volume, Get-CimInstance, Get-NetIPAddress, Get-NetConnectionProfile, Get-NetTCPConnection, Get-Date, Select-Object, Sort-Object, Where-Object, Measure-Object, Select-String, git status, git log, ipconfig.
+        Le ore di lavoro per progetto e per gruppo sono già sommate in {{{home}}}\.nothing-shell\work\ore-AAAA-MM.txt, un file per mese: leggi quello del mese chiesto e riporta la riga del gruppo o del progetto.
         Vietati: metodi .NET, [math], -f, +, variabili proprie, $(...). Per i GB basta dividere: $_.Free/1GB.
         TotalVisibleMemorySize e FreePhysicalMemory sono in KB: dividendo per 1MB diventano GB.
 
@@ -153,6 +154,7 @@ public static partial class AssistantProtocol
         file più grandi -> COMANDO: Get-ChildItem {{{home}}}\Downloads -File | Sort-Object Length -Descending | Select-Object -First 5 Name, @{n='MB';e={$_.Length/1MB}}
         ultimo commit -> COMANDO: git -C C:\percorso\repository log -1 --format=%h
         quanto occupano i file -> COMANDO: Get-ChildItem C:\cartella -File | Measure-Object -Property Length -Sum | Select-Object Count, @{n='MB';e={$_.Sum/1MB}}
+        ore lavorate a ottobre 2026 -> COMANDO: Get-Content {{{home}}}\.nothing-shell\work\ore-2026-10.txt
         internet -> COMANDO: Get-NetConnectionProfile | Select-Object Name, IPv4Connectivity
         sistemalo -> SCELTE: Cosa devo sistemare? | Controlla lo spazio su disco | Controlla i programmi che usano più memoria
 
@@ -323,6 +325,9 @@ public sealed class CommandAssistant
     /// <summary>Il modello che legge i risultati e risponde; null se non ce n'è uno.</summary>
     public IAssistantModel? Model { get; set; }
 
+    /// <summary>Richieste che l'app sa fare da sola, senza modello né comandi (le ore di lavoro): restituisce la risposta, o null se non è roba sua.</summary>
+    public Func<string, string?>? Local { get; set; }
+
     /// <summary>Dimentica la conversazione: la prossima domanda non dipende dalle precedenti.</summary>
     public void Reset() => _history.Clear();
 
@@ -337,6 +342,11 @@ public sealed class CommandAssistant
         if (input.Length == 0)
             return;
 
+        if (!input.StartsWith('>') && Local?.Invoke(input.TrimStart('?').Trim()) is { } local)
+        {
+            view.Answer(local, verified: true);
+            return;
+        }
         if (input.StartsWith('>') || (!input.StartsWith('?') && AssistantProtocol.LooksLikeCommand(input)))
         {
             await RunGatedAsync(input.TrimStart('>').Trim(), Origin.Typed, canRewrite: false, showOutput: true, view, token);

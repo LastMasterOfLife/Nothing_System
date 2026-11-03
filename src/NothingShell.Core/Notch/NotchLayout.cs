@@ -17,7 +17,7 @@ public static class NotchLayout
     /// <summary>Altezza della Home con la musica, che ha i controlli sopra il campo.</summary>
     public const double HomeMediaHeight = 232;
 
-    public static bool IsTall(NotchPage page) => page is NotchPage.Mail or NotchPage.Phone or NotchPage.Agents or NotchPage.Devices or NotchPage.Database or NotchPage.Ftp or NotchPage.Dns;
+    public static bool IsTall(NotchPage page) => page is NotchPage.Mail or NotchPage.Phone or NotchPage.Agents or NotchPage.Devices or NotchPage.Database or NotchPage.Ftp or NotchPage.Diagnosi or NotchPage.Hours;
 
     /// <summary>Notch espanso su <paramref name="page"/>: le pagine con un elenco si allungano in verticale.</summary>
     public static Size2 Expanded(NotchPage page, bool media = false) =>

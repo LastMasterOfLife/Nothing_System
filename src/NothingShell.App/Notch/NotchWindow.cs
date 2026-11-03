@@ -100,7 +100,8 @@ public sealed class NotchWindow : Window
     private readonly DevicesPage _devices;
     private readonly DevicesPage _database;
     private readonly DevicesPage _ftp;
-    private readonly DnsPage _dns = new();
+    private readonly DiagnosiPage _diagnosi = new();
+    private readonly HoursPage _hours = new();
 
     private readonly DispatcherTimer _deadlineTimer = new();
     private readonly DispatcherTimer _equalizerTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
@@ -143,8 +144,11 @@ public sealed class NotchWindow : Window
         _home.AskClicked += () => BeginAsk(_home.FocusAsk);
         _home.AskSubmitted += OnAskSubmitted;
         _home.AskCancelled += CancelAsk;
-        _dns.InputClicked += () => BeginAsk(_dns.FocusInput);
-        _dns.InputCancelled += () => CancelAsk(_dns.ClearInput);
+        _diagnosi.InputClicked += () => BeginAsk(_diagnosi.FocusInput);
+        _diagnosi.InputCancelled += () => CancelAsk(_diagnosi.ClearInput);
+        _hours.GroupClicked += name => HoursGroupClicked?.Invoke(name);
+        _hours.InputClicked += () => BeginAsk(_hours.FocusInput);
+        _hours.InputCancelled += () => CancelAsk(_hours.ClearInput);
 
         var idle = NotchLayout.For(NotchState.Idle);
         _width = new Spring(idle.Width);
@@ -409,7 +413,20 @@ public sealed class NotchWindow : Window
     }
 
     /// <summary>La pagina DNS con i risultati di una ricerca vera (per <c>--snapshot</c>).</summary>
-    public Task LookupDnsForSnapshot(string text) => _dns.LookupAsync(text);
+    public Task RunDiagnosiForSnapshot(string text) => _diagnosi.RunAsync(text);
+
+    /// <summary>La pagina Ore col negozio dato e un comando scritto nel campo (per <c>--snapshot</c>).</summary>
+    public void ShowHoursForSnapshot(NothingShell.Core.Work.WorkStore store, string? command)
+    {
+        _hours.SetStore(store);
+        if (command is not null)
+            _hours.RunForSnapshot(command);
+    }
+
+    public void SetWorkStore(NothingShell.Core.Work.WorkStore? store) => _hours.SetStore(store);
+
+    /// <summary>Clic sul nome di un gruppo nella pagina Ore: la shell apre il suo calendario.</summary>
+    public event Action<string>? HoursGroupClicked;
 
     /// <summary>La Home con una richiesta scritta nel campo (per <c>--snapshot</c>).</summary>
     public void SetAskForSnapshot(string text) => _home.SetAskText(text);
@@ -529,7 +546,7 @@ public sealed class NotchWindow : Window
         _card.HorizontalAlignment = HorizontalAlignment.Center;
         _card.Padding = new Thickness(NotchUi.Padding, 14, NotchUi.Padding, 14);
 
-        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _phone, _work, _agents, _servers, _devices, _database, _ftp, _dns, _clipboard, _timerPage, _system }.OrderBy(p => p.Page))
+        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _phone, _work, _agents, _servers, _devices, _database, _ftp, _diagnosi, _hours, _clipboard, _timerPage, _system }.OrderBy(p => p.Page))
         {
             _pages[page.Page] = page;
             page.Visibility = Visibility.Collapsed;
@@ -571,7 +588,7 @@ public sealed class NotchWindow : Window
         };
         _pill.PreviewMouseLeftButtonDown += (_, e) =>
         {
-            if (!_home.IsMouseOverAsk && !_dns.IsMouseOverInput) // lì si seleziona il testo
+            if (!_home.IsMouseOverAsk && !_diagnosi.IsMouseOverInput && !_hours.IsMouseOverInput) // lì si seleziona il testo
                 _swipe.OnDragStart(e.GetPosition(_pill).X);
         };
         _pill.PreviewMouseMove += (_, e) =>

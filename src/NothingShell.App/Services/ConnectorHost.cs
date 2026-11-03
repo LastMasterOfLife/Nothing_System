@@ -665,6 +665,9 @@ public sealed class ConnectorHost : IDisposable
     /// <summary>Il comando riceve il segreto nella variabile d'ambiente <c>NOTHING_SECRET</c>: mai negli argomenti né nel file.</summary>
     private static async Task<string> RunProcessAsync(string command, IReadOnlyList<string> arguments, CancellationToken token, string? secret = null)
     {
+        // {app}: il programma stesso, per i controlli che hanno bisogno dei suoi driver (--db-check)
+        if (command == "{app}")
+            command = Environment.ProcessPath ?? throw new IOException("percorso del programma sconosciuto");
         var local = Path.Combine(Folder, command);
         ProcessStartInfo start;
         if (command.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase))

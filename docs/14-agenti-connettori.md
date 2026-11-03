@@ -100,10 +100,10 @@ segreti), così ogni scheda ha **Modifica** (riscrive lo stesso connettore; il t
 
 | Categoria | Connettori |
 |---|---|
-| Questo PC | Spazio su disco, Servizio di Windows (Avvia, Riavvia), App in esecuzione (Termina), Docker, File di log, Dimensione di una cartella (Apri), Cestino (Svuota), Unità rimovibile (Espelli), File duplicati |
-| Rete e web | Dispositivo in rete (ping), Sito o servizio web, IP pubblico, Stato di un servizio online (Statuspage: Claude, GitHub…) |
+| Questo PC | Spazio su disco, Servizio di Windows (Avvia, Riavvia), App in esecuzione (Termina), Docker, File di log, Dimensione di una cartella (Apri), Cestino (Svuota), Unità rimovibile (Espelli), File duplicati, **Programma: salute**, **Log: errori e attività**, **Cartella di coda**, **File più recente**, **Attività pianificata**, **Registro eventi** |
+| Rete e web | Dispositivo in rete (ping), Sito o servizio web, **Contenuto di una pagina**, **Salute di un'API**, IP pubblico, Stato di un servizio online (Statuspage: Claude, GitHub…) |
 | Casa | Home Assistant (Accendi/spegni), Sensori MQTT, Presa Shelly, Presa Tasmota, Stampante 3D OctoPrint e Klipper |
-| Server | Server Linux via SSH e Raspberry Pi (Riavvia), Prometheus con node_exporter, **Server FTP**, **Database** |
+| Server | Server Linux via SSH e Raspberry Pi (Riavvia), Prometheus con node_exporter, **Server FTP**, **Database**, **Database: conteggio con soglia**, **Database: freschezza dei dati**, **SQL Server: sessioni e blocchi**, **SQL Server: backup** |
 | Sicurezza | Microsoft Defender (Scansione rapida), Firewall di Windows, Aggiornamenti di Windows, Integrità di un file (SHA-256), Certificato SSL di un sito, Intestazioni di sicurezza, Porte esposte, Amministratori del PC, Accessi SSH falliti, Vulnerabilità sfruttate (CISA KEV) |
 | Sviluppo e AI | Repository Git (Fetch, Apri), GitHub: PR da rivedere, GitHub: ultima CI, Ollama, Costi API Anthropic, Sito con LLM: costi |
 | Informazioni | Meteo e Qualità dell'aria (Open-Meteo), Cambio valuta (BCE), Criptovaluta (CoinGecko) |
@@ -123,18 +123,28 @@ Ogni connettore attivo ha la sua scheda con tipo, valori, permesso, token e *Rim
 La pagina **Dispositivi** mostra i connettori in generale. **Database** e **Server FTP** hanno invece **una pagina tutta
 loro** (*Database*, *FTP*), con le stesse schede: appare nel notch da sola quando ne attivi uno e sparisce quando li
 rimuovi (Core `ConnectorSections`, testato; dipende dal modello della libreria da cui nasce il file). Anche gli avvisi
-aprono la pagina giusta. La pagina **DNS**, dove si scrive l'indirizzo da cercare, è descritta in [17](17-dns-notch.md).
+aprono la pagina giusta. La pagina **Diagnosi** (DNS, tempi di una richiesta, redirect, propagazione, chi tiene una porta), dove si scrive l'indirizzo, è descritta in [17](17-dns-notch.md).
 
 ### FTP e database
 - **Server FTP**: FTP o FTPS (`tls: si`), accesso anonimo o con utente e password; elenca una cartella e dice se risponde,
   in quanti ms e quanti elementi contiene (avviso sotto una soglia). Non carica, non scarica, non cancella.
 - **Database**: *SQL Server* apre la connessione (utente e password o accesso integrato di Windows), misura connessione e
   query, legge la versione ed esegue una query di controllo che restituisce un valore (di serie `SELECT 1`; scegline una di
-  sola lettura, con avviso sopra una soglia). *PostgreSQL*, *MySQL* e *MariaDB* controllano la raggiungibilità della porta
-  (Windows non ha i loro driver).
+  sola lettura, con avviso sopra una soglia). *PostgreSQL*, *MySQL* e *MariaDB* fanno lo stesso con i driver
+  inclusi nel programma (`NothingShell.exe --db-check`, Npgsql e MySqlConnector, connessione di sola lettura): il
+  connettore lancia il programma stesso (`"command": "{app}"`) e la password arriva in `NOTHING_SECRET`.
 
 Sono connettori `command` (PowerShell): servono i permessi. **Le password** vanno nel Gestore credenziali come per gli altri
 connettori e il comando le riceve nella variabile d'ambiente `NOTHING_SECRET`, mai negli argomenti né nel file.
+
+### Diagnostica di portali, database e programmi
+Specifica in [18](18-connettori-diagnostica.md); i modelli del primo giro sono nella libreria (tutti `command`, con permesso, solo lettura):
+- **Contenuto di una pagina**: codice, tempo, dimensione e se contiene (o non contiene) un testo.
+- **Salute di un'API**: `/health`, `/actuator/health`, `/healthz`; legge anche il corpo di una risposta 503 ed elenca i componenti in errore.
+- **Database: conteggio con soglia** e **freschezza dei dati** (SQL Server, PostgreSQL, MySQL, MariaDB): una query che dà un numero o una data, con soglie. La query passa da `SqlGuard` (Core, testato): una sola istruzione, solo `SELECT`/`WITH`, niente commenti, `INTO`, `EXEC`, `sp_`/`xp_`…; meglio comunque un utente di sola lettura.
+- **SQL Server: sessioni e blocchi** (sessioni sul massimo, richieste bloccate e da quanto, transazione più vecchia; serve VIEW SERVER STATE) e **SQL Server: backup** (età dell'ultimo completo e del log da `msdb`).
+- **Programma: salute** (CPU, memoria, thread, handle, partito da poco = riavvio), **Log: errori e attività** (righe con errori tra le ultime N, log fermo), **Cartella di coda** (file e età del più vecchio), **File più recente** (backup), **Attività pianificata**, **Registro eventi** (errori e crash).
+Il log guarda le ultime righe, non una finestra di tempo (i formati di data sono troppo vari).
 
 ### Tipi
 | `type` | Legge | Campi |

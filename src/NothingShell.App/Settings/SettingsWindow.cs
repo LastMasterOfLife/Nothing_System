@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using NothingShell.App.Rendering;
+using NothingShell.App.Services;
 using NothingShell.Core.Brain;
 using NothingShell.Core.Connectors;
 using NothingShell.Core.Design;
@@ -98,6 +99,12 @@ public interface IShellSettingsActions
     IReadOnlyList<PluginLoadResult> PluginResults { get; }
 
     string DataFolder { get; }
+
+    /// <summary>Progetti, gruppi e ore di lavoro; null se le ore sono spente.</summary>
+    NothingShell.Core.Work.WorkStore? Work { get; }
+
+    /// <summary>Ricompila (se si gira dal sorgente), chiude la shell e la riapre.</summary>
+    void Update();
 
     string PluginFolder { get; }
 
@@ -227,6 +234,7 @@ public enum SettingsPage
     Mail,
     Agenda,
     Dev,
+    Hours,
     Shortcuts,
     Agents,
     Connectors,
@@ -256,6 +264,7 @@ public sealed partial class SettingsWindow : Window
         (SettingsPage.Mail, "Posta", "Mail nel notch e casella collegata"),
         (SettingsPage.Agenda, "Agenda", "Appuntamenti, calendari e riepilogo"),
         (SettingsPage.Dev, "Sviluppo", "Build, appunti e server locali"),
+        (SettingsPage.Hours, "Ore", "Ore lavorate per progetto e gruppo"),
         (SettingsPage.Shortcuts, "Scorciatoie", "Frasi che diventano comandi: le tue e quelle di serie"),
         (SettingsPage.Agents, "Agenti", "Claude Code e altri agenti al lavoro"),
         (SettingsPage.Connectors, "Connettori", "Dispositivi, servizi e automazioni"),
@@ -472,6 +481,9 @@ public sealed partial class SettingsWindow : Window
             case SettingsPage.Dev:
                 DevPage();
                 break;
+            case SettingsPage.Hours:
+                HoursPage();
+                break;
             case SettingsPage.Shortcuts:
                 if (_shortcut is { } shortcut)
                     ShortcutDetail(shortcut);
@@ -513,6 +525,13 @@ public sealed partial class SettingsWindow : Window
         ToggleRow("Notch", "Orologio e musica in alto al centro", _shell.NotchEnabled, v => _shell.NotchEnabled = v);
         ToggleRow("Barra al posto della taskbar", "Spenta: torna la taskbar di Windows", _shell.BarEnabled, v => _shell.BarEnabled = v);
         ToggleRow("Tasto Win apre il launcher", "Le combinazioni Win+… restano a Windows", _shell.UseWinKey, v => _shell.UseWinKey = v);
+
+        Section("AGGIORNAMENTO");
+        var source = SelfUpdate.FindSource();
+        Note(source is null
+            ? "Chiude la shell e la riapre."
+            : "Chiude la shell, ricompila dal sorgente e la riapre: dopo una modifica non serve più chiuderla a mano.", Theme.MutedBrush);
+        ButtonRow(("AGGIORNA E RIAVVIA", _shell.Update));
 
         Section("SCORCIATOIE");
         Note("Ctrl+Win spegne e riaccende la shell. Ctrl+Tab passa alla pagina successiva delle impostazioni, Esc chiude.", Theme.MutedBrush);
@@ -781,6 +800,7 @@ public sealed partial class SettingsWindow : Window
         ActivityRow(LiveActivity.Tasks, "Comandi e build", "Tempo nella pillola, scheda alla fine con il primo errore, pagina Lavoro");
         ActivityRow(LiveActivity.Ci, "CI di GitHub dopo il push", "Con GitHub CLI (gh): esito delle Actions e Rilancia");
         ActivityRow(LiveActivity.Servers, "Server locali", "Porte in ascolto: avviso, Apri nel browser, Termina");
+        ActivityRow(LiveActivity.WorkHours, "Ore di lavoro", "Pagina Ore: tempo reale per progetto e gruppo, anche da chiedere all'assistente");
 
         Section("APPUNTI");
         ActivityRow(LiveActivity.Clipboard, "Cronologia degli appunti", "Pagina Appunti: ultime copie con Formatta, Apri, Copia HEX… (solo in memoria)");

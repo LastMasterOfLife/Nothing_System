@@ -94,6 +94,10 @@ public partial class App : Application
                 TaskWatcher.Send(json, TimeSpan.FromMilliseconds(500));
                 Shutdown();
                 return;
+            case ["--db-check", .. var rest]:
+                Environment.ExitCode = await DbProbe.RunAsync(rest);
+                Shutdown();
+                return;
             case ["--connectors-check", var report, .. var rest]:
                 var connectors = rest.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal)) ?? ConnectorHost.Folder;
                 File.WriteAllLines(report, await ConnectorHost.CheckAsync(connectors, rest.Contains("--esegui")));
@@ -371,6 +375,28 @@ public partial class App : Application
         File.WriteAllLines(report, lines);
     }
 
+    /// <summary>Progetti, gruppi e qualche ora di prova in una cartella temporanea, per le istantanee.</summary>
+    private static NothingShell.Core.Work.WorkStore DemoHours()
+    {
+        var hours = new NothingShell.Core.Work.WorkStore(Path.Combine(Path.GetTempPath(), "ns-hours-snapshot-" + Guid.NewGuid().ToString("N")));
+        foreach (var line in new[] { "progetto sinapsi_web = sinapsi_web, sinapsi", "progetto printer = printer", "progetto elfin = elfin, as400", "gruppo Cliente Elfin = elfin, printer" })
+        {
+            var answer = NothingShell.Core.Work.WorkCommands.Run(line, hours, DateTime.Now);
+            if (answer.Config is { } config)
+                hours.SetConfig(config);
+        }
+        var at = DateTime.Now.AddHours(-3);
+        foreach (var (title, minutes) in new[] { ("sinapsi_web - Code", 95), ("printer - Code", 40), ("elfin - Code", 55) })
+        {
+            hours.Sample(at, title, TimeSpan.Zero);
+            for (var i = 0; i < minutes * 12; i++)
+                hours.Sample(at = at.AddSeconds(5), title, TimeSpan.Zero);
+        }
+        foreach (var line in new[] { "aggiungi 6h a printer e 2h a elfin ieri", "aggiungi 3h a elfin avantieri", "aggiungi 5h a sinapsi_web e 3h al gruppo Cliente Elfin lunedì", "aggiungi 1h a printer 26/10" })
+            NothingShell.Core.Work.WorkCommands.Run(line, hours, DateTime.Now);
+        return hours;
+    }
+
     private static async Task RenderNotchSnapshots(string folder)
     {
         using var media = new MediaService(); // non avviato: nessuna sessione, Home mostra l'ora
@@ -392,8 +418,22 @@ public partial class App : Application
             new("Newsletter", "Le novità di ottobre", "Casella collegata", now.AddDays(-2)),
             new("Marco Neri", "Re: preventivo", "Casella collegata", now.AddDays(-3)),
         ];
-        await notch.LookupDnsForSnapshot("sinapsi.it");
-        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Dns), Path.Combine(folder, "notch-dns-risultati.png"));
+        await notch.RunDiagnosiForSnapshot("sinapsi.it");
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Diagnosi), Path.Combine(folder, "notch-dns-risultati.png"));
+        await notch.RunDiagnosiForSnapshot("http https://www.sinapsi.it");
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Diagnosi), Path.Combine(folder, "notch-diagnosi-http.png"));
+        await notch.RunDiagnosiForSnapshot("propaga sinapsi.it");
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Diagnosi), Path.Combine(folder, "notch-diagnosi-propaga.png"));
+        var hours = DemoHours();
+        notch.ShowHoursForSnapshot(hours, null);
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Hours), Path.Combine(folder, "notch-ore.png"));
+        notch.ShowHoursForSnapshot(hours, "ore gruppo Cliente Elfin");
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Hours), Path.Combine(folder, "notch-ore-gruppo.png"));
+        notch.ShowHoursForSnapshot(hours, "aggiungi 7h a printer e 1h al gruppo Cliente Elfin che ho fatto ieri e aggiungi 4h su printer perché ho fatto questa mattina.");
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Hours), Path.Combine(folder, "notch-ore-frase.png"));
+        var groupWindow = new HoursDetailWindow(hours, "Cliente Elfin");
+        SaveSnapshot(groupWindow.PrepareSnapshot(), Path.Combine(folder, "hours-group-window.png"));
+        notch.SetWorkStore(null);
         var dbTemplate = NothingShell.Core.Connectors.ConnectorCatalog.Find("database")!;
         var dbJson = NothingShell.Core.Connectors.ConnectorCatalog.Create(dbTemplate, "Gestionale", new Dictionary<string, string> { ["host"] = "sql.azienda.local", ["database"] = "gestionale", ["username"] = "monitor" }, []);
         var db = NothingShell.Core.Connectors.ConnectorParser.Parse(dbJson.Id!, dbJson.Json!).Manifest!;
@@ -1185,6 +1225,12 @@ public partial class App : Application
         }
 
         public string DataFolder => AtomicFile.DataFolder;
+
+        public NothingShell.Core.Work.WorkStore? Work { get; } = DemoHours();
+
+        public void Update()
+        {
+        }
 
         public string PluginFolder => PluginHost.Folder;
 

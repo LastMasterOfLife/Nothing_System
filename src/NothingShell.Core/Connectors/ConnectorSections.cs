@@ -19,7 +19,7 @@ public static class ConnectorSections
         ArgumentNullException.ThrowIfNull(manifest);
         return manifest.Template switch
         {
-            "database" or "db-conteggio" or "db-freschezza" => NotchPage.Database,
+            "database" or "db-conteggio" or "db-freschezza" or "db-sessioni" or "db-backup" => NotchPage.Database,
             "ftp" => NotchPage.Ftp,
             _ => null,
         };

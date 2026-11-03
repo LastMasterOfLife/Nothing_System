@@ -1,5 +1,6 @@
 using NothingShell.App.Interop;
 using NothingShell.App.Notch;
+using NothingShell.Core.Notch;
 using NothingShell.Core.RemoteAccess;
 
 namespace NothingShell.App;
@@ -67,14 +68,22 @@ public sealed partial class ShellController : IRemoteConnectActions
 
     private void WireRemoteAccess()
     {
-        _notch.AskPreview = text => Route(text).Preview;
+        _notch.AskPreview = text => HoursPreview(text) ?? Route(text).Preview;
         _notch.AskSubmitted += OnAskSubmitted;
     }
 
     private RequestRoute Route(string text) => RequestRouter.Route(text, _computers.All, _brain.Memory);
 
+    private string? HoursPreview(string text) =>
+        ActivityOn(LiveActivity.WorkHours) && NothingShell.Core.Work.WorkPhrase.IsRequest(text) ? "Ore di lavoro · Invio per registrarle" : null;
+
     private void OnAskSubmitted(string text, bool choose)
     {
+        if (HoursPreview(text) is not null)
+        {
+            AskAssistant(text); // le ore si registrano da sole, senza scegliere fra computer e scorciatoie
+            return;
+        }
         var route = Route(text);
         switch (route.ActionFor(choose))
         {

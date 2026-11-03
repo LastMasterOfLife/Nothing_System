@@ -401,7 +401,7 @@ public static partial class ConnectorCatalog
                 "$ErrorActionPreference = 'Stop'; $h = @{}; if ($env:NOTHING_SECRET) { $h['Authorization'] = 'Bearer ' + $env:NOTHING_SECRET }; $code = 0; $body = ''; $sw = [Diagnostics.Stopwatch]::StartNew(); " +
                 $"try {{ $r = Invoke-WebRequest -UseBasicParsing -Uri {Quote(v["url"])} -Headers $h -TimeoutSec 15 -MaximumRedirection 5; $code = [int]$r.StatusCode; $body = [string]$r.Content }} " +
                 // un servizio malato risponde 503 con il dettaglio nel corpo: si legge anche quello
-                "catch { if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode; $sr = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $body = $sr.ReadToEnd(); $sr.Dispose() } else { throw } }; $sw.Stop(); " +
+                "catch { if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode; $body = \"$($_.ErrorDetails.Message)\"; if (-not $body) { $sr = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream()); $body = $sr.ReadToEnd(); $sr.Dispose() } } else { throw } }; $sw.Stop(); " +
                 "$j = $null; try { $j = $body | ConvertFrom-Json } catch { }; " +
                 "$risposta = if ($j -and $j.status) { \"$($j.status)\" } elseif ($body.Length -gt 0 -and $body.Length -lt 40) { $body.Trim() } else { '' }; " +
                 "$comp = $null; if ($j) { $comp = $j.components; if (-not $comp) { $comp = $j.entries } }; $bad = @(); $all = @(); " +
@@ -566,48 +566,30 @@ public static partial class ConnectorCatalog
         {
             Permission = "Esegue PowerShell per collegarsi al server FTP con l'utente e la password indicati ed elencare la cartella: non carica, non scarica e non cancella nulla.",
         },
-        new("database", "Database", "Server", "SQL Server: apre la connessione, misura i tempi, legge la versione ed esegue una query di controllo. PostgreSQL e MySQL: raggiungibilità della porta.",
+        new("database", "Database", "Server", "SQL Server, PostgreSQL, MySQL e MariaDB: apre la connessione, misura i tempi, legge la versione ed esegue una query di controllo.",
             [
-                new("engine", "Tipo") { Default = "sqlserver", Hint = "sqlserver, postgres, mysql o mariadb", Pattern = "^(sqlserver|postgres|mysql|mariadb)$" },
+                new("engine", "Tipo") { Default = "sqlserver", Hint = "sqlserver, postgres, mysql o mariadb", Pattern = Engines },
                 new("host", "Server") { Hint = "db.miosito.it", Pattern = HostName },
                 new("port", "Porta (vuota = quella del tipo)", FieldKind.Number) { Optional = true },
-                new("database", "Database") { Hint = "solo SQL Server", Optional = true, Pattern = @"^[\w.\-]+$" },
-                new("username", "Utente") { Hint = "vuoto = accesso integrato di Windows (SQL Server)", Optional = true, Pattern = @"^[^\s'""`$;]+$" },
+                new("database", "Database") { Hint = "gestionale (obbligatorio per PostgreSQL)", Optional = true, Pattern = @"^[\w.\-]+$" },
+                new("username", "Utente") { Hint = "vuoto = accesso integrato di Windows (solo SQL Server)", Optional = true, Pattern = @"^[^\s'""`$;]+$" },
                 new("password", "Password", FieldKind.Secret) { Optional = true },
-                new("query", "Query di controllo") { Default = "SELECT 1", Hint = "SELECT COUNT(*) FROM ordini (solo SQL Server, un valore solo)", Optional = true, Validate = SqlGuard.Check },
+                new("query", "Query di controllo") { Default = "SELECT 1", Hint = "SELECT COUNT(*) FROM ordini (un valore solo)", Optional = true, Validate = SqlGuard.Check },
                 new("max", "Avvisa sopra (valore della query)", FieldKind.Number) { Optional = true },
             ],
-            v =>
-            {
-                var engine = v["engine"];
-                var host = Quote(v["host"]);
-                var port = (int)(v.Number("port") ?? engine switch { "sqlserver" => 1433, "postgres" => 5432, _ => 3306 });
-                if (engine != "sqlserver")
-                {
-                    return PowerShell(
-                        "$ErrorActionPreference = 'Stop'; $sw = [Diagnostics.Stopwatch]::StartNew(); $c = New-Object Net.Sockets.TcpClient; " +
-                        $"$ar = $c.BeginConnect({host}, {port}, $null, $null); if (-not $ar.AsyncWaitHandle.WaitOne(8000)) {{ $c.Close(); throw 'porta non raggiungibile' }}; $c.EndConnect($ar); $c.Close(); $sw.Stop(); " +
-                        "@{ stato = 'RAGGIUNGIBILE'; ms = $sw.ElapsedMilliseconds } | ConvertTo-Json",
-                        60,
-                        Reading("Stato", "{stato}"),
-                        Reading("Risposta", "{ms}", "ms"));
-                }
-                var query = v.Has("query") ? v["query"] : "SELECT 1";
-                return PowerShell(
-                    SqlOpen(v, port) +
-                    $"$m = $c.CreateCommand(); $m.CommandTimeout = 10; $m.CommandText = {Quote(query)}; $sw.Restart(); $x = $m.ExecuteScalar(); $sw.Stop(); $ver = $c.ServerVersion; $c.Close(); " +
-                    "@{ stato = 'ONLINE'; connessione = $ms; query = $sw.ElapsedMilliseconds; versione = $ver; valore = \"$x\" } | ConvertTo-Json",
-                    60,
-                    Reading("Stato", "{stato}"),
-                    Reading("Connessione", "{connessione}", "ms"),
-                    Reading("Query", "{query}", "ms"),
-                    Reading("Versione", "{versione}"),
-                    Reading("Valore", "{valore}").With("above", v.Number("max")));
-            })
+            v => DbCheck(v, "control", 60,
+                "$m = $c.CreateCommand(); $m.CommandTimeout = 10; $m.CommandText = " + Quote(v.Has("query") ? v["query"] : "SELECT 1") +
+                "; $sw.Restart(); $x = $m.ExecuteScalar(); $sw.Stop(); $ver = $c.ServerVersion; $c.Close(); " +
+                "@{ stato = 'ONLINE'; connessione = $ms; query = $sw.ElapsedMilliseconds; versione = $ver; valore = \"$x\" } | ConvertTo-Json",
+                Reading("Stato", "{stato}"),
+                Reading("Connessione", "{connessione}", "ms"),
+                Reading("Query", "{query}", "ms"),
+                Reading("Versione", "{versione}"),
+                Reading("Valore", "{valore}").With("above", v.Number("max"))))
         {
-            Permission = "Esegue PowerShell per collegarsi al database con l'utente e la password indicati ed eseguire la query scritta nel modulo a ogni aggiornamento: scegli una query di sola lettura.",
+            Permission = DbPermission,
         },
-        new("db-conteggio", "Database: conteggio con soglia", "Server", "SQL Server: una query che restituisce un numero (ordini bloccati, errori nuovi, code) con avviso sopra o sotto una soglia.",
+        new("db-conteggio", "Database: conteggio con soglia", "Server", "Una query che restituisce un numero (ordini bloccati, errori nuovi, code) con avviso sopra o sotto una soglia.",
             [
                 .. SqlFields(),
                 new("query", "Query (un numero)") { Hint = "SELECT COUNT(*) FROM ordini WHERE stato = 'bloccato'", Validate = SqlGuard.Check },
@@ -615,40 +597,90 @@ public static partial class ConnectorCatalog
                 new("above", "Avvisa sopra", FieldKind.Number) { Optional = true },
                 new("below", "Avvisa sotto", FieldKind.Number) { Optional = true },
             ],
-            v => PowerShell(
-                SqlOpen(v, (int)(v.Number("port") ?? 1433)) +
+            v => DbCheck(v, "valore", 60,
                 $"$m = $c.CreateCommand(); $m.CommandTimeout = 10; $m.CommandText = {Quote(v["query"])}; $sw.Restart(); $x = $m.ExecuteScalar(); $sw.Stop(); $c.Close(); " +
                 "if ($null -eq $x -or $x -is [DBNull]) { throw 'la query non restituisce un valore' }; " +
                 "@{ connessione = $ms; query = $sw.ElapsedMilliseconds; valore = [double]$x } | ConvertTo-Json",
-                60,
                 Reading(v["label"], "{valore}").With("above", v.Number("above")).With("below", v.Number("below")),
                 Reading("Query", "{query}", "ms"),
                 Reading("Connessione", "{connessione}", "ms")))
         {
-            Permission = SqlPermission,
+            Permission = DbPermission,
         },
-        new("db-freschezza", "Database: freschezza dei dati", "Server", "SQL Server: una query che restituisce una data (l'ultimo ordine, l'ultima sincronizzazione): se è troppo vecchia il processo che scrive si è fermato.",
+        new("db-freschezza", "Database: freschezza dei dati", "Server", "Una query che restituisce una data (l'ultimo ordine, l'ultima sincronizzazione): se è troppo vecchia il processo che scrive si è fermato.",
             [
                 .. SqlFields(),
                 new("query", "Query (una data)") { Hint = "SELECT MAX(aggiornato_il) FROM ordini", Validate = SqlGuard.Check },
                 new("hours", "Avvisa oltre (ore)", FieldKind.Number) { Default = "24" },
                 new("utc", "La data è in UTC") { Default = "no", Hint = "si o no (no = ora del PC)", Pattern = "^(si|no)$" },
             ],
-            v => PowerShell(
-                SqlOpen(v, (int)(v.Number("port") ?? 1433)) +
+            v => DbCheck(v, "data", 120,
                 $"$m = $c.CreateCommand(); $m.CommandTimeout = 10; $m.CommandText = {Quote(v["query"])}; $sw.Restart(); $x = $m.ExecuteScalar(); $sw.Stop(); $c.Close(); " +
                 "$o = if ($null -eq $x -or $x -is [DBNull]) { @{ stato = 'NESSUN DATO'; ultimo = '—'; ore = 'n.d.' } } else { $d = [datetime]$x; " +
                 $"$now = {(v["utc"] == "si" ? "[datetime]::UtcNow" : "(Get-Date)")}; " +
                 "@{ stato = 'OK'; ultimo = $d.ToString('dd/MM/yyyy HH:mm'); ore = [math]::Round(($now - $d).TotalHours, 1) } }; " +
                 "$o['connessione'] = $ms; $o['query'] = $sw.ElapsedMilliseconds; $o | ConvertTo-Json",
-                120,
                 Reading("Stato", "{stato}").With("alertOn", "NESSUN DATO"),
                 Reading("Ultimo dato", "{ultimo}"),
                 Reading("Età", "{ore}", "ore").With("above", v.Number("hours")),
                 Reading("Query", "{query}", "ms"),
                 Reading("Connessione", "{connessione}", "ms")))
         {
-            Permission = SqlPermission,
+            Permission = DbPermission,
+        },
+        new("db-sessioni", "SQL Server: sessioni e blocchi", "Server", "Sessioni aperte sul massimo, richieste bloccate, da quanto aspetta la più lunga e la transazione aperta più vecchia. Serve il permesso VIEW SERVER STATE.",
+            [
+                .. SqlFields().Where(f => f.Key != "engine"),
+                new("maxblocked", "Avvisa sopra (richieste bloccate)", FieldKind.Number) { Default = "0" },
+                new("maxwait", "Avvisa sopra (secondi di blocco)", FieldKind.Number) { Default = "30" },
+                new("maxtran", "Avvisa sopra (minuti di transazione aperta)", FieldKind.Number) { Optional = true },
+            ],
+            v => PowerShell(
+                SqlOpen(v, (int)(v.Number("port") ?? 1433)) +
+                "$m = $c.CreateCommand(); $m.CommandTimeout = 10; $m.CommandText = " + Quote(
+                    "SELECT (SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE is_user_process = 1) AS sessioni, @@MAX_CONNECTIONS AS massimo, " +
+                    "(SELECT COUNT(*) FROM sys.dm_exec_requests WHERE blocking_session_id <> 0) AS bloccate, " +
+                    "(SELECT ISNULL(MAX(wait_time) / 1000, 0) FROM sys.dm_exec_requests WHERE blocking_session_id <> 0) AS attesa, " +
+                    "(SELECT TOP 1 blocking_session_id FROM sys.dm_exec_requests WHERE blocking_session_id <> 0 GROUP BY blocking_session_id ORDER BY COUNT(*) DESC) AS bloccante, " +
+                    "(SELECT ISNULL(DATEDIFF(MINUTE, MIN(t.transaction_begin_time), GETDATE()), 0) FROM sys.dm_tran_active_transactions t " +
+                    "JOIN sys.dm_tran_session_transactions st ON st.transaction_id = t.transaction_id JOIN sys.dm_exec_sessions e ON e.session_id = st.session_id WHERE e.is_user_process = 1) AS transazione") +
+                "; $sw.Restart(); $r = $m.ExecuteReader(); [void]$r.Read(); $sw.Stop(); " +
+                "$o = @{ sessioni = [int]$r['sessioni']; massimo = [int]$r['massimo']; bloccate = [int]$r['bloccate']; attesa = [int]$r['attesa']; " +
+                "bloccante = $(if ($r['bloccante'] -is [DBNull]) { 'nessuno' } else { \"sessione $($r['bloccante'])\" }); transazione = [int]$r['transazione']; query = $sw.ElapsedMilliseconds }; $r.Close(); $c.Close(); $o | ConvertTo-Json",
+                60,
+                Reading("Sessioni", "{sessioni}"),
+                Reading("Massimo", "{massimo}"),
+                Reading("Richieste bloccate", "{bloccate}").With("above", v.Number("maxblocked")),
+                Reading("Blocco più lungo", "{attesa}", "s").With("above", v.Number("maxwait")),
+                Reading("Blocca", "{bloccante}"),
+                Reading("Transazione più vecchia", "{transazione}", "min").With("above", v.Number("maxtran")),
+                Reading("Query", "{query}", "ms")))
+        {
+            Permission = "Esegue PowerShell per collegarsi a SQL Server e leggere le viste di sistema (sys.dm_exec_sessions, sys.dm_exec_requests): solo lettura, serve VIEW SERVER STATE.",
+        },
+        new("db-backup", "SQL Server: backup", "Server", "Da quanto tempo è stato fatto l'ultimo backup completo e del log di un database (dalla cronologia in msdb).",
+            [
+                .. SqlFields().Where(f => f.Key != "engine"),
+                new("max", "Avvisa se il completo ha più di (ore)", FieldKind.Number) { Default = "26" },
+                new("maxlog", "Avvisa se il log ha più di (minuti)", FieldKind.Number) { Optional = true },
+            ],
+            v => PowerShell(
+                SqlOpen(v, (int)(v.Number("port") ?? 1433)) +
+                "$m = $c.CreateCommand(); $m.CommandTimeout = 10; $m.CommandText = " + Quote(
+                    "SELECT DATEDIFF(MINUTE, MAX(CASE WHEN type = 'D' THEN backup_finish_date END), GETDATE()) AS completo, " +
+                    "DATEDIFF(MINUTE, MAX(CASE WHEN type = 'L' THEN backup_finish_date END), GETDATE()) AS log, " +
+                    "MAX(CASE WHEN type = 'D' THEN backup_size END) / 1048576 AS mb FROM msdb.dbo.backupset WHERE database_name = @db") +
+                "; [void]$m.Parameters.AddWithValue('@db', " + Quote(v["database"]) + "); $r = $m.ExecuteReader(); [void]$r.Read(); " +
+                "$full = if ($r['completo'] -is [DBNull]) { $null } else { [int]$r['completo'] }; $log = if ($r['log'] -is [DBNull]) { $null } else { [int]$r['log'] }; $mb = if ($r['mb'] -is [DBNull]) { 0 } else { [math]::Round([double]$r['mb']) }; $r.Close(); $c.Close(); " +
+                "@{ stato = $(if ($null -eq $full) { 'MAI' } else { 'OK' }); completo = $(if ($null -eq $full) { 'n.d.' } else { [math]::Round($full / 60, 1) }); " +
+                "log = $(if ($null -eq $log) { 'n.d.' } else { $log }); mb = $mb } | ConvertTo-Json",
+                300,
+                Reading("Stato", "{stato}").With("alertOn", "MAI"),
+                Reading("Ultimo completo", "{completo}", "ore fa").With("above", v.Number("max")),
+                Reading("Ultimo log", "{log}", "min fa").With("above", v.Number("maxlog")),
+                Reading("Dimensione", "{mb}", "MB")))
+        {
+            Permission = "Esegue PowerShell per collegarsi a SQL Server e leggere la cronologia dei backup (msdb.dbo.backupset): solo lettura.",
         },
 
         // ── Sviluppo e AI ─────────────────────────────────────────────────────────
@@ -1142,14 +1174,33 @@ public static partial class ConnectorCatalog
     /// <summary>I campi di connessione a SQL Server dei connettori che eseguono una query.</summary>
     private static ConnectorField[] SqlFields() =>
     [
+        new("engine", "Tipo") { Default = "sqlserver", Hint = "sqlserver, postgres, mysql o mariadb", Pattern = Engines },
         new("host", "Server") { Hint = "db.miosito.it", Pattern = HostName },
-        new("port", "Porta", FieldKind.Number) { Default = "1433", Optional = true },
+        new("port", "Porta (vuota = quella del tipo)", FieldKind.Number) { Optional = true },
         new("database", "Database") { Hint = "gestionale", Pattern = @"^[\w.\-]+$" },
         new("username", "Utente") { Hint = "vuoto = accesso integrato di Windows; meglio un utente di sola lettura", Optional = true, Pattern = @"^[^\s'""`$;]+$" },
         new("password", "Password", FieldKind.Secret) { Optional = true },
     ];
 
-    private const string SqlPermission = "Esegue PowerShell per collegarsi a SQL Server con l'utente e la password indicati ed eseguire la query scritta nel modulo a ogni aggiornamento (solo SELECT: una sola istruzione, niente scritture).";
+    private const string Engines = "^(sqlserver|postgres|mysql|mariadb)$";
+
+    private const string DbPermission = "Si collega al database con l'utente e la password indicati ed esegue la query scritta nel modulo a ogni aggiornamento (solo SELECT: una sola istruzione, niente scritture). SQL Server passa da PowerShell, PostgreSQL e MySQL dal programma stesso.";
+
+    /// <summary>
+    /// Un controllo di database: SQL Server con uno script PowerShell, gli altri tipi con il programma stesso
+    /// (<c>NothingShell.exe --db-check</c>, driver Npgsql e MySqlConnector) che stampa le stesse letture.
+    /// </summary>
+    private static JsonObject DbCheck(TemplateInput v, string kind, int refresh, string sqlServerTail, params JsonObject[] readings)
+    {
+        var engine = v.Has("engine") ? v["engine"] : "sqlserver";
+        var port = (int)(v.Number("port") ?? engine switch { "sqlserver" => 1433, "postgres" => 5432, _ => 3306 });
+        if (engine == "sqlserver")
+            return PowerShell(SqlOpen(v, port) + sqlServerTail, refresh, readings);
+        return Obj(("type", "command"), ("command", "{app}"),
+            ("args", Array("--db-check", $"engine={engine}", $"host={v["host"]}", $"port={port}", $"database={v["database"]}", $"user={v["username"]}",
+                $"kind={kind}", $"utc={(v["utc"] == "si" ? "si" : "no")}", $"query={(v.Has("query") ? v["query"] : "SELECT 1")}")),
+            ("refreshSeconds", refresh), ("readings", new JsonArray(readings.Select(r => (JsonNode?)r).ToArray())));
+    }
 
     private static string Coord(string text) => text.Replace(',', '.');
 

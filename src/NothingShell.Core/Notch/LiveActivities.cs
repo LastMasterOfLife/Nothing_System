@@ -44,6 +44,9 @@ public enum LiveActivity
 
     /// <summary>Connettori verso dispositivi e sistemi: pagina Dispositivi e avvisi sulle soglie.</summary>
     Connectors,
+
+    /// <summary>Ore lavorate per progetto e gruppo, dalla finestra in primo piano: pagina Ore (docs/19-ore-di-lavoro.md).</summary>
+    WorkHours,
 }
 
 /// <summary>

@@ -6,6 +6,7 @@ using System.Windows;
 using NothingShell.App.Notch;
 using NothingShell.App.Services;
 using NothingShell.Core.Brain;
+using NothingShell.Core.Notch;
 
 namespace NothingShell.App;
 
@@ -76,7 +77,13 @@ public sealed partial class ShellController : IAssistantPanelActions
     public void OpenTerminal() => OpenTerminal(null, null, null);
 
     CommandAssistant IAssistantPanelActions.Assistant => _assistant ??= new CommandAssistant(_brain.Memory, new AssistantRunner(),
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), _brain.ProposeAsync);
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), _brain.ProposeAsync) { Local = LocalRequest };
+
+    /// <summary>Le ore dette a parole si registrano da sole, senza modello: scrivono dati e vanno capite per bene (docs/19-ore-di-lavoro.md).</summary>
+    private string? LocalRequest(string text) =>
+        ActivityOn(LiveActivity.WorkHours) && NothingShell.Core.Work.WorkPhrase.IsRequest(text)
+            ? NothingShell.Core.Work.WorkPhrase.ToText(NothingShell.Core.Work.WorkPhrase.Apply(text, _work.Store, DateTime.Now))
+            : null;
 
     /// <summary>Chi risponde nel pannello, per le impostazioni.</summary>
     public string AssistantStatus => _assistantModel switch

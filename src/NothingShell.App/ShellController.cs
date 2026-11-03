@@ -401,6 +401,16 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
 
     public string DataFolder => AtomicFile.DataFolder;
 
+    public NothingShell.Core.Work.WorkStore? Work => ActivityOn(LiveActivity.WorkHours) ? _work.Store : null;
+
+    public void Update()
+    {
+        if (SelfUpdate.Prepare() is { } problem)
+            MessageBox.Show(problem, "Nothing Shell", MessageBoxButton.OK, MessageBoxImage.Warning);
+        else
+            Application.Current.Shutdown();
+    }
+
     public string PluginFolder => PluginHost.Folder;
 
     public async Task StartAsync()
