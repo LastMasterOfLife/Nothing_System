@@ -135,6 +135,8 @@ public class AppearanceTests
             NotchStyle = NotchStyle.Attached,
             NotchSize = NotchSize.Large,
             NotchMascot = true,
+            NotchMascotInitiative = MascotInitiative.Often,
+            NotchMascotPlay = false,
             NotchShadow = 0.8,
             NotchOpenDelayMs = 0,
             NotchCloseDelayMs = 700,
@@ -154,6 +156,8 @@ public class AppearanceTests
         {
             NotchStyle = NotchStyle.Attached,
             NotchMascot = true,
+            NotchMascotInitiative = MascotInitiative.Sometimes,
+            NotchMascotPlay = false,
             NotchShadow = 0.2,
             NotchSize = NotchSize.Large,
             NotchOpenDelayMs = 600,
@@ -172,6 +176,8 @@ public class AppearanceTests
         Assert.Equal(mine.NotchStyle, nothing.NotchStyle);
         Assert.Equal(mine.NotchSize, nothing.NotchSize);
         Assert.True(nothing.NotchMascot);
+        Assert.Equal(MascotInitiative.Sometimes, nothing.NotchMascotInitiative);
+        Assert.False(nothing.NotchMascotPlay);
         Assert.Equal(0.2, nothing.NotchShadow);
     }
 
@@ -204,6 +210,8 @@ public class AppearanceTests
         Assert.Null(look.Accent);
         Assert.True(look.Glass);
         Assert.Equal(DisplayStyle.Windows, look.Display);
+        Assert.Equal(MascotInitiative.Off, look.NotchMascotInitiative); // la mascotte prende l'iniziativa solo se lo chiedi
+        Assert.True(look.NotchMascotPlay); // ai gesti invece risponde: sei tu a cominciare
     }
 
     [Fact]

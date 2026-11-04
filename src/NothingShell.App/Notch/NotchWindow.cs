@@ -79,6 +79,22 @@ public sealed class NotchWindow : Window
     private Action? _afterSurprise;
     private bool _mascotShown;
 
+    // L'iniziativa della mascotte (docs/21-mascotte.md): ogni pochi secondi guarda se ha qualcosa da dirti, e lo dice nell'avviso
+    // dove c'è lei al posto dell'icona.
+    private static readonly TimeSpan SpeechDuration = TimeSpan.FromSeconds(6);
+    private readonly MascotNudges _nudges = new();
+    private readonly DispatcherTimer _nudgeTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private readonly MascotView _speaker = new(NotchLayout.For(NotchState.Idle).Height / 28)
+    {
+        HorizontalAlignment = HorizontalAlignment.Left,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(16, 0, 0, 0),
+        Gaze = (0.8, 0.1),
+        Visibility = Visibility.Collapsed,
+    };
+    private bool _speaking;
+    private bool _lowBattery;
+
     // Compatto: [punto rosso | microfono e webcam]  HH:MM o timer  [equalizzatore | download]
     private readonly Grid _compact = new() { VerticalAlignment = VerticalAlignment.Top };
     private readonly DotMatrixView _compactClock = new() { Pitch = 3, TextSize = 13 };
@@ -208,6 +224,7 @@ public sealed class NotchWindow : Window
         _countdownTimer.Tick += (_, _) => OnCountdownTick();
         _taskTimer.Tick += (_, _) => RenderTaskElapsed();
         _followTimer.Tick += (_, _) => FollowMouse();
+        _nudgeTimer.Tick += (_, _) => OnNudgeTick();
         _surpriseTimer.Tick += (_, _) =>
         {
             _surpriseTimer.Stop();
@@ -272,6 +289,7 @@ public sealed class NotchWindow : Window
     public void ShowMailAlert(MailItem mail)
     {
         ArgumentNullException.ThrowIfNull(mail);
+        _nudges.Noticed(MascotEvent.Mail);
         ShowBanner(mail.Subject, DotIcons.Mail, Theme.Accent, Theme.Ink, NotchPage.Mail, duration: null);
     }
 
@@ -281,6 +299,7 @@ public sealed class NotchWindow : Window
         ArgumentNullException.ThrowIfNull(icon);
         _alertMessage = string.Empty;
         _alertPage = null;
+        _speaking = false;
         SetAlertIcon(icon, muted ? Theme.Critical : Theme.Ink);
         _alertText.Visibility = Visibility.Collapsed;
         _alertLevel.Visibility = Visibility.Visible;
@@ -348,7 +367,10 @@ public sealed class NotchWindow : Window
         var finished = _tasks.Any(t => running.All(r => r.Id != t.Id));
         _tasks = running;
         if (finished && recent.Where(t => !t.Quiet).MaxBy(t => t.FinishedAt) is { } last)
+        {
             _mascot.React(last.Succeeded ? MascotMood.Happy : MascotMood.Sad); // il comando ha finito: la mascotte torna e lo dice
+            _nudges.Noticed(last.Succeeded ? MascotEvent.TaskDone : MascotEvent.TaskFailed);
+        }
         _work.Update(running, recent);
         RenderTaskElapsed();
         if (running.Count > 0)
@@ -380,8 +402,10 @@ public sealed class NotchWindow : Window
         _agents.Update(sessions, today);
         var wasWorking = _working;
         _working = sessions.Where(s => s.State == AgentState.Working).ToArray();
-        if (sessions.Any(s => s.State != AgentState.Working && wasWorking.Any(w => w.Id == s.Id)))
+        var finished = sessions.Count(s => s.State != AgentState.Working && wasWorking.Any(w => w.Id == s.Id));
+        if (finished > 0)
             _mascot.React(MascotMood.Happy); // un agente ha finito il turno (non: una sessione chiusa)
+        _nudges.Noticed(MascotEvent.AgentDone, finished);
         if (_working.Length > 0)
             _agentText.Dots = DotText.Render(_working.Any(s => s.TurnCost is null)
                 ? AgentFormat.Tokens(_working.Sum(s => s.TurnUsage.Output))
@@ -455,9 +479,22 @@ public sealed class NotchWindow : Window
         }
     }
 
-    public void SetSystem(SystemStats stats) => _system.Update(stats);
+    /// <summary>CPU e memoria: pagina Sistema e, se la CPU resta al massimo, la mascotte che barcolla.</summary>
+    public void SetSystem(SystemStats stats)
+    {
+        ArgumentNullException.ThrowIfNull(stats);
+        _system.Update(stats);
+        _nudges.ObserveCpu(DateTime.Now, stats.Cpu);
+    }
 
-    public void SetBattery(BatteryStatus battery) => _system.Update(battery);
+    /// <summary>Batteria: pagina Sistema e, quasi scarica, gli occhi stanchi della mascotte.</summary>
+    public void SetBattery(BatteryStatus battery)
+    {
+        ArgumentNullException.ThrowIfNull(battery);
+        _system.Update(battery);
+        _lowBattery = battery.IsLow;
+        _mascot.Tired = _lowBattery && _nudges.Level != MascotInitiative.Off;
+    }
 
     /// <summary>Come il clic sul campo (per <c>--ask-demo</c>): true se ora la tastiera arriva davvero al campo.</summary>
     public bool BeginAskForDemo()
@@ -484,6 +521,9 @@ public sealed class NotchWindow : Window
 
     /// <summary>La Home con una richiesta scritta nel campo (per <c>--snapshot</c>).</summary>
     public void SetAskForSnapshot(string text) => _home.SetAskText(text);
+
+    /// <summary>La mascotte che dice <paramref name="text"/> nell'avviso (per <c>--mascot-sheet</c>).</summary>
+    public void SayForSnapshot(string text) => Say(text, page: null);
 
     /// <summary>Prepara la pillola in uno stato e una pagina senza animazioni (per <c>--snapshot</c>).</summary>
     public FrameworkElement PrepareSnapshot(NotchState state, NotchPage page)
@@ -512,6 +552,8 @@ public sealed class NotchWindow : Window
             layer.BeginAnimation(OpacityProperty, null);
             layer.Opacity = visible ? 1 : 0;
         }
+        _speaker.Visibility = _speaking ? Visibility.Visible : Visibility.Collapsed;
+        _speaker.SetActive(_speaking && state == NotchState.Alert); // la finestra non è sullo schermo: qui si accende a mano
         return _pill;
     }
 
@@ -600,6 +642,7 @@ public sealed class NotchWindow : Window
         _alert.Children.Add(_alertText);
         _alert.Children.Add(_alertLevel);
         _alert.Children.Add(_alertValue);
+        _alert.Children.Add(_speaker);
 
         var cardSize = NotchLayout.For(NotchState.Card);
         _card.Width = cardSize.Width;
@@ -775,6 +818,10 @@ public sealed class NotchWindow : Window
         _quiet = look.QuietNotch;
         _style = look.NotchStyle;
         _mascotOn = look.NotchMascot;
+        _mascot.Initiative = _nudges.Level = look.NotchMascot ? look.NotchMascotInitiative : MascotInitiative.Off;
+        _mascot.Playful = look.NotchMascotPlay;
+        _mascot.Tired = _lowBattery && _nudges.Level != MascotInitiative.Off;
+        _nudgeTimer.IsEnabled = _nudges.Level != MascotInitiative.Off;
         _shadowAmount = Math.Clamp(look.NotchShadow, 0, 1);
         _machine.OpenDelay = look.NotchOpenDelay;
         _machine.CloseDelay = look.NotchCloseDelay;
@@ -834,7 +881,7 @@ public sealed class NotchWindow : Window
         StartAnimation();
     }
 
-    /// <summary>A riposo, se accesa nella pagina Aspetto, la mascotte prende il posto dell'ora.</summary>
+    /// <summary>A riposo, se accesa nella pagina Aspetto, la mascotte prende il posto dell'ora; quando parla, sta nell'avviso.</summary>
     private void UpdateMascot()
     {
         var shown = _mascotOn && !_quiet && _machine.State == NotchState.Idle;
@@ -843,6 +890,31 @@ public sealed class NotchWindow : Window
         _mascot.SetActive(shown && IsVisible);
         FadeTo(_mascot, shown ? 1 : 0);
         FadeTo(_compactClock, shown ? 0 : 1);
+        _speaker.Visibility = _speaking ? Visibility.Visible : Visibility.Collapsed;
+        _speaker.SetActive(_speaking && _machine.State == NotchState.Alert && IsVisible);
+    }
+
+    /// <summary>
+    /// Ogni pochi secondi: se la mascotte è a riposo sullo schermo e ha qualcosa da dirti, prima ti chiama e poi lo dice. Mai
+    /// mentre il notch fa altro, mentre ci passi sopra o mentre un avviso sta per arrivare.
+    /// </summary>
+    private void OnNudgeTick()
+    {
+        var now = DateTime.Now;
+        _nudges.Observe(now, NativeMethods.IdleTime());
+        if (!_mascotShown || _machine.Peeking || _afterSurprise is not null || _nudges.Next(now) is not { } nudge)
+            return;
+        if (nudge.Text is not { } text)
+            _mascot.React(nudge.Gesture);
+        else
+            Lead(nudge.Gesture, MascotBrain.LengthOf(nudge.Gesture), () => Say(text, nudge.Page));
+    }
+
+    /// <summary>La mascotte parla: nell'avviso al posto dell'icona c'è lei, che guarda il suo testo e sobbalza.</summary>
+    private void Say(string text, NotchPage? page)
+    {
+        ShowBanner(text, icon: null, Theme.Ink, Theme.Ink, page, SpeechDuration, speaker: true);
+        _speaker.React(MascotMood.Talking);
     }
 
     private double CompactOpacity(NotchState state) =>
@@ -934,11 +1006,15 @@ public sealed class NotchWindow : Window
         _deadlineTimer.Start();
     }
 
-    /// <summary>Avviso con testo che scorre: icona facoltativa a sinistra, durata standard se non indicata.</summary>
-    private void ShowBanner(string message, DotGlyph? icon, Color iconColor, Color textColor, NotchPage? page, TimeSpan? duration)
+    /// <summary>
+    /// Avviso con testo che scorre: icona facoltativa a sinistra, durata standard se non indicata. Con <paramref name="speaker"/>
+    /// a sinistra c'è la mascotte che parla, e niente sorpresa prima: ha già chiamato lei.
+    /// </summary>
+    private void ShowBanner(string message, DotGlyph? icon, Color iconColor, Color textColor, NotchPage? page, TimeSpan? duration, bool speaker = false)
     {
         _alertMessage = message.Length > 0 ? message : "(senza oggetto)";
         _alertPage = page;
+        _speaking = speaker;
         if (icon is not null)
             SetAlertIcon(icon, iconColor);
         else
@@ -946,7 +1022,10 @@ public sealed class NotchWindow : Window
         _alertText.Visibility = Visibility.Visible;
         _alertLevel.Visibility = Visibility.Collapsed;
         _alertValue.Visibility = Visibility.Collapsed;
-        _alertText.Margin = new Thickness(icon is null ? 20 : 20 + (icon.Width * _alertIcon.Pitch) + 16, 0, 20, 0);
+        var lead = speaker ? _speaker.Margin.Left + _speaker.Width + 10
+            : icon is null ? 20
+            : 20 + (icon.Width * _alertIcon.Pitch) + 16;
+        _alertText.Margin = new Thickness(lead, 0, 20, 0);
         _alertText.DotColor = textColor;
         _alertOffset = 0;
         RenderAlertText(0);
@@ -956,14 +1035,20 @@ public sealed class NotchWindow : Window
                 ShowPage(p, animate: true);
             return;
         }
-        Surprise(() => RaiseAlert(duration));
+        if (speaker)
+            RaiseAlert(duration);
+        else
+            Surprise(() => RaiseAlert(duration));
     }
 
     /// <summary>
     /// Con la mascotte a riposo sullo schermo, prima la sorpresa e poi, dopo <see cref="SurpriseBeat"/>, <paramref name="show"/>:
     /// altrimenti l'avviso la coprirebbe prima di vederla reagire. Avvisi in fila durante l'attesa: vale l'ultimo.
     /// </summary>
-    private void Surprise(Action show)
+    private void Surprise(Action show) => Lead(MascotMood.Surprised, SurpriseBeat.TimeSpan, show);
+
+    /// <summary>Prima la mascotte fa <paramref name="mood"/> e poi, dopo <paramref name="beat"/>, <paramref name="show"/>.</summary>
+    private void Lead(MascotMood mood, TimeSpan beat, Action show)
     {
         FollowMouse();
         if (!_mascotShown || !Motion.Enabled)
@@ -973,8 +1058,8 @@ public sealed class NotchWindow : Window
         }
         if (_afterSurprise is null)
         {
-            _mascot.React(MascotMood.Surprised);
-            _surpriseTimer.Interval = Motion.Scaled(SurpriseBeat).TimeSpan;
+            _mascot.React(mood);
+            _surpriseTimer.Interval = Motion.Scaled(beat).TimeSpan;
             _surpriseTimer.Start();
         }
         _afterSurprise = show;

@@ -19,6 +19,8 @@ le finestre, senza riavvio; con Sistema e con l'accento di Windows la shell segu
 | Notch › Forma | Sospeso · Unito al bordo (con le "orecchie", docs/20-stile-nusa.md) | Sospeso |
 | Notch › Misura | Piccola · Grande (larga come Nusa); cambiandola la shell si riavvia e riapre le impostazioni | Piccola |
 | Notch › Mascotte | a riposo due occhi al posto dell'ora; reagiscono ad avvisi e lavori finiti | spenta |
+| Notch › Iniziativa | con la mascotte accesa: No · Ogni tanto · Spesso (gesti suoi, pausa, cosa è successo mentre eri via; docs/21-mascotte.md) | No |
+| Notch › Giochi col mouse | con la mascotte accesa: risponde ai gesti sotto il notch (carezza, solletico, saluto, sì, giro, colpetto; docs/21-mascotte.md) | acceso |
 | Notch › Ombra | da nessuna a larga e morbida, sotto il notch aperto | a metà |
 | Notch › Apertura | col mouse sopra, attesa prima di aprire: subito, 0,15, 0,3 o 0,6 s | 0,3 s (290 ms, come Nusa) |
 | Notch › Chiusura | uscito il mouse, quanto resta aperto: subito, 0,3, 0,7 o 1,5 s | subito |

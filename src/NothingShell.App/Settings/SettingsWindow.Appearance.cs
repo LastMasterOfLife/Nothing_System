@@ -71,6 +71,14 @@ public sealed partial class SettingsWindow
             look.NotchSize, v => SetAppearance(a => a with { NotchSize = v }));
         ToggleRow("Mascotte", "A riposo, al posto dell'ora, due occhi che sbattono le palpebre, seguono il mouse, si stupiscono agli avvisi, gioiscono quando un agente o un comando finisce e si addormentano",
             look.NotchMascot, v => SetAppearance(a => a with { NotchMascot = v }));
+        if (look.NotchMascot)
+        {
+            ChoiceRow("Iniziativa", "Se fa qualcosa da sé: gesti suoi, la pausa dopo 50 minuti di fila, al ritorno cosa è successo mentre eri via. Spesso: più gesti, e ti dice anche quando è tardi o il PC fatica",
+                [("No", MascotInitiative.Off), ("Ogni tanto", MascotInitiative.Sometimes), ("Spesso", MascotInitiative.Often)],
+                look.NotchMascotInitiative, v => SetAppearance(a => a with { NotchMascotInitiative = v }));
+            ToggleRow("Giochi col mouse", "Risponde ai gesti appena sotto il notch: accarezzala avanti e indietro, falle il solletico, salutala più in basso, muovi su e giù, falle un giro intorno o dai un colpetto alla pillola",
+                look.NotchMascotPlay, v => SetAppearance(a => a with { NotchMascotPlay = v }));
+        }
         SliderRow("Ombra", "Quanto si allarga l'ombra sotto il notch aperto: tutta a sinistra non c'è",
             look.NotchShadow, v => _shell.Appearance with { NotchShadow = v });
         ToggleRow("Notch discreto", "A riposo resta solo una lineetta contro il bordo alto dello schermo: passandoci sopra si apre",

@@ -74,6 +74,19 @@ public enum NotchScreen
     Chosen,
 }
 
+/// <summary>Quanto la mascotte prende l'iniziativa (docs/21-mascotte.md).</summary>
+public enum MascotInitiative
+{
+    /// <summary>Reagisce soltanto: avvisi, lavori finiti, sonno.</summary>
+    Off,
+
+    /// <summary>Ogni pochi minuti un gesto suo; ti ricorda la pausa e al ritorno ti dice cosa è successo mentre eri via.</summary>
+    Sometimes,
+
+    /// <summary>Gesti più frequenti, e ti dice anche quando si è fatto tardi o il PC fatica.</summary>
+    Often,
+}
+
 /// <summary>Le scelte della pagina Aspetto (docs/02-design-system.md), salvate con le impostazioni della shell.</summary>
 public sealed record AppearanceSettings
 {
@@ -112,6 +125,12 @@ public sealed record AppearanceSettings
     /// <summary>A riposo, al posto dell'ora, due occhi che sbattono le palpebre, seguono il mouse e si addormentano.</summary>
     public bool NotchMascot { get; init; }
 
+    /// <summary>Se la mascotte fa qualcosa da sé: gesti suoi, la pausa, cosa è successo mentre eri via.</summary>
+    public MascotInitiative NotchMascotInitiative { get; init; }
+
+    /// <summary>Se la mascotte risponde ai gesti col mouse vicino al notch: carezze, solletico, saluti, giri, colpetti.</summary>
+    public bool NotchMascotPlay { get; init; } = true;
+
     /// <summary>Ampiezza dell'ombra sotto il notch aperto, da 0 (nessuna) a 1 (larga e morbida).</summary>
     public double NotchShadow { get; init; } = DefaultNotchShadow;
 
@@ -148,6 +167,8 @@ public sealed record AppearanceSettings
             NotchStyle = from.NotchStyle,
             NotchSize = from.NotchSize,
             NotchMascot = from.NotchMascot,
+            NotchMascotInitiative = from.NotchMascotInitiative,
+            NotchMascotPlay = from.NotchMascotPlay,
             NotchShadow = from.NotchShadow,
             NotchOpenDelayMs = from.NotchOpenDelayMs,
             NotchCloseDelayMs = from.NotchCloseDelayMs,

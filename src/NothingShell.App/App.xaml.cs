@@ -63,6 +63,12 @@ public partial class App : Application
                 await RenderAccessSnapshots(folder);
                 Shutdown();
                 return;
+            case ["--mascot-sheet", var folder]:
+                Rendering.Motion.Suspended = true;
+                Rendering.Theme.Apply(SnapshotAppearance(["scuro", "mascotte"]));
+                RenderMascotSheet(folder);
+                Shutdown();
+                return;
             case ["--glass-check", var folder, .. var mode]:
                 await GlassCheck(folder, mode.Contains("solido"));
                 Shutdown();
@@ -1898,6 +1904,85 @@ public partial class App : Application
         encoder.Frames.Add(BitmapFrame.Create(shot));
         using var file = File.Create(path);
         encoder.Save(file);
+    }
+
+    /// <summary>
+    /// La mascotte (docs/21-mascotte.md): <c>mascotte-espressioni.png</c> con ogni espressione in sei momenti della sua durata,
+    /// fermi sulle pose a cui puntano le molle, e <c>mascotte-parla.png</c> con l'avviso in cui parla lei.
+    /// </summary>
+    private static void RenderMascotSheet(string folder)
+    {
+        const int Frames = 6;
+        const double LabelWidth = 96;
+        Directory.CreateDirectory(folder);
+        var idle = NotchLayout.For(NotchState.Idle);
+        var moods = Enum.GetValues<MascotMood>();
+        var sheet = new System.Windows.Controls.Grid
+        {
+            Background = Rendering.Theme.BaseSolidBrush,
+            Width = LabelWidth + (Frames * (idle.Width + 8)) + 8,
+            Height = moods.Length * (idle.Height + 8),
+        };
+        sheet.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = new GridLength(LabelWidth) });
+        for (var frame = 0; frame < Frames; frame++)
+            sheet.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = new GridLength(idle.Width + 8) });
+        foreach (var (mood, row) in moods.Select((m, i) => (m, i)))
+        {
+            sheet.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = new GridLength(idle.Height + 8) });
+            var label = new System.Windows.Controls.TextBlock
+            {
+                Text = mood switch
+                {
+                    MascotMood.Surprised => "Sorpresa",
+                    MascotMood.Happy => "Contenta",
+                    MascotMood.Sad => "Triste",
+                    MascotMood.Wink => "Occhiolino",
+                    MascotMood.LookAround => "Giro d'occhi",
+                    MascotMood.Hop => "Saltello",
+                    MascotMood.Yawn => "Sbadiglio",
+                    MascotMood.Calling => "Ti chiama",
+                    MascotMood.Dizzy => "Capogiro",
+                    MascotMood.Talking => "Parla",
+                    MascotMood.Purr => "Fusa",
+                    MascotMood.Giggle => "Ridacchia",
+                    MascotMood.WaveBack => "Saluta",
+                    MascotMood.Nod => "Annuisce",
+                    MascotMood.Poked => "Colpetto",
+                    _ => "Offesa",
+                },
+                Foreground = Rendering.Theme.InkBrush,
+                FontFamily = Rendering.Theme.BodyFont,
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(12, 0, 0, 0),
+            };
+            System.Windows.Controls.Grid.SetRow(label, row);
+            sheet.Children.Add(label);
+            for (var frame = 0; frame < Frames; frame++)
+            {
+                var mascot = new MascotView(idle.Height / 28) { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+                mascot.Freeze(MascotBrain.Feel(mood, MascotBrain.LengthOf(mood) * frame / Frames));
+                var pill = new System.Windows.Controls.Border
+                {
+                    Width = idle.Width,
+                    Height = idle.Height,
+                    CornerRadius = new CornerRadius(NotchLayout.CornerRadius(idle)),
+                    Background = Rendering.Theme.PanelBrush,
+                    BorderBrush = Rendering.Theme.OutlineBrush,
+                    BorderThickness = new Thickness(1),
+                    Child = mascot,
+                };
+                System.Windows.Controls.Grid.SetRow(pill, row);
+                System.Windows.Controls.Grid.SetColumn(pill, frame + 1);
+                sheet.Children.Add(pill);
+            }
+        }
+        SaveSnapshot(sheet, Path.Combine(folder, "mascotte-espressioni.png"));
+
+        using var media = new MediaService(); // non avviato
+        var notch = new NotchWindow(media, DevPageActions.None, ConnectedPageActions.None);
+        notch.SayForSnapshot("MENTRE ERI VIA: 2 MAIL, 1 AGENTE HA FINITO");
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "mascotte-parla.png"));
     }
 
     /// <summary>L'aspetto delle immagini: <c>chiaro</c>, <c>scuro</c>, <c>punti</c>, <c>#RRGGBB</c>; RenderTargetBitmap non vede il vetro, quindi senza.</summary>
