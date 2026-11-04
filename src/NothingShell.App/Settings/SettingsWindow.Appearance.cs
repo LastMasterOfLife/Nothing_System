@@ -3,8 +3,10 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using NothingShell.App.Interop;
 using NothingShell.App.Rendering;
 using NothingShell.Core.Design;
+using NothingShell.Core.Notch;
 
 namespace NothingShell.App.Settings;
 
@@ -67,17 +69,54 @@ public sealed partial class SettingsWindow
         ChoiceRow("Misura", "Piccola è quella di sempre, Grande è più larga. Cambiandola la shell si riavvia",
             [("Piccola", NotchSize.Small), ("Grande", NotchSize.Large)],
             look.NotchSize, v => SetAppearance(a => a with { NotchSize = v }));
-        ToggleRow("Mascotte", "A riposo, al posto dell'ora, due occhi che sbattono le palpebre, seguono il mouse e si addormentano",
+        ToggleRow("Mascotte", "A riposo, al posto dell'ora, due occhi che sbattono le palpebre, seguono il mouse, si stupiscono agli avvisi, gioiscono quando un agente o un comando finisce e si addormentano",
             look.NotchMascot, v => SetAppearance(a => a with { NotchMascot = v }));
         SliderRow("Ombra", "Quanto si allarga l'ombra sotto il notch aperto: tutta a sinistra non c'è",
             look.NotchShadow, v => _shell.Appearance with { NotchShadow = v });
         ToggleRow("Notch discreto", "A riposo resta solo una lineetta contro il bordo alto dello schermo: passandoci sopra si apre",
             look.QuietNotch, v => SetAppearance(a => a with { QuietNotch = v }));
+        ChoiceRow("Apertura", "Col mouse sopra, quanto aspetta prima di aprirsi: così passarci di sfuggita non lo apre",
+            [("Subito", 0), ("0,15 s", 150), ("0,3 s", AppearanceSettings.DefaultNotchOpenDelayMs), ("0,6 s", 600)],
+            look.NotchOpenDelayMs, v => SetAppearance(a => a with { NotchOpenDelayMs = v }));
+        ChoiceRow("Chiusura", "Uscito il mouse, quanto resta aperto: tornandoci sopra intanto non si chiude",
+            [("Subito", 0), ("0,3 s", 300), ("0,7 s", 700), ("1,5 s", 1500)],
+            look.NotchCloseDelayMs, v => SetAppearance(a => a with { NotchCloseDelayMs = v }));
+        NotchScreenRows(look);
+
+        Section("Movimento");
+        ChoiceRow("Molla del notch", "Morbida si apre piano senza rimbalzo, Nusa rimbalza appena, Scattante è svelta e vivace",
+            [("Morbida", NotchFeel.Soft), ("Nusa", NotchFeel.Nusa), ("Scattante", NotchFeel.Snappy)],
+            look.NotchFeel, v => SetAppearance(a => a with { NotchFeel = v }));
+        ChoiceRow("Velocità", "Di tutte le animazioni della shell: sotto 1× più calme, sopra più svelte",
+            [("0,5×", 0.5), ("0,75×", 0.75), ("1×", 1.0), ("1,25×", 1.25), ("1,5×", 1.5)],
+            look.AnimationSpeed, v => SetAppearance(a => a with { AnimationSpeed = v }));
+    }
+
+    /// <summary>Su quale schermo: con più schermi si può sceglierne uno, numerati da sinistra a destra.</summary>
+    private void NotchScreenRows(AppearanceSettings look)
+    {
+        var monitors = NotchPlacement.InOrder(WindowNative.Monitors());
+        var several = monitors.Count > 1;
+        (string, NotchScreen)[] screens = several
+            ? [("Principale", NotchScreen.Primary), ("Dove sta il mouse", NotchScreen.Mouse), ("Uno scelto", NotchScreen.Chosen)]
+            : [("Principale", NotchScreen.Primary), ("Dove sta il mouse", NotchScreen.Mouse)];
+        ChoiceRow("Schermo", "Dove sta il mouse: il notch ci passa quando è chiuso, e porta lì avvisi e schede",
+            screens, look.NotchScreen, v => SetAppearance(a => a with
+            {
+                NotchScreen = v,
+                NotchMonitor = v == NotchScreen.Chosen ? a.NotchMonitor ?? monitors.FirstOrDefault(m => !m.IsPrimary)?.Name : a.NotchMonitor,
+            }));
+        if (!several || look.NotchScreen != NotchScreen.Chosen)
+            return;
+        var chosen = NotchPlacement.Pick(monitors, NotchScreen.Chosen, look.NotchMonitor, 0)?.Name ?? "";
+        ChoiceRow("Quale schermo", "Numerati da sinistra a destra. Se lo scolleghi, il notch torna sul principale",
+            [.. monitors.Select((m, i) => ($"{i + 1}{(m.IsPrimary ? " · principale" : "")}", m.Name))],
+            chosen, v => SetAppearance(a => a with { NotchMonitor = v }));
     }
 
     /// <summary>Scelta fra poche voci: titolo a sinistra, controllo a segmenti a destra.</summary>
     private void ChoiceRow<T>(string title, string description, (string Label, T Value)[] options, T selected, Action<T> pick)
-        where T : struct, Enum
+        where T : notnull
     {
         var row = new Grid { Margin = new Thickness(0, 8, 0, 8) };
         row.ColumnDefinitions.Add(new ColumnDefinition());

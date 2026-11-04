@@ -18,7 +18,7 @@ public enum NotchState
 /// </summary>
 public sealed class NotchStateMachine
 {
-    /// <summary>Come Nusa: uscendo col mouse il notch si richiude subito (docs/20-stile-nusa.md).</summary>
+    /// <summary>Come Nusa: uscendo col mouse il notch si richiude subito (docs/20-stile-nusa.md). Di serie per <see cref="CloseDelay"/>.</summary>
     public static readonly TimeSpan LeaveDelay = TimeSpan.Zero;
     public static readonly TimeSpan AlertDuration = TimeSpan.FromSeconds(6);
 
@@ -26,6 +26,12 @@ public sealed class NotchStateMachine
     public static readonly TimeSpan CardLeaveDelay = TimeSpan.FromMilliseconds(1500);
 
     private bool _activity;
+
+    /// <summary>Col mouse sopra, quanto si aspetta prima di aprire (pagina Aspetto). Zero apre subito, senza gonfiarsi.</summary>
+    public TimeSpan OpenDelay { get; set; } = NotchMotion.EnterDelay;
+
+    /// <summary>Uscito il mouse, quanto resta aperto (pagina Aspetto): tornandoci sopra intanto non si chiude.</summary>
+    public TimeSpan CloseDelay { get; set; } = LeaveDelay;
 
     public NotchState State { get; private set; } = NotchState.Idle;
 
@@ -38,7 +44,7 @@ public sealed class NotchStateMachine
     /// <summary>Istante in cui l'avviso in corso finirà.</summary>
     public TimeSpan? AlertDeadline { get; private set; }
 
-    /// <summary>Istante in cui il notch col mouse sopra si aprirà (<see cref="NotchMotion.EnterDelay"/>).</summary>
+    /// <summary>Istante in cui il notch col mouse sopra si aprirà (<see cref="OpenDelay"/>).</summary>
     public TimeSpan? ExpandDeadline { get; private set; }
 
     /// <summary>Il mouse è sopra e si aspetta di aprire: la pillola si gonfia un poco.</summary>
@@ -98,17 +104,17 @@ public sealed class NotchStateMachine
     }
 
     /// <summary>
-    /// Il mouse arriva sul notch: si apre dopo <see cref="NotchMotion.EnterDelay"/>, se resta. Restituisce true se comincia
-    /// l'attesa (la pillola va gonfiata). Un avviso intanto non scade.
+    /// Il mouse arriva sul notch: si apre dopo <see cref="OpenDelay"/>, se resta. Restituisce true se comincia l'attesa (la
+    /// pillola va gonfiata) o se si apre subito. Un avviso intanto non scade.
     /// </summary>
     public bool OnPointerHover(TimeSpan now)
     {
-        if (State is NotchState.Expanded or NotchState.Card)
+        if (State is NotchState.Expanded or NotchState.Card || OpenDelay <= TimeSpan.Zero)
             return OnPointerEnter();
         if (Peeking)
             return false;
         AlertDeadline = null;
-        ExpandDeadline = now + NotchMotion.EnterDelay;
+        ExpandDeadline = now + OpenDelay;
         return true;
     }
 
@@ -125,7 +131,7 @@ public sealed class NotchStateMachine
         if (State == NotchState.Expanded)
         {
             if (!Held)
-                CollapseDeadline = now + LeaveDelay;
+                CollapseDeadline = now + CloseDelay;
         }
         else if (State == NotchState.Card)
         {
@@ -141,7 +147,7 @@ public sealed class NotchStateMachine
         if (held)
             CollapseDeadline = null;
         else if (State == NotchState.Expanded && !pointerOver)
-            CollapseDeadline = now + LeaveDelay;
+            CollapseDeadline = now + CloseDelay;
     }
 
     /// <summary>Richiude subito il notch, anche col mouse sopra: la richiesta passa alla finestra dell'assistente.</summary>

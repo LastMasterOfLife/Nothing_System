@@ -61,7 +61,8 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
     private SettingsWindow? _settingsWindow;
     private MailReaderWindow? _mailReader;
     private QuickPanelWindow? _quickPanel;
-    private bool _fullscreen; // app a schermo intero sul monitor principale: lì sta il notch
+    private bool _fullscreen; // app a schermo intero sullo schermo del notch
+    private nint _fullscreenMonitor;
 
     public ShellController()
     {
@@ -140,11 +141,22 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         _bars.SetNetwork(_network.Current);
         _tracker.FullscreenChanged += monitor =>
         {
-            _fullscreen = monitor != 0 && Interop.WindowNative.Monitors().Any(m => m.Handle == monitor && m.IsPrimary);
+            _fullscreenMonitor = monitor;
             _bars.FullscreenMonitor = monitor;
-            ApplyTopLevelVisibility();
-            ApplyVolumeKeys();
+            ApplyFullscreen();
         };
+        _notch.MonitorChanged += ApplyFullscreen;
+    }
+
+    /// <summary>Il notch si nasconde se l'app a schermo intero sta sul suo schermo (il principale finché non è posato).</summary>
+    private void ApplyFullscreen()
+    {
+        var notchMonitor = _notch.MonitorHandle;
+        _fullscreen = _fullscreenMonitor != 0 && (notchMonitor != 0
+            ? _fullscreenMonitor == notchMonitor
+            : Interop.WindowNative.Monitors().Any(m => m.Handle == _fullscreenMonitor && m.IsPrimary));
+        ApplyTopLevelVisibility();
+        ApplyVolumeKeys();
     }
 
     /// <summary>Ctrl+Win: l'app spegne la shell e resta in attesa (docs/06-launcher.md).</summary>

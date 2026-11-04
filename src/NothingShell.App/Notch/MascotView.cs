@@ -11,7 +11,7 @@ namespace NothingShell.App.Notch;
 
 /// <summary>
 /// La mascotte del notch a riposo (docs/20-stile-nusa.md): due occhi tondi che sbattono le palpebre, seguono il mouse,
-/// sorridono quando ci si passa sopra e si addormentano. <see cref="MascotBrain"/> decide le pose, qui ogni grandezza ha la sua
+/// sorridono quando ci si passa sopra, reagiscono ad avvisi e lavori finiti e si addormentano. <see cref="MascotBrain"/> decide le pose, qui ogni grandezza ha la sua
 /// molla. Si ridisegna solo mentre qualcosa si muove: fermi, gli occhi non costano nulla.
 /// </summary>
 internal sealed class MascotView : Canvas
@@ -25,6 +25,7 @@ internal sealed class MascotView : Canvas
     private readonly Spring _lookX = new(0, 140, 19);
     private readonly Spring _lookY = new(0, 140, 19);
     private readonly Spring _smile = new(0, 220, 26);
+    private readonly Spring _lift = new(0, 520, 20);
     private readonly DispatcherTimer _think = new() { Interval = ThinkInterval };
     private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
     private readonly double _scale;
@@ -48,6 +49,14 @@ internal sealed class MascotView : Canvas
 
     /// <summary>Il mouse sopra il notch che sta per aprirsi: gli occhi si strizzano in un sorriso.</summary>
     public bool Greeting { get; set; }
+
+    /// <summary>Reagisce a ciò che succede; se è nascosta, la reazione si vede appena torna (finché dura).</summary>
+    public void React(MascotMood mood)
+    {
+        _brain.React(mood, _clock.Elapsed);
+        if (_active)
+            Think();
+    }
 
     /// <summary>Visibile o no: nascosta non pensa e non anima.</summary>
     public void SetActive(bool active)
@@ -76,14 +85,15 @@ internal sealed class MascotView : Canvas
         _lookX.Target = pose.LookX;
         _lookY.Target = pose.LookY;
         _smile.Target = pose.Smile;
+        _lift.Target = pose.Lift;
         if (!Motion.Enabled)
         {
-            foreach (var spring in new[] { _open, _lookX, _lookY, _smile })
+            foreach (var spring in new[] { _open, _lookX, _lookY, _smile, _lift })
                 spring.SnapTo(spring.Target);
             Render();
             return;
         }
-        if (!_rendering && !(_open.IsSettled && _lookX.IsSettled && _lookY.IsSettled && _smile.IsSettled))
+        if (!_rendering && !(_open.IsSettled && _lookX.IsSettled && _lookY.IsSettled && _smile.IsSettled && _lift.IsSettled))
         {
             _rendering = true;
             _lastFrame = now;
@@ -110,9 +120,9 @@ internal sealed class MascotView : Canvas
     private void OnFrame(object? sender, EventArgs e)
     {
         var now = _clock.Elapsed;
-        var dt = (now - _lastFrame).TotalSeconds;
+        var dt = (now - _lastFrame).TotalSeconds * Motion.Speed;
         _lastFrame = now;
-        var moving = _open.Step(dt) | _lookX.Step(dt) | _lookY.Step(dt) | _smile.Step(dt);
+        var moving = _open.Step(dt) | _lookX.Step(dt) | _lookY.Step(dt) | _smile.Step(dt) | _lift.Step(dt);
         Render();
         if (moving)
             return;
@@ -127,7 +137,7 @@ internal sealed class MascotView : Canvas
         var width = 8 * s * (1 + (0.15 * smile));
         var height = Math.Max(1.6 * s, 10 * s * Math.Max(_open.Value, 0) * (1 - (0.5 * smile)));
         var x = _lookX.Value * 4 * s;
-        var y = (_lookY.Value * 2 * s) - (smile * 1.5 * s);
+        var y = (_lookY.Value * 2 * s) - (smile * 1.5 * s) + (_lift.Value * 3 * s);
         var gap = 20 * s;
         Place(_left, (Width / 2) - (gap / 2) + x, (Height / 2) + y, width, height);
         Place(_right, (Width / 2) + (gap / 2) + x, (Height / 2) + y, width, height);

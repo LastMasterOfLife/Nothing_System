@@ -10,7 +10,8 @@ namespace NothingShell.App.Rendering;
 /// Movimento condiviso dei controlli (docs/02-design-system.md): lo stato si legge dal riempimento che sfuma
 /// (niente bordi che compaiono), la pressione rimpicciolisce appena e al rilascio torna con un piccolo rimbalzo,
 /// i contenuti nuovi entrano sfumando dal basso. Curva OutQuint: parte svelta e si posa piano.
-/// Con le animazioni di Windows spente (Accessibilità › Effetti visivi) tutto salta subito allo stato finale.
+/// Con le animazioni di Windows spente (Accessibilità › Effetti visivi) tutto salta subito allo stato finale. Le durate seguono
+/// la velocità scelta nella pagina Aspetto (<see cref="Speed"/>).
 /// </summary>
 public static class Motion
 {
@@ -27,7 +28,15 @@ public static class Motion
     /// <summary>Preferenza di Windows: false con gli effetti di animazione disattivati.</summary>
     public static bool Enabled => !Suspended && SystemParameters.ClientAreaAnimation;
 
-    private static Duration D(Duration d) => Enabled ? d : TimeSpan.Zero;
+    /// <summary>Velocità delle animazioni scelta nella pagina Aspetto: 1 di serie, 1,5 più svelte, 0,5 più calme.</summary>
+    public static double Speed => Theme.Settings.MotionSpeed;
+
+    /// <summary><paramref name="d"/> alla velocità scelta: le animazioni proprie (non di questi aiuti) la passano di qui.</summary>
+    public static Duration Scaled(Duration d) => d.HasTimeSpan ? TimeSpan.FromTicks((long)(d.TimeSpan.Ticks / Speed)) : d;
+
+    private static Duration D(Duration d) => Enabled ? Scaled(d) : TimeSpan.Zero;
+
+    private static TimeSpan Delay(double ms) => TimeSpan.FromMilliseconds(ms / Speed);
 
     /// <summary>Riempimento che sfuma verso <paramref name="color"/>; il pennello diventa modificabile se era condiviso.</summary>
     public static void FadeTo(Border border, Color color, Duration? duration = null)
@@ -103,12 +112,12 @@ public static class Motion
         }
         var shift = new TranslateTransform(offsetX, offsetY);
         AddTransform(element, shift);
-        var begin = TimeSpan.FromMilliseconds(delayMs);
+        var begin = Delay(delayMs);
         element.Opacity = 0;
-        element.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, Normal) { BeginTime = begin, EasingFunction = OutQuint });
-        shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(offsetY, 0, Slow) { BeginTime = begin, EasingFunction = OutQuint });
+        element.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, D(Normal)) { BeginTime = begin, EasingFunction = OutQuint });
+        shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(offsetY, 0, D(Slow)) { BeginTime = begin, EasingFunction = OutQuint });
         if (offsetX != 0)
-            shift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(offsetX, 0, Slow) { BeginTime = begin, EasingFunction = OutQuint });
+            shift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(offsetX, 0, D(Slow)) { BeginTime = begin, EasingFunction = OutQuint });
     }
 
     /// <summary>Apertura di una finestra o di un pannello: sfuma e cresce dal 96%.</summary>
@@ -120,10 +129,10 @@ public static class Motion
         var scale = new ScaleTransform(0.96, 0.96);
         element.RenderTransformOrigin = new Point(0.5, 0.5);
         AddTransform(element, scale);
-        var grow = new DoubleAnimation(0.96, 1, Slow) { EasingFunction = OutQuint };
+        var grow = new DoubleAnimation(0.96, 1, D(Slow)) { EasingFunction = OutQuint };
         scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
         scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
-        element.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, Normal) { EasingFunction = OutQuint });
+        element.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, D(Normal)) { EasingFunction = OutQuint });
     }
 
     /// <summary>Sposta un indicatore (la pillola di un controllo a segmenti) fino a <paramref name="x"/>, cambiandone la larghezza.</summary>
@@ -141,9 +150,9 @@ public static class Motion
         ArgumentNullException.ThrowIfNull(element);
         if (!Enabled)
             return;
-        element.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(1, low, TimeSpan.FromMilliseconds(520))
+        element.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(1, low, D(TimeSpan.FromMilliseconds(520)))
         {
-            BeginTime = TimeSpan.FromMilliseconds(delayMs),
+            BeginTime = Delay(delayMs),
             AutoReverse = true,
             RepeatBehavior = RepeatBehavior.Forever,
             EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },

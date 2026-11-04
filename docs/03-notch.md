@@ -19,12 +19,19 @@ che non ruba il focus (`WS_EX_NOACTIVATE`, `WS_EX_TOOLWINDOW`: non appare in Alt
 ```
 Idle      --media playing-->   Activity
 Activity  --media stopped-->   Idle
-Idle|Activity|Alert --pointer enter--> (attesa 290 ms, la pillola si gonfia) --> Expanded
+Idle|Activity|Alert --pointer enter--> (attesa scelta in Aspetto, di serie 290 ms: la pillola si gonfia; con "Subito" si apre senza) --> Expanded
 attesa --pointer leave--> torna com'era (un avviso resta ancora 1,5 s)
-Expanded  --pointer leave (subito)--> Activity se media attivo, altrimenti Idle
+Expanded  --pointer leave (dopo la chiusura scelta, di serie subito)--> Activity se media attivo, altrimenti Idle
 ```
 La macchina a stati è in `Core/Notch/NotchStateMachine` ed è deterministica: riceve eventi
 e un orologio iniettato (per il ritardo di uscita), restituisce lo stato corrente.
+
+## Schermo
+`Core/Notch/NotchPlacement` sceglie lo schermo (Aspetto › Schermo) e posa la finestra centrata contro il suo bordo alto, in
+pixel fisici di quello schermo. "Dove sta il mouse" controlla ogni 400 ms e sposta il notch solo da chiuso (mai aperto, in
+attesa d'apertura o mentre si scrive); un avviso o una scheda lo portano subito sullo schermo del mouse. "Uno scelto" usa il
+nome di Windows dello schermo (`\\.\DISPLAY2`): scollegato, si torna al principale. Il notch si nasconde a schermo intero
+solo se l'app a schermo intero sta sul suo schermo.
 
 ## Rendering
 - La finestra ha la dimensione massima (`Expanded`) ed è trasparente; la pillola visibile è

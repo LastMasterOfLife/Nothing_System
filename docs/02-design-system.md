@@ -18,8 +18,13 @@ le finestre, senza riavvio; con Sistema e con l'accento di Windows la shell segu
 | Notch discreto | a riposo solo una lineetta contro il bordo alto | spento |
 | Notch › Forma | Sospeso · Unito al bordo (con le "orecchie", docs/20-stile-nusa.md) | Sospeso |
 | Notch › Misura | Piccola · Grande (larga come Nusa); cambiandola la shell si riavvia e riapre le impostazioni | Piccola |
-| Notch › Mascotte | a riposo due occhi al posto dell'ora | spenta |
+| Notch › Mascotte | a riposo due occhi al posto dell'ora; reagiscono ad avvisi e lavori finiti | spenta |
 | Notch › Ombra | da nessuna a larga e morbida, sotto il notch aperto | a metà |
+| Notch › Apertura | col mouse sopra, attesa prima di aprire: subito, 0,15, 0,3 o 0,6 s | 0,3 s (290 ms, come Nusa) |
+| Notch › Chiusura | uscito il mouse, quanto resta aperto: subito, 0,3, 0,7 o 1,5 s | subito |
+| Notch › Schermo | principale, dove sta il mouse (ci passa a notch chiuso, e ci porta avvisi e schede), o uno scelto | principale |
+| Movimento › Molla del notch | Morbida (senza rimbalzo), Nusa, Scattante (svelta, rimbalzo vivace) | Nusa |
+| Movimento › Velocità | tutte le animazioni della shell, da 0,5× a 1,5× | 1× |
 
 Gli stili rapidi cambiano colori e materiale ma lasciano le scelte del notch (`AppearanceSettings.WithNotchOf`).
 
@@ -89,6 +94,11 @@ equalizzatore restano a punti.
 - Notch, come Nusa (docs/20-stile-nusa.md, `NotchMotion`): col mouse sopra aspetta 290 ms gonfiandosi del 7% (molla 170/26), poi
   si apre con la molla 250/20 (supera la misura del ~7%); uscendo si chiude subito con la molla 290/22, che scende sotto la
   misura di riposo e rimbalza. Le altre molle della shell restano 280/26.
+- Molla del notch (`NotchMotion.Of`): Morbida apre 70/16, chiude 85/18 (ζ ≈ 0,95, si posa in ~0,6 s); Scattante apre 460/23,5,
+  chiude 520/25 (ζ ≈ 0,55, supera la misura del ~13% e si posa in ~0,4 s).
+- Velocità (`Motion.Speed`): le durate di `Motion` e del notch si dividono per la velocità, le molle del notch e della mascotte
+  avanzano il tempo moltiplicato per lei (stessa forma del movimento, più svelta o più calma). Le attese di apertura e chiusura
+  del notch non cambiano: hanno le loro scelte.
 - Cambio contenuto: dissolvenza dei punti 120 ms.
 - Controlli (App `Rendering/Motion`, idea presa dal file manager Ski): lo stato si legge dal **riempimento che sfuma**
   (trasparente → `#111111` al passaggio, 140 ms; ritorno 260 ms), non da bordi che compaiono. Premuti si stringono

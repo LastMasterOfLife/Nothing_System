@@ -65,6 +65,19 @@ public sealed class NotchWindow : Window
     private double _shadowAmount;
     private bool _mascotOn;
     private bool _peeking;
+    private AppearanceSettings? _applied;
+
+    // Su quale schermo (pagina Aspetto): seguendo il mouse ci si sposta solo a notch chiuso.
+    private readonly DispatcherTimer _followTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
+    private NotchScreen _screen;
+    private string? _monitorName;
+    private NotchFeel _feel;
+
+    // La mascotte reagisce (docs/20-stile-nusa.md): prima di un avviso sgrana gli occhi, e l'avviso arriva un attimo dopo.
+    private static readonly Duration SurpriseBeat = new(TimeSpan.FromMilliseconds(350));
+    private readonly DispatcherTimer _surpriseTimer = new();
+    private Action? _afterSurprise;
+    private bool _mascotShown;
 
     // Compatto: [punto rosso | microfono e webcam]  HH:MM o timer  [equalizzatore | download]
     private readonly Grid _compact = new() { VerticalAlignment = VerticalAlignment.Top };
@@ -194,6 +207,14 @@ public sealed class NotchWindow : Window
         _alertMarquee.Tick += (_, _) => RenderAlertText(++_alertOffset);
         _countdownTimer.Tick += (_, _) => OnCountdownTick();
         _taskTimer.Tick += (_, _) => RenderTaskElapsed();
+        _followTimer.Tick += (_, _) => FollowMouse();
+        _surpriseTimer.Tick += (_, _) =>
+        {
+            _surpriseTimer.Stop();
+            var show = _afterSurprise;
+            _afterSurprise = null;
+            show?.Invoke();
+        };
         media.Changed += snapshot => Dispatcher.BeginInvoke(() => OnMedia(snapshot));
 
         SourceInitialized += (_, _) =>
@@ -204,19 +225,22 @@ public sealed class NotchWindow : Window
         };
         Deactivated += (_, _) => ReleaseAsk();
         IsVisibleChanged += (_, _) => UpdateMascot();
-        Loaded += (_, _) =>
-        {
-            PositionOnPrimaryScreen();
-            ApplyPillSize();
-        };
+        Loaded += (_, _) => PlaceOnScreen();
         SystemParameters.StaticPropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(SystemParameters.WorkArea))
-                PositionOnPrimaryScreen();
+                PlaceOnScreen();
         };
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => Dispatcher.BeginInvoke(PlaceOnScreen);
     }
 
     public event Action? SettingsRequested;
+
+    /// <summary>Il notch è passato su un altro schermo: chi nasconde il notch a schermo intero guarda questo.</summary>
+    public event Action? MonitorChanged;
+
+    /// <summary>HMONITOR dello schermo dove sta il notch; 0 finché la finestra non c'è.</summary>
+    public nint MonitorHandle { get; private set; }
 
     /// <summary>Invio nel campo della Home: la richiesta e se si è premuto Ctrl per scegliere (docs/16-assistente-notch.md).</summary>
     public event Action<string, bool>? AskSubmitted;
@@ -279,8 +303,12 @@ public sealed class NotchWindow : Window
     {
         ArgumentNullException.ThrowIfNull(content);
         _card.Child = content;
-        Apply(_machine.OnCard(_clock.Elapsed, duration) || _machine.State == NotchState.Card);
-        ScheduleDeadline();
+        FollowMouse(); // la scheda arriva dove si sta guardando
+        Surprise(() =>
+        {
+            Apply(_machine.OnCard(_clock.Elapsed, duration) || _machine.State == NotchState.Card);
+            ScheduleDeadline();
+        });
     }
 
     public void DismissCard()
@@ -317,7 +345,10 @@ public sealed class NotchWindow : Window
     {
         ArgumentNullException.ThrowIfNull(running);
         ArgumentNullException.ThrowIfNull(recent);
+        var finished = _tasks.Any(t => running.All(r => r.Id != t.Id));
         _tasks = running;
+        if (finished && recent.Where(t => !t.Quiet).MaxBy(t => t.FinishedAt) is { } last)
+            _mascot.React(last.Succeeded ? MascotMood.Happy : MascotMood.Sad); // il comando ha finito: la mascotte torna e lo dice
         _work.Update(running, recent);
         RenderTaskElapsed();
         if (running.Count > 0)
@@ -347,7 +378,10 @@ public sealed class NotchWindow : Window
     {
         ArgumentNullException.ThrowIfNull(sessions);
         _agents.Update(sessions, today);
+        var wasWorking = _working;
         _working = sessions.Where(s => s.State == AgentState.Working).ToArray();
+        if (sessions.Any(s => s.State != AgentState.Working && wasWorking.Any(w => w.Id == s.Id)))
+            _mascot.React(MascotMood.Happy); // un agente ha finito il turno (non: una sessione chiusa)
         if (_working.Length > 0)
             _agentText.Dots = DotText.Render(_working.Any(s => s.TurnCost is null)
                 ? AgentFormat.Tokens(_working.Sum(s => s.TurnUsage.Output))
@@ -718,8 +752,8 @@ public sealed class NotchWindow : Window
         var shown = _pages[page];
         var transform = (TranslateTransform)shown.RenderTransform;
         transform.BeginAnimation(TranslateTransform.XProperty,
-            new DoubleAnimation(fromRight ? 40 : -40, 0, Slide) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
-        shown.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, Slide));
+            new DoubleAnimation(fromRight ? 40 : -40, 0, Motion.Scaled(Slide)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+        shown.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, Motion.Scaled(Slide)));
     }
 
     private Size2 ExpandedSize(NotchPage page) => NotchLayout.Expanded(page, _media is not null);
@@ -742,16 +776,22 @@ public sealed class NotchWindow : Window
         _style = look.NotchStyle;
         _mascotOn = look.NotchMascot;
         _shadowAmount = Math.Clamp(look.NotchShadow, 0, 1);
+        _machine.OpenDelay = look.NotchOpenDelay;
+        _machine.CloseDelay = look.NotchCloseDelay;
+        _screen = look.NotchScreen;
+        _monitorName = look.NotchMonitor;
+        _feel = look.NotchFeel;
+        _followTimer.IsEnabled = _screen == NotchScreen.Mouse;
+        _applied = AppearanceSettings.Default.WithNotchOf(look);
     }
 
-    /// <summary>Scelte del notch cambiate dalla pagina Aspetto: forma, ombra e mascotte si aggiornano subito.</summary>
+    /// <summary>Scelte del notch cambiate dalla pagina Aspetto: forma, ombra, mascotte, attese e schermo si aggiornano subito.</summary>
     private void OnAppearanceChanged()
     {
-        var look = Theme.Settings;
-        if (_quiet == look.QuietNotch && _style == look.NotchStyle && _mascotOn == look.NotchMascot
-            && _shadowAmount == Math.Clamp(look.NotchShadow, 0, 1))
+        if (AppearanceSettings.Default.WithNotchOf(Theme.Settings) == _applied)
             return;
         ReadAppearance();
+        PlaceOnScreen();
         ApplyQuiet();
         ApplyStyle();
         Retarget(SizeFor(_machine.State, _pager.Current));
@@ -786,7 +826,7 @@ public sealed class NotchWindow : Window
     /// </summary>
     private void Retarget(Size2 size, bool peek = false)
     {
-        var tune = NotchMotion.For(new Size2(_width.Target, _height.Target), size, peek);
+        var tune = NotchMotion.For(new Size2(_width.Target, _height.Target), size, peek, _feel);
         _width.Tune(tune.Stiffness, tune.Damping);
         _height.Tune(tune.Stiffness, tune.Damping);
         _width.Target = size.Width;
@@ -798,6 +838,7 @@ public sealed class NotchWindow : Window
     private void UpdateMascot()
     {
         var shown = _mascotOn && !_quiet && _machine.State == NotchState.Idle;
+        _mascotShown = shown && IsVisible;
         _mascot.Greeting = _machine.Peeking;
         _mascot.SetActive(shown && IsVisible);
         FadeTo(_mascot, shown ? 1 : 0);
@@ -915,7 +956,28 @@ public sealed class NotchWindow : Window
                 ShowPage(p, animate: true);
             return;
         }
-        RaiseAlert(duration);
+        Surprise(() => RaiseAlert(duration));
+    }
+
+    /// <summary>
+    /// Con la mascotte a riposo sullo schermo, prima la sorpresa e poi, dopo <see cref="SurpriseBeat"/>, <paramref name="show"/>:
+    /// altrimenti l'avviso la coprirebbe prima di vederla reagire. Avvisi in fila durante l'attesa: vale l'ultimo.
+    /// </summary>
+    private void Surprise(Action show)
+    {
+        FollowMouse();
+        if (!_mascotShown || !Motion.Enabled)
+        {
+            show();
+            return;
+        }
+        if (_afterSurprise is null)
+        {
+            _mascot.React(MascotMood.Surprised);
+            _surpriseTimer.Interval = Motion.Scaled(SurpriseBeat).TimeSpan;
+            _surpriseTimer.Start();
+        }
+        _afterSurprise = show;
     }
 
     private void SetAlertIcon(DotGlyph icon, Color color)
@@ -928,6 +990,7 @@ public sealed class NotchWindow : Window
     /// <summary>Un secondo avviso durante il primo lo sostituisce e ne rinnova la durata.</summary>
     private void RaiseAlert(TimeSpan? duration)
     {
+        FollowMouse(); // l'avviso arriva dove si sta guardando
         var changed = _machine.OnAlert(_clock.Elapsed, duration);
         Apply(changed || _machine.State == NotchState.Alert);
         ScheduleDeadline();
@@ -1081,7 +1144,7 @@ public sealed class NotchWindow : Window
         var dt = (now - _lastFrame).TotalSeconds;
         _lastFrame = now;
 
-        var moving = _width.Step(dt) | _height.Step(dt);
+        var moving = _width.Step(dt * Motion.Speed) | _height.Step(dt * Motion.Speed); // la velocità scelta accorcia il tempo
         ApplyPillSize();
         if (moving)
             return;
@@ -1141,12 +1204,30 @@ public sealed class NotchWindow : Window
         _shadow.Visibility = Visibility.Visible;
     }
 
-    private void PositionOnPrimaryScreen()
+    /// <summary>Centrata contro il bordo alto dello schermo scelto nella pagina Aspetto, in pixel fisici di quello schermo.</summary>
+    private void PlaceOnScreen()
     {
-        Left = (SystemParameters.PrimaryScreenWidth - Width) / 2;
-        Top = 0;
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == 0 || NotchPlacement.Pick(WindowNative.Monitors(), _screen, _monitorName, WindowNative.MonitorAtCursor()) is not { } monitor)
+            return;
+        WindowNative.Place(hwnd, NotchPlacement.Place(monitor, NotchLayout.Host));
+        ApplyPillSize(); // il vetro dietro la pillola segue la finestra
+        if (monitor.Handle == MonitorHandle)
+            return;
+        MonitorHandle = monitor.Handle;
+        MonitorChanged?.Invoke();
+    }
+
+    /// <summary>Seguendo il mouse: a notch chiuso (anche nascosto a schermo intero) passa sullo schermo dove sta il mouse.</summary>
+    private void FollowMouse()
+    {
+        if (_screen != NotchScreen.Mouse || _machine.Peeking || _machine.Held || _machine.State is NotchState.Expanded or NotchState.Card)
+            return;
+        var cursor = WindowNative.MonitorAtCursor();
+        if (cursor != 0 && cursor != MonitorHandle)
+            PlaceOnScreen();
     }
 
     private static void FadeTo(UIElement element, double opacity) =>
-        element.BeginAnimation(OpacityProperty, new DoubleAnimation(opacity, Fade));
+        element.BeginAnimation(OpacityProperty, new DoubleAnimation(opacity, Motion.Scaled(Fade)));
 }

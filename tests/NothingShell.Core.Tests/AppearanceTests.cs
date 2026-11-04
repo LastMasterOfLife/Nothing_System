@@ -136,6 +136,12 @@ public class AppearanceTests
             NotchSize = NotchSize.Large,
             NotchMascot = true,
             NotchShadow = 0.8,
+            NotchOpenDelayMs = 0,
+            NotchCloseDelayMs = 700,
+            NotchScreen = NotchScreen.Chosen,
+            NotchMonitor = @"\\.\DISPLAY2",
+            NotchFeel = NotchFeel.Snappy,
+            AnimationSpeed = 1.25,
         };
         var json = ShellSettingsStore.Serialize(ShellSettings.Default with { Appearance = look });
         Assert.Equal(look, ShellSettingsStore.Deserialize(json).Appearance);
@@ -144,14 +150,47 @@ public class AppearanceTests
     [Fact]
     public void PresetsKeepTheNotchChoices()
     {
-        var mine = new AppearanceSettings { NotchStyle = NotchStyle.Attached, NotchMascot = true, NotchShadow = 0.2, NotchSize = NotchSize.Large };
+        var mine = new AppearanceSettings
+        {
+            NotchStyle = NotchStyle.Attached,
+            NotchMascot = true,
+            NotchShadow = 0.2,
+            NotchSize = NotchSize.Large,
+            NotchOpenDelayMs = 600,
+            NotchCloseDelayMs = 300,
+            NotchScreen = NotchScreen.Mouse,
+            NotchFeel = NotchFeel.Soft,
+            AnimationSpeed = 0.75,
+        };
         var nothing = AppearanceChoices.Presets[2].Settings.WithNotchOf(mine);
+        Assert.Equal(mine.NotchOpenDelayMs, nothing.NotchOpenDelayMs);
+        Assert.Equal(mine.NotchCloseDelayMs, nothing.NotchCloseDelayMs);
+        Assert.Equal(mine.NotchScreen, nothing.NotchScreen);
+        Assert.Equal(mine.NotchFeel, nothing.NotchFeel);
+        Assert.Equal(0.75, nothing.AnimationSpeed);
         Assert.Equal(DisplayStyle.Dots, nothing.Display);
         Assert.Equal(mine.NotchStyle, nothing.NotchStyle);
         Assert.Equal(mine.NotchSize, nothing.NotchSize);
         Assert.True(nothing.NotchMascot);
         Assert.Equal(0.2, nothing.NotchShadow);
     }
+
+    [Fact]
+    public void NotchDelaysDefaultToNusaAndStayInRange()
+    {
+        Assert.Equal(NotchMotion.EnterDelay, AppearanceSettings.Default.NotchOpenDelay);
+        Assert.Equal(NotchStateMachine.LeaveDelay, AppearanceSettings.Default.NotchCloseDelay);
+        Assert.Equal(TimeSpan.Zero, new AppearanceSettings { NotchOpenDelayMs = -5 }.NotchOpenDelay);
+        Assert.Equal(TimeSpan.FromMilliseconds(AppearanceSettings.MaxNotchDelayMs), new AppearanceSettings { NotchCloseDelayMs = 99999 }.NotchCloseDelay);
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(0.1, AppearanceSettings.MinAnimationSpeed)]
+    [InlineData(9, AppearanceSettings.MaxAnimationSpeed)]
+    [InlineData(double.NaN, 1)]
+    public void AnimationSpeedStaysInRange(double speed, double expected) =>
+        Assert.Equal(expected, new AppearanceSettings { AnimationSpeed = speed }.MotionSpeed);
 
     [Fact]
     public void OldSettingsFileGetsTheDefaultLook() =>

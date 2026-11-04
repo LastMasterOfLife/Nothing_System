@@ -48,11 +48,41 @@ public enum NotchSize
     Large,
 }
 
+/// <summary>Carattere delle molle del notch: quanto rimbalza e quanto è svelto ad aprirsi e chiudersi.</summary>
+public enum NotchFeel
+{
+    /// <summary>Lenta e senza rimbalzo.</summary>
+    Soft,
+
+    /// <summary>Quella di Nusa: un piccolo rimbalzo.</summary>
+    Nusa,
+
+    /// <summary>Svelta e con un rimbalzo più vivace.</summary>
+    Snappy,
+}
+
+/// <summary>Su quale schermo sta il notch.</summary>
+public enum NotchScreen
+{
+    /// <summary>Lo schermo principale di Windows.</summary>
+    Primary,
+
+    /// <summary>Quello dove sta il mouse: il notch ci si sposta quando è chiuso, e ci porta gli avvisi.</summary>
+    Mouse,
+
+    /// <summary>Uno schermo scelto (<see cref="AppearanceSettings.NotchMonitor"/>); scollegato, si torna al principale.</summary>
+    Chosen,
+}
+
 /// <summary>Le scelte della pagina Aspetto (docs/02-design-system.md), salvate con le impostazioni della shell.</summary>
 public sealed record AppearanceSettings
 {
     public const double DefaultGlassStrength = 0.5;
     public const double DefaultNotchShadow = 0.5;
+    public const int DefaultNotchOpenDelayMs = 290;
+    public const int MaxNotchDelayMs = 3000;
+    public const double MinAnimationSpeed = 0.5;
+    public const double MaxAnimationSpeed = 1.5;
 
     public static AppearanceSettings Default { get; } = new();
 
@@ -85,7 +115,30 @@ public sealed record AppearanceSettings
     /// <summary>Ampiezza dell'ombra sotto il notch aperto, da 0 (nessuna) a 1 (larga e morbida).</summary>
     public double NotchShadow { get; init; } = DefaultNotchShadow;
 
-    /// <summary>Le scelte del notch di <paramref name="from"/> su questo aspetto: uno stile rapido non le tocca.</summary>
+    /// <summary>Col mouse sopra, millisecondi prima di aprire: 0 apre subito, di serie l'attesa di Nusa.</summary>
+    public int NotchOpenDelayMs { get; init; } = DefaultNotchOpenDelayMs;
+
+    /// <summary>Uscito il mouse, millisecondi prima di richiudere: di serie subito, come Nusa.</summary>
+    public int NotchCloseDelayMs { get; init; }
+
+    public NotchScreen NotchScreen { get; init; } = NotchScreen.Primary;
+
+    public NotchFeel NotchFeel { get; init; } = NotchFeel.Nusa;
+
+    /// <summary>Velocità di tutte le animazioni della shell: 1 è quella di serie, 0,5 la metà, 1,5 una volta e mezzo.</summary>
+    public double AnimationSpeed { get; init; } = 1;
+
+    /// <summary><see cref="AnimationSpeed"/> nei limiti, e 1 se non è un numero.</summary>
+    public double MotionSpeed => double.IsFinite(AnimationSpeed) ? Math.Clamp(AnimationSpeed, MinAnimationSpeed, MaxAnimationSpeed) : 1;
+
+    /// <summary>Nome di Windows dello schermo scelto (es. <c>\\.\DISPLAY2</c>), con <see cref="NotchScreen.Chosen"/>.</summary>
+    public string? NotchMonitor { get; init; }
+
+    public TimeSpan NotchOpenDelay => TimeSpan.FromMilliseconds(Math.Clamp(NotchOpenDelayMs, 0, MaxNotchDelayMs));
+
+    public TimeSpan NotchCloseDelay => TimeSpan.FromMilliseconds(Math.Clamp(NotchCloseDelayMs, 0, MaxNotchDelayMs));
+
+    /// <summary>Le scelte del notch e del movimento di <paramref name="from"/> su questo aspetto: uno stile rapido non le tocca.</summary>
     public AppearanceSettings WithNotchOf(AppearanceSettings from)
     {
         ArgumentNullException.ThrowIfNull(from);
@@ -96,6 +149,12 @@ public sealed record AppearanceSettings
             NotchSize = from.NotchSize,
             NotchMascot = from.NotchMascot,
             NotchShadow = from.NotchShadow,
+            NotchOpenDelayMs = from.NotchOpenDelayMs,
+            NotchCloseDelayMs = from.NotchCloseDelayMs,
+            NotchScreen = from.NotchScreen,
+            NotchMonitor = from.NotchMonitor,
+            NotchFeel = from.NotchFeel,
+            AnimationSpeed = from.AnimationSpeed,
         };
     }
 

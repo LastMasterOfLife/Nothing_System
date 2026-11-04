@@ -67,6 +67,52 @@ public class MascotBrainTests
     }
 
     [Fact]
+    public void AnAlertSurprisesItForAMoment()
+    {
+        var brain = new MascotBrain(new Random(8));
+        brain.React(MascotMood.Surprised, Awake);
+        var pose = brain.Pose(Awake + Step, null, Awake, greeting: false);
+        Assert.True(pose.Open > 1.2);
+        Assert.True(pose.LookY < 0); // guarda in su, verso l'avviso
+        Assert.Null(brain.MoodAt(Awake + MascotBrain.SurpriseLength));
+        Assert.True(brain.Pose(Awake + MascotBrain.SurpriseLength, null, Awake, greeting: false).Open <= 1);
+    }
+
+    [Fact]
+    public void FinishedWorkMakesItSmileAndHop()
+    {
+        var brain = new MascotBrain(new Random(9));
+        brain.React(MascotMood.Happy, Awake);
+        var poses = Enumerable.Range(0, 20).Select(i => brain.Pose(Awake + (Step * i), null, Awake, greeting: false)).ToList();
+        Assert.All(poses, p => Assert.Equal(1, p.Smile));
+        Assert.Contains(poses, p => p.Lift < -0.8);
+        Assert.All(poses, p => Assert.InRange(p.Lift, -1, 0));
+        Assert.Equal(0, brain.Pose(Awake + MascotBrain.HappyLength, null, Awake, greeting: false).Smile);
+    }
+
+    [Fact]
+    public void AFailureMakesItLookDown()
+    {
+        var brain = new MascotBrain(new Random(10));
+        brain.React(MascotMood.Sad, Awake);
+        var pose = brain.Pose(Awake + Step, null, Awake, greeting: false);
+        Assert.True(pose.Open < 1 && pose.LookY > 0.5);
+    }
+
+    [Fact]
+    public void AReactionWakesItUpThenItGoesBackToSleep()
+    {
+        var brain = new MascotBrain(new Random(11));
+        brain.Pose(Awake, null, MascotBrain.SleepAfter, greeting: false);
+        Assert.True(brain.Asleep);
+        brain.React(MascotMood.Happy, Awake + Step);
+        brain.Pose(Awake + Step, null, MascotBrain.SleepAfter, greeting: false);
+        Assert.False(brain.Asleep);
+        brain.Pose(Awake + MascotBrain.HappyLength + Step, null, MascotBrain.SleepAfter, greeting: false);
+        Assert.True(brain.Asleep);
+    }
+
+    [Fact]
     public void GreetingWakesItUp()
     {
         var brain = new MascotBrain(new Random(7));

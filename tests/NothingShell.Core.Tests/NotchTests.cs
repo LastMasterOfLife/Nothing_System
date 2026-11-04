@@ -83,6 +83,54 @@ public class NotchStateMachineTests
     }
 
     [Fact]
+    public void NoOpenDelayOpensAtOnceWithoutPeeking()
+    {
+        var sm = new NotchStateMachine { OpenDelay = TimeSpan.Zero };
+        Assert.True(sm.OnPointerHover(T0));
+        Assert.False(sm.Peeking);
+        Assert.Equal(NotchState.Expanded, sm.State);
+    }
+
+    [Fact]
+    public void OpenDelayIsTheChosenOne()
+    {
+        var delay = TimeSpan.FromMilliseconds(600);
+        var sm = new NotchStateMachine { OpenDelay = delay };
+        sm.OnPointerHover(T0);
+        Assert.False(sm.Tick(T0 + NotchMotion.EnterDelay));
+        Assert.True(sm.Tick(T0 + delay));
+        Assert.Equal(NotchState.Expanded, sm.State);
+    }
+
+    [Fact]
+    public void CloseDelayKeepsItOpenAndComingBackCancelsIt()
+    {
+        var delay = TimeSpan.FromSeconds(1);
+        var sm = new NotchStateMachine { CloseDelay = delay };
+        sm.OnPointerEnter();
+        sm.OnPointerLeave(T0);
+        Assert.False(sm.Tick(T0 + delay - TimeSpan.FromMilliseconds(1)));
+        Assert.Equal(NotchState.Expanded, sm.State);
+
+        sm.OnPointerHover(T0 + TimeSpan.FromMilliseconds(500));
+        Assert.Null(sm.CollapseDeadline);
+        sm.OnPointerLeave(T0 + TimeSpan.FromSeconds(2));
+        Assert.True(sm.Tick(T0 + TimeSpan.FromSeconds(3)));
+        Assert.Equal(NotchState.Idle, sm.State);
+    }
+
+    [Fact]
+    public void CloseDelayAlsoAppliesWhenTypingStops()
+    {
+        var delay = TimeSpan.FromMilliseconds(700);
+        var sm = new NotchStateMachine { CloseDelay = delay };
+        sm.OnPointerEnter();
+        sm.Hold(true, pointerOver: true, T0);
+        sm.Hold(false, pointerOver: false, T0);
+        Assert.Equal(T0 + delay, sm.CollapseDeadline);
+    }
+
+    [Fact]
     public void HoverOnAnOpenNotchCancelsItsCollapse()
     {
         var sm = new NotchStateMachine();
@@ -231,6 +279,29 @@ public class NusaMotionTests
         Assert.InRange(overshoot, 0.05, 0.09); // ~35 px sotto la misura di riposo, come Nusa
         Assert.InRange(peakTime, 0.2, 0.3);
         Assert.InRange(settle, 0.3, 0.55);
+    }
+
+    [Theory]
+    [InlineData(NotchFeel.Soft, -0.001, 0.01, 0.5, 0.8)]
+    [InlineData(NotchFeel.Nusa, 0.05, 0.09, 0.35, 0.55)]
+    [InlineData(NotchFeel.Snappy, 0.1, 0.16, 0.25, 0.45)]
+    public void FeelsGoFromCalmToLively(NotchFeel feel, double minOvershoot, double maxOvershoot, double minSettle, double maxSettle)
+    {
+        var (overshoot, _, settle) = Run(NotchMotion.Of(feel).Open, 291, 765);
+        Assert.InRange(overshoot, minOvershoot, maxOvershoot);
+        Assert.InRange(settle, minSettle, maxSettle);
+        var (closing, _, _) = Run(NotchMotion.Of(feel).Close, 767, 271);
+        Assert.InRange(closing, minOvershoot, maxOvershoot + 0.02);
+    }
+
+    [Fact]
+    public void FeelPicksItsOwnSprings()
+    {
+        var small = new Size2(144, 28);
+        var big = new Size2(420, 172);
+        Assert.Equal(NotchMotion.Snappy.Open, NotchMotion.For(small, big, peeking: false, NotchFeel.Snappy));
+        Assert.Equal(NotchMotion.Soft.Close, NotchMotion.For(big, small, peeking: false, NotchFeel.Soft));
+        Assert.Equal(NotchMotion.Open, NotchMotion.For(small, big, peeking: false));
     }
 
     [Fact]

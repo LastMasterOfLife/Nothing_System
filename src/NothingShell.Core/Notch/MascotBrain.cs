@@ -2,9 +2,23 @@ namespace NothingShell.Core.Notch;
 
 /// <summary>
 /// Dove vogliono andare gli occhi della mascotte: <see cref="Open"/> 0 chiusi, 1 aperti, oltre 1 sgranati; <see cref="LookX"/> e
-/// <see cref="LookY"/> da −1 a 1 (sinistra/su → destra/giù); <see cref="Smile"/> 0..1 strizza gli occhi in un sorriso.
+/// <see cref="LookY"/> da −1 a 1 (sinistra/su → destra/giù); <see cref="Smile"/> 0..1 strizza gli occhi in un sorriso;
+/// <see cref="Lift"/> da −1 a 0 solleva tutto il viso (i saltelli della contentezza).
 /// </summary>
-public readonly record struct MascotPose(double Open, double LookX, double LookY, double Smile);
+public readonly record struct MascotPose(double Open, double LookX, double LookY, double Smile, double Lift = 0);
+
+/// <summary>Reazioni della mascotte a ciò che succede.</summary>
+public enum MascotMood
+{
+    /// <summary>Arriva un avviso: occhi sgranati verso l'alto.</summary>
+    Surprised,
+
+    /// <summary>Un agente o un comando ha finito: sorride e saltella.</summary>
+    Happy,
+
+    /// <summary>Un comando è fallito: occhi socchiusi verso il basso.</summary>
+    Sad,
+}
 
 /// <summary>
 /// La mascotte del notch (docs/20-stile-nusa.md): sbatte le palpebre a intervalli irregolari, segue il mouse, si guarda intorno
@@ -20,6 +34,13 @@ public sealed class MascotBrain(Random random)
     /// <summary>Dopo quanto un mouse fermo smette di essere seguito e la mascotte si guarda intorno.</summary>
     public static readonly TimeSpan CursorRest = TimeSpan.FromSeconds(4);
 
+    public static readonly TimeSpan SurpriseLength = TimeSpan.FromMilliseconds(900);
+    public static readonly TimeSpan HappyLength = TimeSpan.FromMilliseconds(1600);
+    public static readonly TimeSpan SadLength = TimeSpan.FromMilliseconds(2000);
+
+    /// <summary>Quanto dura il saltellare della contentezza: due salti.</summary>
+    private static readonly TimeSpan HopLength = TimeSpan.FromMilliseconds(800);
+
     private const double SleepingOpen = 0.08;
     private const double DrowsyOpen = 0.55;
 
@@ -32,6 +53,7 @@ public sealed class MascotBrain(Random random)
     private double _glanceY;
     private TimeSpan? _wakeEnd;
     private bool _asleep;
+    private (MascotMood Mood, TimeSpan Start, TimeSpan End)? _mood;
 
     public MascotBrain() : this(Random.Shared)
     {
@@ -39,13 +61,26 @@ public sealed class MascotBrain(Random random)
 
     public bool Asleep => _asleep;
 
+    /// <summary>La reazione in corso a <paramref name="now"/>, se c'è.</summary>
+    public MascotMood? MoodAt(TimeSpan now) => _mood is { } m && now >= m.Start && now < m.End ? m.Mood : null;
+
+    /// <summary>Reagisce a qualcosa che succede: per poco la posa è quella della reazione, e se dormiva si sveglia.</summary>
+    public void React(MascotMood mood, TimeSpan now) =>
+        _mood = (mood, now, now + mood switch
+        {
+            MascotMood.Surprised => SurpriseLength,
+            MascotMood.Happy => HappyLength,
+            _ => SadLength,
+        });
+
     /// <summary>
     /// La posa di adesso. <paramref name="cursor"/> è il mouse rispetto al centro del notch, già in −1..1 (null se lontano o
     /// fermo da <see cref="CursorRest"/>); <paramref name="idle"/> è da quanto non si tocca mouse o tastiera.
     /// </summary>
     public MascotPose Pose(TimeSpan now, (double X, double Y)? cursor, TimeSpan idle, bool greeting)
     {
-        var sleeping = idle >= SleepAfter && !greeting;
+        var mood = MoodAt(now);
+        var sleeping = idle >= SleepAfter && !greeting && mood is null;
         if (_asleep && !sleeping)
         {
             _wakeEnd = now + WakeLength;
@@ -57,6 +92,8 @@ public sealed class MascotBrain(Random random)
             _blinkEnd = _secondBlink = _nextGlance = _glanceEnd = null;
             return new(SleepingOpen, 0, 0.6, 0);
         }
+        if (mood is { } reaction)
+            return Feel(reaction, now - _mood!.Value.Start);
 
         var open = Blink(now) ? 0.06 : 1.0;
         if (_wakeEnd is { } wake && now < wake)
@@ -71,6 +108,14 @@ public sealed class MascotBrain(Random random)
             _nextGlance = _glanceEnd = null;
         return new(open, x, y, greeting ? 1 : 0);
     }
+
+    /// <summary>La posa di una reazione, <paramref name="elapsed"/> dopo il suo inizio.</summary>
+    private static MascotPose Feel(MascotMood mood, TimeSpan elapsed) => mood switch
+    {
+        MascotMood.Surprised => new(1.4, 0, -0.7, 0),
+        MascotMood.Happy => new(1, 0, 0, 1, elapsed < HopLength ? -Math.Abs(Math.Sin(elapsed.TotalSeconds * Math.PI * 2 / HopLength.TotalSeconds)) : 0),
+        _ => new(0.5, 0, 0.8, 0),
+    };
 
     private bool Blink(TimeSpan now)
     {
