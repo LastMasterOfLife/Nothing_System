@@ -26,6 +26,15 @@ public interface IRemoteConnectActions
     /// <summary>Il computer com'è salvato ora: mentre si guardava la finestra può aver preso un altro nome.</summary>
     RemoteComputer? Current(RemoteComputer computer);
 
+    /// <summary>Senza password salvata la chiede questa finestra al collegamento; altrimenti la chiede Desktop remoto.</summary>
+    bool AsksPasswords { get; }
+
+    /// <summary>Mette la password nel Gestore credenziali solo per questo collegamento; false se Windows la rifiuta.</summary>
+    bool LendPassword(RemoteComputer computer, string userName, string password);
+
+    /// <summary>Cancella la password prestata quando il processo di Desktop remoto si chiude (subito, se non c'è).</summary>
+    void ReturnPassword(RemoteComputer computer, int? processId);
+
     /// <summary>Passa una richiesta all'assistente: ogni comando parte da lì (docs/15-comandi-cervello.md).</summary>
     void AskAssistant(string text);
 }
@@ -173,6 +182,15 @@ public sealed class RemoteConnectWindow : Window
         Command(RemoteDesktop.WaitScript(computer, 12408));
         Output("connessione aperta", false);
         Comment("Il computer ha accettato il collegamento: il resto è nella finestra di Desktop remoto.");
+    }
+
+    /// <summary>La richiesta della password durante un collegamento (per <c>--snapshot</c>).</summary>
+    public void ShowSamplePassword(RemoteComputer computer)
+    {
+        ArgumentNullException.ThrowIfNull(computer);
+        SetHeader(computer.Name, $"{computer.Address} · desktop remoto", "PASSWORD", Theme.Muted);
+        StartLog();
+        _ = AskPasswordAsync(computer, CancellationToken.None);
     }
 
     private Grid BuildVisualTree()
@@ -342,7 +360,7 @@ public sealed class RemoteConnectWindow : Window
         form.Children.Add(FormField("Nome della scorciatoia", nameBox));
         form.Children.Add(FormField("Indirizzo IP o nome del computer", addressBox));
         form.Children.Add(FormField("Utente sul computer remoto (es. luca oppure .\\luca)", userBox));
-        form.Children.Add(FormField(replacing is null ? "Password: se la lasci vuota la chiede Desktop remoto" : "Password: se la lasci vuota resta quella salvata", passwordBox));
+        form.Children.Add(FormField(replacing is null ? "Password: se la lasci vuota la chiedo a ogni collegamento" : "Password: se la lasci vuota resta quella salvata", passwordBox));
         form.Children.Add(problem);
         _body.Content = form;
 
@@ -433,6 +451,8 @@ public sealed class RemoteConnectWindow : Window
         Footer("Esc per fermare");
         using var cancel = new CancellationTokenSource();
         _running = cancel;
+        var lent = false;
+        int? mstscId = null;
         try
         {
             Comment($"{computer.Name} → {computer.Address}");
@@ -451,7 +471,12 @@ public sealed class RemoteConnectWindow : Window
             var listed = new List<string>();
             await StepAsync(RemoteDesktop.CredentialScript(computer), listed, cancel.Token);
             if (!RemoteDesktop.HasCredential(listed))
-                Comment("Nessuna password salvata: la chiederà Desktop remoto.");
+            {
+                if (_actions.AsksPasswords)
+                    (computer, lent) = await UsePasswordAsync(computer, cancel.Token);
+                else
+                    Comment("Nessuna password salvata: la chiederà Desktop remoto.");
+            }
 
             await TypeAsync(RemoteDesktop.MstscCommand(computer), cancel.Token);
             using var mstsc = StartMstsc(computer);
@@ -461,6 +486,7 @@ public sealed class RemoteConnectWindow : Window
                 return;
             }
             Output($"avviato, processo {mstsc.Id}", false);
+            mstscId = mstsc.Id;
 
             // mstsc chiuso durante l'attesa: non serve aspettare oltre.
             using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancel.Token);
@@ -501,6 +527,89 @@ public sealed class RemoteConnectWindow : Window
         finally
         {
             _running = null;
+            if (lent)
+                _actions.ReturnPassword(computer, mstscId);
+        }
+    }
+
+    /// <summary>
+    /// Chiede utente e password nel momento del collegamento. Di solito valgono solo per questo: stanno nel Gestore
+    /// credenziali finché Desktop remoto resta aperto. Con "Ricordala" si salvano come dal modulo del computer.
+    /// </summary>
+    private async Task<(RemoteComputer Computer, bool Lent)> UsePasswordAsync(RemoteComputer computer, CancellationToken token)
+    {
+        Comment("Nessuna password salvata: scrivila qui, serve solo per questo collegamento.");
+        var (user, password, remember) = await AskPasswordAsync(computer, token);
+        var target = RemoteDesktop.CredentialTarget(computer);
+        if (remember)
+        {
+            var saved = computer with { UserName = user };
+            if (_actions.SaveComputer(saved, _actions.Current(computer) ?? computer, password) is not { } refused)
+            {
+                Comment("Password salvata nel Gestore credenziali di Windows");
+                Output($"CredWrite {target}  utente {user}  password ••••••••", false);
+                return (saved, false);
+            }
+            Output(refused, true);
+        }
+        if (!_actions.LendPassword(computer, user, password))
+        {
+            Output("Windows non ha accettato la password: la chiederà Desktop remoto.", true);
+            return (computer, false);
+        }
+        Comment("Password solo per questo collegamento: si cancella quando chiudi Desktop remoto");
+        Output($"CredWrite {target}  utente {user}  password ••••••••", false);
+        return (computer, true);
+    }
+
+    /// <summary>Il modulo di utente e password al posto del registro; Esc ferma il collegamento.</summary>
+    private async Task<(string User, string Password, bool Remember)> AskPasswordAsync(RemoteComputer computer, CancellationToken token)
+    {
+        var answer = new TaskCompletionSource<(string, string, bool)>();
+        var userBox = FormBox(computer.UserName ?? string.Empty);
+        var passwordBox = new PasswordBox { Background = Brushes.Transparent, BorderThickness = new Thickness(0), Foreground = Theme.InkBrush, CaretBrush = Theme.InkBrush, FontSize = 13, VerticalContentAlignment = VerticalAlignment.Center };
+        var remember = new CheckBox { Content = "Ricordala su questo PC", Foreground = Theme.InkBrush, FontFamily = Theme.BodyFont, FontSize = 12, Margin = new Thickness(0, 2, 0, 0) };
+        var problem = NotchUi.Text(12, Theme.CriticalBrush);
+        problem.Margin = new Thickness(0, 10, 0, 0);
+
+        var form = new StackPanel();
+        form.Children.Add(FormField("Utente sul computer remoto (es. luca oppure .\\luca)", userBox));
+        form.Children.Add(FormField("Password", passwordBox));
+        form.Children.Add(remember);
+        form.Children.Add(problem);
+        _body.Content = form;
+
+        void Submit()
+        {
+            var user = userBox.Text.Trim();
+            if (user.Length == 0 || user.Length > 256 || user.Any(char.IsControl))
+            {
+                problem.Text = "Scrivi l'utente con cui entrare.";
+                return;
+            }
+            if (passwordBox.Password.Length == 0)
+            {
+                problem.Text = "Scrivi la password.";
+                return;
+            }
+            var password = passwordBox.Password;
+            passwordBox.Clear();
+            _enter = null;
+            Footer("Esc per fermare");
+            answer.TrySetResult((user, password, remember.IsChecked == true));
+        }
+
+        _enter = Submit;
+        Footer("Invio per collegarti · Esc per fermare", ("COLLEGA", Submit));
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Input, FocusFirstField);
+        using var stop = token.Register(() => answer.TrySetCanceled(token));
+        try
+        {
+            return await answer.Task;
+        }
+        finally
+        {
+            _body.Content = _logView; // anche fermato: "Fermato." va nel registro, che deve tornare visibile
         }
     }
 

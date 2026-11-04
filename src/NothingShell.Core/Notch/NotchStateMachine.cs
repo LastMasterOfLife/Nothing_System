@@ -18,7 +18,8 @@ public enum NotchState
 /// </summary>
 public sealed class NotchStateMachine
 {
-    public static readonly TimeSpan LeaveDelay = TimeSpan.FromMilliseconds(400);
+    /// <summary>Come Nusa: uscendo col mouse il notch si richiude subito (docs/20-stile-nusa.md).</summary>
+    public static readonly TimeSpan LeaveDelay = TimeSpan.Zero;
     public static readonly TimeSpan AlertDuration = TimeSpan.FromSeconds(6);
 
     /// <summary>Dopo che il mouse lascia una scheda, quanto resta ancora visibile.</summary>
@@ -37,14 +38,14 @@ public sealed class NotchStateMachine
     /// <summary>Istante in cui l'avviso in corso finirà.</summary>
     public TimeSpan? AlertDeadline { get; private set; }
 
+    /// <summary>Istante in cui il notch col mouse sopra si aprirà (<see cref="NotchMotion.EnterDelay"/>).</summary>
+    public TimeSpan? ExpandDeadline { get; private set; }
+
+    /// <summary>Il mouse è sopra e si aspetta di aprire: la pillola si gonfia un poco.</summary>
+    public bool Peeking => ExpandDeadline is not null;
+
     /// <summary>La prossima scadenza da controllare con <see cref="Tick"/>.</summary>
-    public TimeSpan? NextDeadline => (CollapseDeadline, AlertDeadline) switch
-    {
-        ({ } c, { } a) => c < a ? c : a,
-        ({ } c, null) => c,
-        (null, { } a) => a,
-        _ => null,
-    };
+    public TimeSpan? NextDeadline => new[] { CollapseDeadline, AlertDeadline, ExpandDeadline }.Where(d => d is not null).Min();
 
     private NotchState CollapsedState => _activity ? NotchState.Activity : NotchState.Idle;
 
@@ -85,17 +86,42 @@ public sealed class NotchStateMachine
         return SetState(CollapsedState);
     }
 
+    /// <summary>Apre subito (pulsanti delle schede, e la fine dell'attesa di <see cref="OnPointerHover"/>).</summary>
     public bool OnPointerEnter()
     {
         AlertDeadline = null;
+        ExpandDeadline = null;
         if (State == NotchState.Card)
             return false; // si resta sulla scheda finché il mouse è sopra
         CollapseDeadline = null;
         return SetState(NotchState.Expanded);
     }
 
+    /// <summary>
+    /// Il mouse arriva sul notch: si apre dopo <see cref="NotchMotion.EnterDelay"/>, se resta. Restituisce true se comincia
+    /// l'attesa (la pillola va gonfiata). Un avviso intanto non scade.
+    /// </summary>
+    public bool OnPointerHover(TimeSpan now)
+    {
+        if (State is NotchState.Expanded or NotchState.Card)
+            return OnPointerEnter();
+        if (Peeking)
+            return false;
+        AlertDeadline = null;
+        ExpandDeadline = now + NotchMotion.EnterDelay;
+        return true;
+    }
+
+    /// <summary>Restituisce true se il mouse è uscito durante l'attesa: la pillola torna alla sua misura.</summary>
     public bool OnPointerLeave(TimeSpan now)
     {
+        if (Peeking)
+        {
+            ExpandDeadline = null;
+            if (State == NotchState.Alert)
+                AlertDeadline = now + CardLeaveDelay; // l'avviso resta ancora un attimo, poi se ne va
+            return true;
+        }
         if (State == NotchState.Expanded)
         {
             if (!Held)
@@ -123,12 +149,15 @@ public sealed class NotchStateMachine
     {
         Held = false;
         CollapseDeadline = null;
+        ExpandDeadline = null;
         return State == NotchState.Expanded && SetState(CollapsedState);
     }
 
     public bool Tick(TimeSpan now)
     {
         var changed = false;
+        if (ExpandDeadline is { } expand && now >= expand)
+            changed |= OnPointerEnter();
         if (CollapseDeadline is { } collapse && now >= collapse)
         {
             CollapseDeadline = null;

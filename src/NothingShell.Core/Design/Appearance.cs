@@ -31,10 +31,28 @@ public enum DisplayStyle
     Dots,
 }
 
+/// <summary>Forma del notch (docs/20-stile-nusa.md).</summary>
+public enum NotchStyle
+{
+    /// <summary>Pillola staccata di poco dal bordo alto, angoli tondi tutt'intorno.</summary>
+    Floating,
+
+    /// <summary>Unito al bordo alto: in alto si allarga con due raccordi concavi, le "orecchie".</summary>
+    Attached,
+}
+
+/// <summary>Misura del notch: Piccola è quella di sempre, Grande quella di Nusa.</summary>
+public enum NotchSize
+{
+    Small,
+    Large,
+}
+
 /// <summary>Le scelte della pagina Aspetto (docs/02-design-system.md), salvate con le impostazioni della shell.</summary>
 public sealed record AppearanceSettings
 {
     public const double DefaultGlassStrength = 0.5;
+    public const double DefaultNotchShadow = 0.5;
 
     public static AppearanceSettings Default { get; } = new();
 
@@ -55,6 +73,31 @@ public sealed record AppearanceSettings
 
     /// <summary>Notch ridotto a una lineetta finché non serve: niente orologio sullo schermo.</summary>
     public bool QuietNotch { get; init; }
+
+    public NotchStyle NotchStyle { get; init; } = NotchStyle.Floating;
+
+    /// <summary>Si applica al riavvio della shell: le pagine del notch si impaginano sulla sua larghezza.</summary>
+    public NotchSize NotchSize { get; init; } = NotchSize.Small;
+
+    /// <summary>A riposo, al posto dell'ora, due occhi che sbattono le palpebre, seguono il mouse e si addormentano.</summary>
+    public bool NotchMascot { get; init; }
+
+    /// <summary>Ampiezza dell'ombra sotto il notch aperto, da 0 (nessuna) a 1 (larga e morbida).</summary>
+    public double NotchShadow { get; init; } = DefaultNotchShadow;
+
+    /// <summary>Le scelte del notch di <paramref name="from"/> su questo aspetto: uno stile rapido non le tocca.</summary>
+    public AppearanceSettings WithNotchOf(AppearanceSettings from)
+    {
+        ArgumentNullException.ThrowIfNull(from);
+        return this with
+        {
+            QuietNotch = from.QuietNotch,
+            NotchStyle = from.NotchStyle,
+            NotchSize = from.NotchSize,
+            NotchMascot = from.NotchMascot,
+            NotchShadow = from.NotchShadow,
+        };
+    }
 
     /// <summary>Accento effettivo: quello scelto se valido, altrimenti <paramref name="system"/>.</summary>
     public Argb ResolveAccent(Argb system) => Argb.TryParse(Accent) ?? system;

@@ -132,9 +132,25 @@ public class AppearanceTests
             GlassStrength = 0.25,
             Display = DisplayStyle.Dots,
             QuietNotch = true,
+            NotchStyle = NotchStyle.Attached,
+            NotchSize = NotchSize.Large,
+            NotchMascot = true,
+            NotchShadow = 0.8,
         };
         var json = ShellSettingsStore.Serialize(ShellSettings.Default with { Appearance = look });
         Assert.Equal(look, ShellSettingsStore.Deserialize(json).Appearance);
+    }
+
+    [Fact]
+    public void PresetsKeepTheNotchChoices()
+    {
+        var mine = new AppearanceSettings { NotchStyle = NotchStyle.Attached, NotchMascot = true, NotchShadow = 0.2, NotchSize = NotchSize.Large };
+        var nothing = AppearanceChoices.Presets[2].Settings.WithNotchOf(mine);
+        Assert.Equal(DisplayStyle.Dots, nothing.Display);
+        Assert.Equal(mine.NotchStyle, nothing.NotchStyle);
+        Assert.Equal(mine.NotchSize, nothing.NotchSize);
+        Assert.True(nothing.NotchMascot);
+        Assert.Equal(0.2, nothing.NotchShadow);
     }
 
     [Fact]

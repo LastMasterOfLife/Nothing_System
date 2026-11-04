@@ -68,6 +68,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         _settings = _settingsStore.Load();
         Rendering.Theme.Apply(_settings.Appearance ?? NothingShell.Core.Design.AppearanceSettings.Default);
         Rendering.Theme.FollowSystem();
+        NothingShell.Core.Notch.NotchLayout.Use(Appearance.NotchSize); // prima del notch: le sue pagine si impaginano su questa larghezza
         _tracker = new WindowTracker(_appIds);
         var shellIcons = new ShellIcons();
 
@@ -149,13 +150,19 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
     /// <summary>Ctrl+Win: l'app spegne la shell e resta in attesa (docs/06-launcher.md).</summary>
     public event Action? ToggleRequested;
 
+    /// <summary>Cambiata la misura del notch: l'app riavvia la shell e riapre le impostazioni.</summary>
+    public event Action? RestartRequested;
+
     public NothingShell.Core.Design.AppearanceSettings Appearance
     {
         get => _settings.Appearance ?? NothingShell.Core.Design.AppearanceSettings.Default;
         set
         {
+            var resized = value.NotchSize != Appearance.NotchSize;
             Update(_settings with { Appearance = value });
             Rendering.Theme.Apply(value);
+            if (resized)
+                RestartRequested?.Invoke();
         }
     }
 

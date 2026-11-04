@@ -16,6 +16,12 @@ le finestre, senza riavvio; con Sistema e con l'accento di Windows la shell segu
 | Liquid Glass | acceso/spento, con la trasparenza da velato a limpido | acceso, a metà |
 | Testo e icone | Windows (Segoe e Fluent) · Punti | Windows |
 | Notch discreto | a riposo solo una lineetta contro il bordo alto | spento |
+| Notch › Forma | Sospeso · Unito al bordo (con le "orecchie", docs/20-stile-nusa.md) | Sospeso |
+| Notch › Misura | Piccola · Grande (larga come Nusa); cambiandola la shell si riavvia e riapre le impostazioni | Piccola |
+| Notch › Mascotte | a riposo due occhi al posto dell'ora | spenta |
+| Notch › Ombra | da nessuna a larga e morbida, sotto il notch aperto | a metà |
+
+Gli stili rapidi cambiano colori e materiale ma lasciano le scelte del notch (`AppearanceSettings.WithNotchOf`).
 
 Con gli effetti di trasparenza di Windows spenti il vetro resta inattivo e la pagina lo dice.
 
@@ -75,11 +81,14 @@ equalizzatore restano a punti.
 
 ## Forme
 - Angoli come in Windows 11: superfici 8 (`Theme.RadiusLarge`), controlli 4 (`Theme.RadiusSmall`); notch a pillola, al massimo 14.
-- Ombra solo quella di Windows, sulle superfici. Gradienti solo nel vetro.
+  Unito al bordo il notch ha gli angoli bassi fino a 26 e in alto due raccordi concavi da 6 a 20 (`NotchLayout.Ear`, `NotchShape`).
+- Ombra solo quella di Windows, sulle superfici; il notch aperto ne ha in più una sua, ampia quanto si sceglie. Gradienti solo nel vetro.
 - Superfici con `Theme.Panel`, così fondo, bordo e angoli sono uguali ovunque.
 
 ## Movimento
-- Espansione notch: molla (stiffness 280, damping 26), nessun rimbalzo eccessivo.
+- Notch, come Nusa (docs/20-stile-nusa.md, `NotchMotion`): col mouse sopra aspetta 290 ms gonfiandosi del 7% (molla 170/26), poi
+  si apre con la molla 250/20 (supera la misura del ~7%); uscendo si chiude subito con la molla 290/22, che scende sotto la
+  misura di riposo e rimbalza. Le altre molle della shell restano 280/26.
 - Cambio contenuto: dissolvenza dei punti 120 ms.
 - Controlli (App `Rendering/Motion`, idea presa dal file manager Ski): lo stato si legge dal **riempimento che sfuma**
   (trasparente → `#111111` al passaggio, 140 ms; ritorno 260 ms), non da bordi che compaiono. Premuti si stringono

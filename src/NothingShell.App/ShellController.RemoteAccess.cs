@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using NothingShell.App.Interop;
 using NothingShell.App.Notch;
 using NothingShell.Core.Notch;
@@ -9,6 +10,7 @@ namespace NothingShell.App;
 public sealed partial class ShellController : IRemoteConnectActions
 {
     private const string CredentialComment = "Nothing Shell: desktop remoto";
+    private const string LentComment = "Nothing Shell: desktop remoto, solo per un collegamento";
 
     private readonly RemoteComputerStore _computers = new(RemoteComputerStore.DefaultPath);
     private RemoteConnectWindow? _remoteWindow;
@@ -60,6 +62,50 @@ public sealed partial class ShellController : IRemoteConnectActions
         _computers.RecordSuccess(computer, phrase, DateTimeOffset.Now);
     }
 
+    public bool AsksPasswords => true;
+
+    public bool LendPassword(RemoteComputer computer, string userName, string password)
+    {
+        ArgumentNullException.ThrowIfNull(computer);
+        return CredentialStore.Write(RemoteDesktop.CredentialTarget(computer), userName, password, LentComment);
+    }
+
+    public void ReturnPassword(RemoteComputer computer, int? processId)
+    {
+        ArgumentNullException.ThrowIfNull(computer);
+        var target = RemoteDesktop.CredentialTarget(computer);
+        Process? mstsc = null;
+        try
+        {
+            mstsc = processId is { } id ? Process.GetProcessById(id) : null;
+        }
+        catch (ArgumentException)
+        {
+            // già chiuso
+        }
+        if (mstsc is null)
+        {
+            ForgetLentPassword(target);
+            return;
+        }
+        // Finché Desktop remoto è aperto la password serve ancora, per riconnettersi se la rete cade.
+        mstsc.EnableRaisingEvents = true;
+        mstsc.Exited += (_, _) =>
+        {
+            ForgetLentPassword(target);
+            mstsc.Dispose();
+        };
+        if (mstsc.HasExited)
+            ForgetLentPassword(target);
+    }
+
+    /// <summary>Cancella la voce solo se è ancora quella prestata: intanto il computer può aver salvato la sua.</summary>
+    private static void ForgetLentPassword(string target)
+    {
+        if (CredentialStore.Comment(target) == LentComment)
+            CredentialStore.Delete(target);
+    }
+
     public RemoteComputer? Current(RemoteComputer computer)
     {
         ArgumentNullException.ThrowIfNull(computer);
@@ -68,6 +114,9 @@ public sealed partial class ShellController : IRemoteConnectActions
 
     private void WireRemoteAccess()
     {
+        // Password prestate rimaste da una chiusura brusca della shell.
+        foreach (var target in _computers.All.Select(RemoteDesktop.CredentialTarget).Distinct())
+            ForgetLentPassword(target);
         _notch.AskPreview = text => HoursPreview(text) ?? Route(text).Preview;
         _notch.AskSubmitted += OnAskSubmitted;
     }

@@ -52,6 +52,7 @@ public partial class App : Application
             case ["--snapshot", var folder, .. var look]:
                 Rendering.Motion.Suspended = true; // le immagini mostrano lo stato finale, non l'inizio delle animazioni
                 Rendering.Theme.Apply(SnapshotAppearance(look));
+                NotchLayout.Use(SnapshotAppearance(look).NotchSize);
                 RenderSnapshots(folder);
                 RenderIconSheet(folder);
                 await RenderLauncherSnapshot(folder);
@@ -178,7 +179,7 @@ public partial class App : Application
 
         _singleInstance = new Mutex(initiallyOwned: true, @"Local\NothingShell", out var createdNew);
         // Dopo Ctrl+Win dallo stato dormiente l'istanza precedente può star ancora chiudendo.
-        if (!createdNew && !(e.Args is ["--wake"] && WaitForPreviousShell()))
+        if (!createdNew && !(e.Args is ["--wake", ..] && WaitForPreviousShell()))
         {
             Shutdown();
             return;
@@ -189,7 +190,8 @@ public partial class App : Application
 
         _shell = new ShellController();
         _shell.ToggleRequested += () => Relaunch("--dormant");
-        if (e.Args is ["--settings"])
+        _shell.RestartRequested += () => Dispatcher.BeginInvoke(() => Relaunch("--wake --settings"));
+        if (e.Args is ["--settings"] or ["--wake", "--settings"])
             _shell.OpenSettings();
         await _shell.StartAsync();
     }
@@ -491,6 +493,7 @@ public partial class App : Application
         notch.SetAgenda(agenda, DateTimeOffset.Now, string.Empty);
 
         notch.ShowMailAlert(demo[0]);
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Idle, NotchPage.Home), Path.Combine(folder, "notch-idle.png"));
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "notch-alert.png"));
         foreach (var page in NotchPager.Pages)
             SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, page),
@@ -1504,6 +1507,9 @@ public partial class App : Application
         var log = new RemoteConnectWindow(actions);
         log.ShowSampleLog(luca);
         SaveSnapshot(log.PrepareSnapshot(), Path.Combine(folder, "remote-log.png"));
+        var password = new RemoteConnectWindow(actions);
+        password.ShowSamplePassword(luca);
+        SaveSnapshot(password.PrepareSnapshot(), Path.Combine(folder, "remote-password.png"));
     }
 
     /// <summary>
@@ -1580,6 +1586,14 @@ public partial class App : Application
         }
 
         public NothingShell.Core.RemoteAccess.RemoteComputer? Current(NothingShell.Core.RemoteAccess.RemoteComputer computer) => computer;
+
+        public bool AsksPasswords => false; // la prova va da sola: nessuno risponderebbe
+
+        public bool LendPassword(NothingShell.Core.RemoteAccess.RemoteComputer computer, string userName, string password) => false;
+
+        public void ReturnPassword(NothingShell.Core.RemoteAccess.RemoteComputer computer, int? processId)
+        {
+        }
 
         public void AskAssistant(string text)
         {
@@ -1893,6 +1907,9 @@ public partial class App : Application
         Display = look.Contains("punti") ? DisplayStyle.Dots : DisplayStyle.Windows,
         Accent = look.FirstOrDefault(a => a.StartsWith('#')),
         Glass = false,
+        NotchStyle = look.Contains("unito") ? NotchStyle.Attached : NotchStyle.Floating,
+        NotchSize = look.Contains("grande") ? NotchSize.Large : NotchSize.Small,
+        NotchMascot = look.Contains("mascotte"),
     };
 
     private static void SaveSnapshot(FrameworkElement view, string path, double scale = 2)

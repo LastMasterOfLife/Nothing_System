@@ -11,8 +11,15 @@ public sealed class Spring(double value, double stiffness = 280, double damping 
     public double Value { get; private set; } = value;
     public double Velocity { get; private set; }
     public double Target { get; set; } = value;
-    public double Stiffness { get; } = stiffness;
-    public double Damping { get; } = damping;
+    public double Stiffness { get; private set; } = stiffness;
+    public double Damping { get; private set; } = damping;
+
+    /// <summary>Cambia molla a metà corsa: la velocità resta, così il movimento non ha scatti.</summary>
+    public void Tune(double stiffness, double damping)
+    {
+        Stiffness = stiffness;
+        Damping = damping;
+    }
 
     public bool IsSettled => Math.Abs(Value - Target) < RestDistance && Math.Abs(Velocity) < RestVelocity;
 

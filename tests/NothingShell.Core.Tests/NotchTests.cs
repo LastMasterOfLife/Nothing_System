@@ -1,4 +1,5 @@
 using NothingShell.Core.Animation;
+using NothingShell.Core.Design;
 using NothingShell.Core.Notch;
 
 namespace NothingShell.Core.Tests;
@@ -29,18 +30,68 @@ public class NotchStateMachineTests
     }
 
     [Fact]
-    public void LeaveCollapsesOnlyAfterDelay()
+    public void LeaveCollapsesRightAway()
     {
         var sm = new NotchStateMachine();
         sm.OnPointerEnter();
         sm.OnPointerLeave(T0);
 
-        Assert.False(sm.Tick(T0 + NotchStateMachine.LeaveDelay - TimeSpan.FromMilliseconds(1)));
-        Assert.Equal(NotchState.Expanded, sm.State);
-
-        Assert.True(sm.Tick(T0 + NotchStateMachine.LeaveDelay));
+        Assert.Equal(T0, sm.NextDeadline);
+        Assert.True(sm.Tick(T0));
         Assert.Equal(NotchState.Idle, sm.State);
         Assert.Null(sm.CollapseDeadline);
+    }
+
+    [Fact]
+    public void HoverOpensOnlyAfterTheEnterDelay()
+    {
+        var sm = new NotchStateMachine();
+        Assert.True(sm.OnPointerHover(T0));
+        Assert.True(sm.Peeking);
+        Assert.Equal(NotchState.Idle, sm.State);
+
+        Assert.False(sm.Tick(T0 + NotchMotion.EnterDelay - TimeSpan.FromMilliseconds(1)));
+        Assert.True(sm.Tick(T0 + NotchMotion.EnterDelay));
+        Assert.Equal(NotchState.Expanded, sm.State);
+        Assert.False(sm.Peeking);
+    }
+
+    [Fact]
+    public void LeavingWhilePeekingCancelsTheOpening()
+    {
+        var sm = new NotchStateMachine();
+        sm.OnPointerHover(T0);
+        Assert.True(sm.OnPointerLeave(T0 + TimeSpan.FromMilliseconds(100)));
+        Assert.False(sm.Peeking);
+        Assert.False(sm.Tick(T0 + TimeSpan.FromSeconds(1)));
+        Assert.Equal(NotchState.Idle, sm.State);
+    }
+
+    [Fact]
+    public void PeekingKeepsAnAlertUntilItOpensOrTheMouseLeaves()
+    {
+        var sm = new NotchStateMachine();
+        sm.OnAlert(T0, TimeSpan.FromMilliseconds(100));
+        sm.OnPointerHover(T0);
+        Assert.Null(sm.AlertDeadline);
+
+        var left = T0 + TimeSpan.FromMilliseconds(200);
+        sm.OnPointerLeave(left);
+        Assert.Equal(NotchState.Alert, sm.State);
+        Assert.True(sm.Tick(left + NotchStateMachine.CardLeaveDelay));
+        Assert.Equal(NotchState.Idle, sm.State);
+    }
+
+    [Fact]
+    public void HoverOnAnOpenNotchCancelsItsCollapse()
+    {
+        var sm = new NotchStateMachine();
+        sm.OnPointerEnter();
+        sm.OnPointerLeave(T0);
+        sm.OnPointerHover(T0);
+        Assert.False(sm.Peeking);
+        Assert.Null(sm.CollapseDeadline);
+        Assert.Equal(NotchState.Expanded, sm.State);
     }
 
     [Fact]
@@ -94,6 +145,102 @@ public class NotchLayoutTests
     {
         var idle = NotchLayout.For(NotchState.Idle);
         Assert.Equal(idle.Height / 2, NotchLayout.CornerRadius(idle));
+    }
+
+    [Fact]
+    public void HostLeavesRoomForPeekEarsAndShadow()
+    {
+        var host = NotchLayout.Host;
+        foreach (var state in Enum.GetValues<NotchState>())
+        {
+            var s = NotchLayout.For(state);
+            Assert.True((s.Width * NotchMotion.PeekScale) + (2 * NotchLayout.Ear(s)) <= host.Width);
+        }
+        Assert.True(host.Height >= NotchLayout.TallHeight + NotchLayout.TopMargin + NotchLayout.ShadowReach);
+    }
+
+    [Fact]
+    public void LargeIsNusaWideAndKeepsOurHeights()
+    {
+        Assert.Equal(new Size2(144, 28), NotchLayout.For(NotchState.Idle, NotchSize.Small));
+        Assert.Equal(new Size2(420, 172), NotchLayout.For(NotchState.Expanded, NotchSize.Small));
+        foreach (var state in Enum.GetValues<NotchState>())
+        {
+            var small = NotchLayout.For(state, NotchSize.Small);
+            var large = NotchLayout.For(state, NotchSize.Large);
+            Assert.True(large.Width > small.Width && large.Height >= small.Height);
+        }
+        Assert.Equal(480, NotchLayout.For(NotchState.Expanded, NotchSize.Large).Width);
+    }
+
+    [Fact]
+    public void AttachedNotchGrowsEarsAndRoundsTheBottom()
+    {
+        var idle = new Size2(174, 33);
+        var open = new Size2(480, 172);
+        Assert.InRange(NotchLayout.Ear(idle), 6, 9);
+        Assert.Equal(NotchLayout.MaxEar, NotchLayout.Ear(open));
+        Assert.Equal(NotchLayout.MaxAttachedRadius, NotchLayout.CornerRadius(open, NotchStyle.Attached));
+        Assert.Equal(NotchLayout.MaxCornerRadius, NotchLayout.CornerRadius(open, NotchStyle.Floating));
+        Assert.Equal(3, NotchLayout.Ear(NotchLayout.Quiet)); // mai oltre metà altezza
+    }
+
+    [Fact]
+    public void MotionPicksTheSpringByDirection()
+    {
+        var small = new Size2(144, 28);
+        var big = new Size2(420, 172);
+        Assert.Equal(NotchMotion.Open, NotchMotion.For(small, big, peeking: false));
+        Assert.Equal(NotchMotion.Close, NotchMotion.For(big, small, peeking: false));
+        Assert.Equal(NotchMotion.Peek, NotchMotion.For(small, small, peeking: true));
+    }
+}
+
+/// <summary>Le molle di Nusa, misurate dallo schermo (docs/20-stile-nusa.md): stesso rimbalzo e stessi tempi.</summary>
+public class NusaMotionTests
+{
+    private static (double Overshoot, double PeakTime, double SettleTime) Run(SpringTune tune, double from, double to)
+    {
+        var spring = new Spring(from, tune.Stiffness, tune.Damping) { Target = to };
+        var direction = Math.Sign(to - from);
+        double peak = from, peakTime = 0, settle = 0, t = 0;
+        while (spring.Step(1.0 / 240) && t < 3)
+        {
+            t += 1.0 / 240;
+            if ((spring.Value - peak) * direction > 0)
+                (peak, peakTime) = (spring.Value, t);
+            if (Math.Abs(spring.Value - to) > Math.Abs(to - from) * 0.01)
+                settle = t;
+        }
+        return ((peak - to) / (to - from), peakTime, settle);
+    }
+
+    [Fact]
+    public void OpeningOvershootsLikeNusa()
+    {
+        var (overshoot, peakTime, settle) = Run(NotchMotion.Open, 291, 765);
+        Assert.InRange(overshoot, 0.05, 0.09);
+        Assert.InRange(peakTime, 0.23, 0.29);
+        Assert.InRange(settle, 0.35, 0.55);
+    }
+
+    [Fact]
+    public void ClosingDipsBelowRestLikeNusa()
+    {
+        var (overshoot, peakTime, settle) = Run(NotchMotion.Close, 767, 271);
+        Assert.InRange(overshoot, 0.05, 0.09); // ~35 px sotto la misura di riposo, come Nusa
+        Assert.InRange(peakTime, 0.2, 0.3);
+        Assert.InRange(settle, 0.3, 0.55);
+    }
+
+    [Fact]
+    public void TuningMidFlightKeepsVelocity()
+    {
+        var spring = new Spring(0, NotchMotion.Peek.Stiffness, NotchMotion.Peek.Damping) { Target = 10 };
+        spring.Step(0.05);
+        var velocity = spring.Velocity;
+        spring.Tune(NotchMotion.Open.Stiffness, NotchMotion.Open.Damping);
+        Assert.Equal(velocity, spring.Velocity);
     }
 }
 

@@ -65,7 +65,11 @@ Non sono mai in un file né nel registro della finestra. Stanno nel Gestore cred
 scrivono con `CredWrite` e non con `cmdkey /pass:`, che lascerebbe la password nella riga di comando, visibile agli altri
 programmi. Il registro mostra `password ••••••••`.
 
-Senza password il computer si salva lo stesso, e la chiede Desktop remoto. Cambiando indirizzo o utente senza riscriverla,
+Senza password il computer si salva lo stesso, e la password si chiede al collegamento: se `cmdkey` non trova la voce, la
+finestra mostra utente e password al posto del registro (Esc ferma). La password vale solo per quel collegamento: va nella
+voce `TERMSRV/indirizzo` col commento *solo per un collegamento*, perché `mstsc` la legga, e si cancella quando il processo di
+Desktop remoto si chiude (serve ancora per riconnettersi se la rete cade). Se la shell si chiude prima, la voce si cancella
+al prossimo avvio. Con *Ricordala su questo PC* si salva invece come dal modulo. `--remote-demo` non la chiede. Cambiando indirizzo o utente senza riscriverla,
 quella salvata segue il computer. *Rimuovi* cancella anche la voce, se nessun altro computer usa quell'indirizzo.
 
 `%USERPROFILE%\.nothing-shell\brain\computers.json` contiene nome, indirizzo, porta, utente e frasi imparate. Un indirizzo

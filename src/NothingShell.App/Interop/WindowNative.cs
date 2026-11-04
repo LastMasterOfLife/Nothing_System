@@ -307,6 +307,9 @@ internal static partial class WindowNative
     /// <summary>HMONITOR del monitor più vicino alla finestra.</summary>
     public static nint MonitorOf(nint hwnd) => MonitorFromWindow(hwnd, MonitorDefaultToNearest);
 
+    /// <summary>Il puntatore del mouse in pixel fisici dello schermo, dovunque sia.</summary>
+    public static System.Windows.Point? CursorPosition() => GetCursorPos(out var p) ? new(p.X, p.Y) : null;
+
     /// <summary>HMONITOR del monitor sotto il puntatore del mouse.</summary>
     public static nint MonitorAtCursor() =>
         GetCursorPos(out var p) ? MonitorFromPoint(((long)p.Y << 32) | (uint)p.X, MonitorDefaultToNearest) : 0;

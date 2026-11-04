@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using NothingShell.App.Interop;
@@ -52,6 +53,18 @@ public sealed class NotchWindow : Window
     private readonly Border _pill = Theme.Panel(new Border { ClipToBounds = true });
     private readonly GlassBackdrop _glass;
     private bool _quiet;
+
+    // Unito al bordo (docs/20-stile-nusa.md): la pillola non ha fondo suo, lo disegna _body con le orecchie.
+    private readonly Path _body = new() { Fill = Theme.PanelBrush, Stroke = Theme.RimBrush, StrokeThickness = 1, Visibility = Visibility.Collapsed };
+    private readonly Grid _layers = new();
+    private readonly BlurEffect _shadowBlur = new() { RenderingBias = RenderingBias.Performance };
+    private readonly Path _shadow = new() { Fill = Brushes.Black, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+    private readonly Grid _shadowHost = new() { IsHitTestVisible = false }; // il ritaglio sta qui: su _shadow verrebbe prima della sfocatura
+    private readonly MascotView _mascot = new(NotchLayout.For(NotchState.Idle).Height / 28) { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Opacity = 0 };
+    private NotchStyle _style;
+    private double _shadowAmount;
+    private bool _mascotOn;
+    private bool _peeking;
 
     // Compatto: [punto rosso | microfono e webcam]  HH:MM o timer  [equalizzatore | download]
     private readonly Grid _compact = new() { VerticalAlignment = VerticalAlignment.Top };
@@ -168,9 +181,11 @@ public sealed class NotchWindow : Window
 
         Content = BuildVisualTree();
         _glass = GlassBackdrop.Attach(this, _pill);
-        _quiet = Theme.Settings.QuietNotch;
+        ReadAppearance();
         Theme.Changed += (_, _) => OnAppearanceChanged();
         ApplyQuiet();
+        ApplyStyle();
+        UpdateMascot();
         ApplyPillSize();
         ShowPage(NotchPage.Home, animate: false);
 
@@ -188,6 +203,7 @@ public sealed class NotchWindow : Window
             HwndSource.FromHwnd(hwnd)?.AddHook(OnWindowMessage);
         };
         Deactivated += (_, _) => ReleaseAsk();
+        IsVisibleChanged += (_, _) => UpdateMascot();
         Loaded += (_, _) =>
         {
             PositionOnPrimaryScreen();
@@ -398,7 +414,11 @@ public sealed class NotchWindow : Window
         ShowPage(page, animate: false);
         Apply(changed);
         if (!_pill.IsMouseOver)
-            OnPointerLeave();
+        {
+            // il notch si chiude appena il mouse esce: aperto da lontano gli si dà il tempo di arrivarci
+            _machine.OnPointerLeave(_clock.Elapsed + NotchStateMachine.CardLeaveDelay);
+            ScheduleDeadline();
+        }
     }
 
     public void SetSystem(SystemStats stats) => _system.Update(stats);
@@ -452,6 +472,12 @@ public sealed class NotchWindow : Window
             layer.Opacity = visible ? 1 : 0;
         }
         SetActivityVisible(state == NotchState.Activity);
+        var mascot = _mascotOn && !_quiet && state == NotchState.Idle;
+        foreach (var (layer, visible) in new (UIElement, bool)[] { (_mascot, mascot), (_compactClock, !mascot) })
+        {
+            layer.BeginAnimation(OpacityProperty, null);
+            layer.Opacity = visible ? 1 : 0;
+        }
         return _pill;
     }
 
@@ -511,6 +537,7 @@ public sealed class NotchWindow : Window
         _agentView.Children.Add(_agentIcon);
         _agentView.Children.Add(_agentText);
         _compact.Children.Add(_compactClock);
+        _compact.Children.Add(_mascot);
         _compact.Children.Add(_liveDot);
         _compact.Children.Add(_equalizerView);
         _compact.Children.Add(_privacyIcons);
@@ -571,12 +598,15 @@ public sealed class NotchWindow : Window
         _expanded.Children.Add(BuildAssistantButton());
         _expanded.IsHitTestVisible = false;
 
-        var content = new Grid();
+        var content = _layers;
         content.Children.Add(_compact);
         content.Children.Add(_alert);
         content.Children.Add(_expanded);
         content.Children.Add(_card);
-        _pill.Child = content;
+        var surface = new Grid();
+        surface.Children.Add(_body);
+        surface.Children.Add(content);
+        _pill.Child = surface;
         _pill.HorizontalAlignment = HorizontalAlignment.Center;
         _pill.VerticalAlignment = VerticalAlignment.Top;
         _pill.MouseEnter += (_, _) => OnPointerEnter();
@@ -604,6 +634,9 @@ public sealed class NotchWindow : Window
         _pill.ContextMenu = BuildContextMenu();
 
         var root = new Grid(); // senza Background: le zone vuote non intercettano il mouse
+        _shadow.Effect = _shadowBlur;
+        _shadowHost.Children.Add(_shadow);
+        root.Children.Add(_shadowHost);
         root.Children.Add(_pill);
         return root;
     }
@@ -691,27 +724,85 @@ public sealed class NotchWindow : Window
 
     private Size2 ExpandedSize(NotchPage page) => NotchLayout.Expanded(page, _media is not null);
 
-    private Size2 SizeFor(NotchState state, NotchPage page) =>
-        state == NotchState.Expanded ? ExpandedSize(page)
-        : state == NotchState.Idle && _quiet ? NotchLayout.Quiet
-        : NotchLayout.For(state);
+    private Size2 SizeFor(NotchState state, NotchPage page)
+    {
+        var size = state == NotchState.Expanded ? ExpandedSize(page)
+            : state == NotchState.Idle && _quiet ? NotchLayout.Quiet
+            : NotchLayout.For(state);
+        // col mouse sopra, in attesa di aprire, la pillola si gonfia un poco (docs/20-stile-nusa.md)
+        return _machine.Peeking && state is not (NotchState.Expanded or NotchState.Card)
+            ? new(size.Width * NotchMotion.PeekScale, size.Height * NotchMotion.PeekScale)
+            : size;
+    }
 
-    /// <summary>Notch discreto acceso o spento dalla pagina Aspetto: la pillola cambia subito misura.</summary>
+    private void ReadAppearance()
+    {
+        var look = Theme.Settings;
+        _quiet = look.QuietNotch;
+        _style = look.NotchStyle;
+        _mascotOn = look.NotchMascot;
+        _shadowAmount = Math.Clamp(look.NotchShadow, 0, 1);
+    }
+
+    /// <summary>Scelte del notch cambiate dalla pagina Aspetto: forma, ombra e mascotte si aggiornano subito.</summary>
     private void OnAppearanceChanged()
     {
-        if (_quiet == Theme.Settings.QuietNotch)
+        var look = Theme.Settings;
+        if (_quiet == look.QuietNotch && _style == look.NotchStyle && _mascotOn == look.NotchMascot
+            && _shadowAmount == Math.Clamp(look.NotchShadow, 0, 1))
             return;
-        _quiet = Theme.Settings.QuietNotch;
+        ReadAppearance();
         ApplyQuiet();
-        var size = SizeFor(_machine.State, _pager.Current);
+        ApplyStyle();
+        Retarget(SizeFor(_machine.State, _pager.Current));
+        FadeTo(_compact, CompactOpacity(_machine.State));
+        UpdateMascot();
+        ApplyPillSize();
+    }
+
+    /// <summary>Contro il bordo alto, così basta spingere il mouse in su per trovarla; unita al bordo ci sta sempre.</summary>
+    private void ApplyQuiet() =>
+        _pill.Margin = new Thickness(0, _quiet || _style == NotchStyle.Attached ? 0 : NotchLayout.TopMargin, 0, 0);
+
+    /// <summary>Sospesa la pillola si disegna da sé; unita al bordo il fondo è <see cref="_body"/>, con le orecchie.</summary>
+    private void ApplyStyle()
+    {
+        var attached = _style == NotchStyle.Attached;
+        _body.Visibility = attached ? Visibility.Visible : Visibility.Collapsed;
+        _pill.Background = attached ? Brushes.Transparent : Theme.PanelBrush;
+        _pill.BorderThickness = new Thickness(attached ? 0 : 1);
+        if (attached)
+        {
+            _pill.CornerRadius = default;
+            return;
+        }
+        _pill.Clip = null;
+        _layers.Margin = default;
+    }
+
+    /// <summary>
+    /// Nuova misura con la molla giusta (docs/20-stile-nusa.md): apertura e chiusura come Nusa, gonfiore morbido. La molla
+    /// cambia a metà corsa senza perdere velocità.
+    /// </summary>
+    private void Retarget(Size2 size, bool peek = false)
+    {
+        var tune = NotchMotion.For(new Size2(_width.Target, _height.Target), size, peek);
+        _width.Tune(tune.Stiffness, tune.Damping);
+        _height.Tune(tune.Stiffness, tune.Damping);
         _width.Target = size.Width;
         _height.Target = size.Height;
         StartAnimation();
-        FadeTo(_compact, CompactOpacity(_machine.State));
     }
 
-    /// <summary>Contro il bordo alto, così basta spingere il mouse in su per trovarla.</summary>
-    private void ApplyQuiet() => _pill.Margin = new Thickness(0, _quiet ? 0 : NotchLayout.TopMargin, 0, 0);
+    /// <summary>A riposo, se accesa nella pagina Aspetto, la mascotte prende il posto dell'ora.</summary>
+    private void UpdateMascot()
+    {
+        var shown = _mascotOn && !_quiet && _machine.State == NotchState.Idle;
+        _mascot.Greeting = _machine.Peeking;
+        _mascot.SetActive(shown && IsVisible);
+        FadeTo(_mascot, shown ? 1 : 0);
+        FadeTo(_compactClock, shown ? 0 : 1);
+    }
 
     private double CompactOpacity(NotchState state) =>
         state is NotchState.Expanded or NotchState.Alert or NotchState.Card || (state == NotchState.Idle && _quiet) ? 0 : 1;
@@ -723,9 +814,7 @@ public sealed class NotchWindow : Window
         if (Math.Abs(_height.Target - size.Height) < 0.5)
             return;
         _expanded.Height = size.Height; // la pillola taglia mentre la sua altezza anima
-        _width.Target = size.Width;
-        _height.Target = size.Height;
-        StartAnimation();
+        Retarget(size);
     }
 
     /// <summary>
@@ -772,24 +861,27 @@ public sealed class NotchWindow : Window
         AskSubmitted?.Invoke(text, choose);
     }
 
+    /// <summary>Si apre dopo <see cref="NotchMotion.EnterDelay"/>, se il mouse resta; intanto la pillola si gonfia.</summary>
     private void OnPointerEnter()
     {
-        var alertPage = _machine.State == NotchState.Alert ? _alertPage : null;
-        Apply(_machine.OnPointerEnter());
-        if (alertPage is { } page && _pager.IsAvailable(page))
-            ShowPage(page, animate: false);
+        Apply(_machine.OnPointerHover(_clock.Elapsed));
+        ScheduleDeadline();
     }
 
     private void OnPointerLeave()
     {
-        _machine.OnPointerLeave(_clock.Elapsed);
+        Apply(_machine.OnPointerLeave(_clock.Elapsed));
         ScheduleDeadline();
     }
 
     private void OnDeadline()
     {
         _deadlineTimer.Stop();
-        Apply(_machine.Tick(_clock.Elapsed));
+        var alertPage = _machine.State == NotchState.Alert ? _alertPage : null; // passando sopra un avviso si apre la sua pagina
+        var changed = _machine.Tick(_clock.Elapsed);
+        Apply(changed);
+        if (changed && _machine.State == NotchState.Expanded && alertPage is { } page && _pager.IsAvailable(page))
+            ShowPage(page, animate: false);
         ScheduleDeadline();
     }
 
@@ -909,9 +1001,9 @@ public sealed class NotchWindow : Window
         var size = SizeFor(state, _pager.Current);
         if (state == NotchState.Expanded)
             _expanded.Height = size.Height;
-        _width.Target = size.Width;
-        _height.Target = size.Height;
-        StartAnimation();
+        // il gonfiore e il suo ritiro hanno la loro molla; dal gonfiore all'apertura si passa a quella d'apertura
+        Retarget(size, peek: _machine.Peeking || (_peeking && state != NotchState.Expanded));
+        _peeking = _machine.Peeking;
 
         var expanded = state == NotchState.Expanded;
         var alert = state == NotchState.Alert;
@@ -934,6 +1026,7 @@ public sealed class NotchWindow : Window
             page.OnShown();
         else
             page.OnHidden();
+        UpdateMascot();
     }
 
     /// <summary>
@@ -999,11 +1092,53 @@ public sealed class NotchWindow : Window
     private void ApplyPillSize()
     {
         var size = new Size2(Math.Max(1, _width.Value), Math.Max(1, _height.Value));
-        _pill.Width = size.Width;
+        var attached = _style == NotchStyle.Attached;
+        var radius = NotchLayout.CornerRadius(size, _style);
+        var ear = attached ? NotchLayout.Ear(size) : 0;
+        var left = (Width - size.Width) / 2;
+        var top = _pill.Margin.Top;
+        _pill.Width = size.Width + (2 * ear);
         _pill.Height = size.Height;
-        var radius = NotchLayout.CornerRadius(size);
-        _pill.CornerRadius = new CornerRadius(radius);
-        _glass.SetShape(new Rect((Width - size.Width) / 2, _pill.Margin.Top, size.Width, size.Height), radius);
+        if (attached)
+        {
+            var shape = NotchShape.Attached(size.Width, size.Height, ear, radius);
+            _body.Data = shape;
+            _pill.Clip = shape;
+            _layers.Margin = new Thickness(ear, 0, ear, 0);
+            // il vetro sale oltre il bordo dello schermo: i suoi angoli alti restano fuori, lassù la forma è squadrata
+            _glass.SetShape(new Rect(left, top - radius, size.Width, size.Height + radius), radius);
+        }
+        else
+        {
+            _pill.CornerRadius = new CornerRadius(radius);
+            _glass.SetShape(new Rect(left, top, size.Width, size.Height), radius);
+        }
+        ApplyShadow(size, left, top, radius, ear);
+    }
+
+    /// <summary>
+    /// Ombra ampia e morbida sotto il notch aperto (docs/20-stile-nusa.md), larga quanto chiede la pagina Aspetto. Cresce con
+    /// l'apertura e a riposo non c'è: le sue sfumature prenderebbero i clic appena sotto il bordo dello schermo.
+    /// </summary>
+    private void ApplyShadow(Size2 size, double left, double top, double radius, double ear)
+    {
+        var idle = NotchLayout.For(NotchState.Idle).Height;
+        var open = Math.Clamp((size.Height - idle) / (NotchLayout.For(NotchState.Card).Height - idle), 0, 1);
+        if (_shadowAmount <= 0 || open <= 0)
+        {
+            _shadow.Visibility = Visibility.Collapsed;
+            return;
+        }
+        var drop = 2 + (8 * _shadowAmount);
+        Geometry At(double y) => _style == NotchStyle.Attached
+            ? NotchShape.Attached(size.Width, size.Height, ear, radius, left - ear, y)
+            : NotchShape.Floating(size.Width, size.Height, radius, left, y);
+        _shadow.Data = At(top + drop);
+        // solo fuori dalla forma: col vetro l'ombra non deve scurire ciò che si vede attraverso
+        _shadowHost.Clip = new CombinedGeometry(GeometryCombineMode.Exclude, new RectangleGeometry(new Rect(0, 0, Width, Height)), At(top));
+        _shadowBlur.Radius = Math.Max(1, (NotchLayout.ShadowReach - drop) * _shadowAmount);
+        _shadow.Opacity = 0.6 * open;
+        _shadow.Visibility = Visibility.Visible;
     }
 
     private void PositionOnPrimaryScreen()

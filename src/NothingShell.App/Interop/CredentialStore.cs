@@ -72,6 +72,21 @@ internal static class CredentialStore
         }
     }
 
+    /// <summary>Il commento della voce, o null se non c'è: dice chi l'ha scritta e perché.</summary>
+    public static string? Comment(string target)
+    {
+        if (!CredRead(target, CredTypeGeneric, 0, out var pointer))
+            return null;
+        try
+        {
+            return Marshal.PtrToStructure<Credential>(pointer).Comment ?? string.Empty;
+        }
+        finally
+        {
+            CredFree(pointer);
+        }
+    }
+
     public static void Delete(string target) => CredDelete(target, CredTypeGeneric, 0);
 
     [DllImport("advapi32.dll", EntryPoint = "CredWriteW", CharSet = CharSet.Unicode, SetLastError = true)]

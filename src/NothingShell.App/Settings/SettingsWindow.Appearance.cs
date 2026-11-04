@@ -31,7 +31,7 @@ public sealed partial class SettingsWindow
         Section("Stile rapido");
         var presets = new UniformGrid2(AppearanceChoices.Presets.Count);
         foreach (var (name, description, settings) in AppearanceChoices.Presets)
-            presets.Add(PresetTile(name, description, settings, settings == look));
+            presets.Add(PresetTile(name, description, settings.WithNotchOf(look), settings.WithNotchOf(look) == look));
         _current.Children.Add(presets);
 
         Section("Tema");
@@ -59,6 +59,18 @@ public sealed partial class SettingsWindow
         ChoiceRow("Testo e icone", "Windows usa Segoe UI e le icone Fluent; Punti è la matrice di Nothing",
             [("Windows", DisplayStyle.Windows), ("Punti", DisplayStyle.Dots)],
             look.Display, v => SetAppearance(a => a with { Display = v }));
+
+        Section("Notch");
+        ChoiceRow("Forma", "Unito al bordo si fonde con l'alto dello schermo, con due raccordi ai lati",
+            [("Sospeso", NotchStyle.Floating), ("Unito al bordo", NotchStyle.Attached)],
+            look.NotchStyle, v => SetAppearance(a => a with { NotchStyle = v }));
+        ChoiceRow("Misura", "Piccola è quella di sempre, Grande è più larga. Cambiandola la shell si riavvia",
+            [("Piccola", NotchSize.Small), ("Grande", NotchSize.Large)],
+            look.NotchSize, v => SetAppearance(a => a with { NotchSize = v }));
+        ToggleRow("Mascotte", "A riposo, al posto dell'ora, due occhi che sbattono le palpebre, seguono il mouse e si addormentano",
+            look.NotchMascot, v => SetAppearance(a => a with { NotchMascot = v }));
+        SliderRow("Ombra", "Quanto si allarga l'ombra sotto il notch aperto: tutta a sinistra non c'è",
+            look.NotchShadow, v => _shell.Appearance with { NotchShadow = v });
         ToggleRow("Notch discreto", "A riposo resta solo una lineetta contro il bordo alto dello schermo: passandoci sopra si apre",
             look.QuietNotch, v => SetAppearance(a => a with { QuietNotch = v }));
     }
@@ -222,26 +234,32 @@ public sealed partial class SettingsWindow
     }
 
     /// <summary>Quanto si vede attraverso il vetro: si applica mentre si trascina.</summary>
-    private void GlassStrengthRow(AppearanceSettings look)
+    private void GlassStrengthRow(AppearanceSettings look) =>
+        SliderRow("Trasparenza", "Più velato si legge meglio, più limpido si vede di più",
+            look.GlassStrength, v => _shell.Appearance with { GlassStrength = v });
+
+    /// <summary>Cursore da 0 a 1 con <paramref name="change"/> che dice l'aspetto risultante: si vede mentre si trascina.</summary>
+    private void SliderRow(string title, string description, double value, Func<double, AppearanceSettings> change)
     {
         var row = new Grid { Margin = new Thickness(0, 8, 0, 8) };
         row.ColumnDefinitions.Add(new ColumnDefinition());
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
-        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        text.Children.Add(Label("Trasparenza", 14, Theme.InkBrush));
-        var hint = Label("Più velato si legge meglio, più limpido si vede di più", 12, Theme.MutedBrush);
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 16, 0) };
+        text.Children.Add(Label(title, 14, Theme.InkBrush));
+        var hint = Label(description, 12, Theme.MutedBrush);
         hint.Margin = new Thickness(0, 3, 0, 0);
+        hint.TextWrapping = TextWrapping.Wrap;
         text.Children.Add(hint);
         row.Children.Add(text);
 
-        var slider = new AccentSlider(look.GlassStrength);
+        var slider = new AccentSlider(value);
         slider.DragStarted += () => _holdRebuild = true;
         // Mentre si trascina si vede subito ma non si scrive su disco: si salva al rilascio.
-        slider.ValueChanged += v => Theme.Apply(_shell.Appearance with { GlassStrength = v });
+        slider.ValueChanged += v => Theme.Apply(change(v));
         slider.DragCompleted += v =>
         {
             _holdRebuild = false;
-            SetAppearance(a => a with { GlassStrength = v });
+            _shell.Appearance = change(v);
         };
         Grid.SetColumn(slider, 1);
         row.Children.Add(slider);
