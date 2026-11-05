@@ -187,6 +187,15 @@ public interface IShellSettingsActions
     /// <summary>Le scorciatoie imparate, senza quelle di serie.</summary>
     IReadOnlyList<Shortcut> LearnedShortcuts { get; }
 
+    /// <summary>Insegna una scorciatoia scritta a mano; null se salvata, altrimenti il motivo (docs/15-comandi-cervello.md).</summary>
+    string? AddShortcut(string phrase, string command);
+
+    /// <summary>Dimentica la scorciatoia della frase (anche un modello con {0}).</summary>
+    bool ForgetShortcut(string phrase);
+
+    /// <summary>La scorciatoia che risponde già a questa frase, di serie o imparata.</summary>
+    Shortcut? FindShortcut(string phrase);
+
     /// <summary>Le scorciatoie di serie ancora valide, per argomento.</summary>
     IReadOnlyList<BuiltInSection> BuiltInShortcuts { get; }
 
@@ -328,7 +337,7 @@ public sealed partial class SettingsWindow : Window
         {
             if (e.Key == Key.Escape)
             {
-                if (_draft is not null || _llmDraft is not null || _shortcut is not null || _outfitDraft is not null)
+                if (_draft is not null || _llmDraft is not null || _shortcut is not null || _outfitDraft is not null || _commandEditing is not null)
                 {
                     CloseForms();
                     Rebuild();
@@ -442,6 +451,7 @@ public sealed partial class SettingsWindow : Window
         _shortcut = null;
         _builtIn = null;
         _openPicker = null;
+        ResetCommandForm();
         CloseOutfitEditor();
     }
 
@@ -692,6 +702,24 @@ public sealed partial class SettingsWindow : Window
             var failures => $"{runs}, le ultime {failures} volte è fallita",
         });
 
+        if (_builtIn is { } seed)
+        {
+            Section("PERSONALIZZA");
+            Note("Parti da questa per farne una tua, con un altro comando o un'altra frase: quella di serie resta per le altre frasi.", Theme.MutedBrush);
+            ButtonRow(("PERSONALIZZA", () => EditShortcut(shortcut, seed.Phrases[0], replace: false)));
+        }
+        else
+        {
+            Section("MODIFICA");
+            ButtonRow(("MODIFICA FRASE O COMANDO", () => EditShortcut(shortcut)));
+            ConfirmButtonRow("DIMENTICA", "DI NUOVO PER DIMENTICARLA", () =>
+            {
+                _shell.ForgetShortcut(shortcut.Phrase);
+                CloseForms();
+                Rebuild();
+            });
+        }
+
         Section("COMANDI CRITICI");
         var result = Note(string.Empty, Theme.CriticalBrush);
         result.Visibility = Visibility.Collapsed;
@@ -748,6 +776,8 @@ public sealed partial class SettingsWindow : Window
             _shell.BrainInstalling ? ("ANNULLA DOWNLOAD", _shell.CancelBrainInstall)
             : _shell.BrainModelInstalled ? ("DIMENTICA LE SCORCIATOIE", _shell.ClearBrainMemory)
             : ("SCARICA IL MODELLO", _shell.InstallBrainModel));
+
+        MyShortcutsSection();
 
         Section("ASSISTENTE NEL NOTCH");
         Note("Il pulsante in basso a destra nel notch apre una casella: scrivi cosa ti serve e i comandi di sola lettura partono da " +

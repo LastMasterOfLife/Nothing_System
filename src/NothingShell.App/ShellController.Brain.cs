@@ -53,6 +53,12 @@ public sealed partial class ShellController : IAssistantPanelActions
 
     public IReadOnlyList<Shortcut> LearnedShortcuts => _brain.Memory.Learned;
 
+    public string? AddShortcut(string phrase, string command) => _brain.Remember(phrase, command);
+
+    public bool ForgetShortcut(string phrase) => _brain.Forget(phrase);
+
+    public Shortcut? FindShortcut(string phrase) => _brain.Memory.Find(phrase);
+
     public IReadOnlyList<BuiltInSection> BuiltInShortcuts => _brain.Memory.BuiltIn;
 
     public bool IsUserCritical(string command) => CriticalCommands.IsInUserFile(CriticalCommands.DefaultUserPath, command);

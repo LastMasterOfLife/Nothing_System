@@ -209,38 +209,114 @@ public sealed partial class ShortcutMemory
         }
     }
 
-    /// <summary>Scorciatoia chiesta a mano: vale come già confermata, ma un comando critico chiederà comunque conferma.</summary>
+    /// <summary>
+    /// Scorciatoia chiesta a mano: vale come già confermata, ma un comando critico chiederà comunque conferma. Con
+    /// <c>{0}</c> nella frase e nel comando nasce un modello con un valore ("apri progetto {0}" → "code C:\dev\{0}").
+    /// </summary>
     public bool Remember(string input, string command, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(command);
-        var tokens = IntentText.Tokens(input);
-        command = command.Trim();
-        if (tokens.Count == 0 || command.Length == 0 || command.Contains('\n', StringComparison.Ordinal) || !CanLearn(input, command))
+        if (WhyNot(input, command) is not null)
             return false;
+        var tokens = PhraseTokens(input);
+        command = command.Trim();
         lock (_gate)
         {
-            _exact.TryGetValue(IntentText.Key(tokens), out var known);
+            var key = IntentText.Key(tokens);
+            var known = (tokens.Contains(Slot) ? _templates : _exact).GetValueOrDefault(key);
             var kept = known is { Seed: false } && string.Equals(known.Command, command, StringComparison.Ordinal);
             Put(new Shortcut(tokens, command, TrustedAfter, 0, now, Created: kept ? known!.Created : now));
-            _forgotten.Remove(IntentText.Key(tokens));
+            _forgotten.Remove(key);
             Save();
             return true;
         }
     }
 
+    /// <summary>
+    /// Perché una scorciatoia scritta a mano non si può tenere, in parole per le impostazioni; null se va bene.
+    /// Sono le stesse regole di <see cref="Remember"/>.
+    /// </summary>
+    public static string? WhyNot(string phrase, string command)
+    {
+        ArgumentNullException.ThrowIfNull(phrase);
+        ArgumentNullException.ThrowIfNull(command);
+        command = command.Trim();
+        var tokens = PhraseTokens(phrase);
+        var slots = tokens.Count(t => t == Slot);
+        if (tokens.Count == 0)
+            return "Scrivi la frase da dire.";
+        if (command.Length == 0)
+            return "Scrivi il comando da eseguire.";
+        if (command.Contains('\n', StringComparison.Ordinal) || command.Contains('\r', StringComparison.Ordinal))
+            return "Il comando sta su una riga sola: più comandi si separano con ;";
+        if (!CanLearn(phrase, command))
+            return "Non si salvano chiavi, token o password: il file delle scorciatoie è in chiaro.";
+        if (slots > 1 || Count(command, Slot) > 1)
+            return $"Al massimo un {Slot}, nella frase e nel comando.";
+        if (slots == 1 && tokens.Count == 1)
+            return $"Oltre a {Slot} serve almeno una parola nella frase.";
+        if ((slots == 1) != command.Contains(Slot, StringComparison.Ordinal))
+            return slots == 1 ? $"La frase ha {Slot}: mettilo anche nel comando, dove va il valore." : $"Il comando ha {Slot}: mettilo anche nella frase, dove si dice il valore.";
+        if (slots == 1 && CommandSafety.Classify(command) == CommandRisk.Dangerous)
+            return $"Un comando critico non può avere {Slot}: scrivi una scorciatoia per ogni valore.";
+        return null;
+    }
+
+    /// <summary>La scorciatoia che risponde già esattamente a questa frase (anche un modello con <c>{0}</c>), o null.</summary>
+    public Shortcut? Find(string phrase)
+    {
+        ArgumentNullException.ThrowIfNull(phrase);
+        var tokens = PhraseTokens(phrase);
+        if (tokens.Count == 0)
+            return null;
+        lock (_gate)
+            return (tokens.Contains(Slot) ? _templates : _exact).GetValueOrDefault(IntentText.Key(tokens));
+    }
+
+    /// <summary>Dimentica la scorciatoia di questa frase; con <c>{0}</c> il modello con un valore.</summary>
     public bool Forget(string input)
     {
         ArgumentNullException.ThrowIfNull(input);
         lock (_gate)
         {
-            var key = IntentText.Key(IntentText.Tokens(input));
+            var tokens = PhraseTokens(input);
+            var key = IntentText.Key(tokens);
+            if (tokens.Contains(Slot))
+            {
+                if (!_templates.Remove(key))
+                    return false;
+                Save();
+                return true;
+            }
             if (!_exact.TryGetValue(key, out var known))
                 return false;
             Drop(key, known);
             Save();
             return true;
         }
+    }
+
+    /// <summary>Le parole della frase, con <c>{0}</c> dove l'utente l'ha scritto (le parentesi altrimenti si perdono).</summary>
+    private static List<string> PhraseTokens(string phrase)
+    {
+        var tokens = new List<string>();
+        var parts = phrase.Split(Slot);
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (i > 0)
+                tokens.Add(Slot);
+            tokens.AddRange(IntentText.Tokens(parts[i]).Where(t => !IntentText.IsFiller(t) || parts.Length == 1));
+        }
+        return tokens;
+    }
+
+    private static int Count(string text, string part)
+    {
+        var count = 0;
+        for (var at = text.IndexOf(part, StringComparison.Ordinal); at >= 0; at = text.IndexOf(part, at + part.Length, StringComparison.Ordinal))
+            count++;
+        return count;
     }
 
     /// <summary>Dimentica tutto ciò che è stato imparato; le scorciatoie di serie tornano com'erano.</summary>

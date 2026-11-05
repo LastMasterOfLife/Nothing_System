@@ -799,6 +799,8 @@ public partial class App : Application
         }
         settings.ShowBuiltIn(new ShortcutMemory().BuiltIn[0].Commands[0]);
         SaveSnapshot(root, Path.Combine(folder, "settings-shortcut-seed.png"));
+        settings.EditShortcut(learned[2]);
+        SaveSnapshot(root, Path.Combine(folder, "settings-shortcut-edit.png"));
         settings.ShowConnectorTemplate("homeassistant");
         root.Height = settings.Height;
         SaveSnapshot(root, Path.Combine(folder, "settings-connector-form.png"));
@@ -1169,6 +1171,12 @@ public partial class App : Application
         ];
 
         public bool IsUserCritical(string command) => command.StartsWith("vmctl", StringComparison.Ordinal);
+
+        public string? AddShortcut(string phrase, string command) => ShortcutMemory.WhyNot(phrase, command);
+
+        public bool ForgetShortcut(string phrase) => false;
+
+        public Shortcut? FindShortcut(string phrase) => null;
 
         public string? SetUserCritical(string command, bool critical) => null;
 

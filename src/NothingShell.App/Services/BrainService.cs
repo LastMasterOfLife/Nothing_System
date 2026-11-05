@@ -126,6 +126,25 @@ public sealed class BrainService : IDisposable
         Changed?.Invoke();
     }
 
+    /// <summary>Scorciatoia scritta a mano (terminale, impostazioni): null se salvata, altrimenti il motivo.</summary>
+    public string? Remember(string phrase, string command)
+    {
+        if (ShortcutMemory.WhyNot(phrase, command) is { } why)
+            return why;
+        if (!Memory.Remember(phrase, command, DateTimeOffset.Now))
+            return "Non si è potuta salvare.";
+        Changed?.Invoke();
+        return null;
+    }
+
+    public bool Forget(string phrase)
+    {
+        if (!Memory.Forget(phrase))
+            return false;
+        Changed?.Invoke();
+        return true;
+    }
+
     /// <summary>Scarica un modello riprendendo dal punto in cui si era fermato; null se riuscito, altrimenti il motivo.</summary>
     /// <param name="model">Quello piccolo del terminale, se non si dice altro.</param>
     public async Task<string?> InstallModelAsync(BrainModel? model = null)
@@ -269,15 +288,10 @@ public sealed class BrainService : IDisposable
                 Record(request.Input, request.Command, request.Ok);
                 return new BrainReply();
             case "remember" when request.Input is { Length: > 0 } && request.Command is { Length: > 0 }:
-                var remembered = Memory.Remember(request.Input, request.Command, DateTimeOffset.Now);
-                if (remembered)
-                    Changed?.Invoke();
-                return new BrainReply(Note: remembered ? null : "non si impara: contiene un segreto");
+                var why = Remember(request.Input, request.Command);
+                return new BrainReply(Note: why);
             case "forget" when request.Input is { Length: > 0 }:
-                var forgotten = Memory.Forget(request.Input);
-                if (forgotten)
-                    Changed?.Invoke();
-                return new BrainReply(Note: forgotten ? null : "nessuna scorciatoia per questa frase");
+                return new BrainReply(Note: Forget(request.Input) ? null : "nessuna scorciatoia per questa frase");
             default:
                 return new BrainReply(Note: "richiesta non valida");
         }

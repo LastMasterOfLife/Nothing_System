@@ -197,6 +197,16 @@ togliendo le meno recenti.
 `ricorda "frase" "comando"` ne insegna una a mano, `dimentica "frase"` la toglie; *Dimentica le scorciatoie* nelle
 impostazioni azzera tutto.
 
+**Scritte a mano nelle impostazioni.** Impostazioni › Sviluppo › *Le tue scorciatoie*: una frase e il comando PowerShell
+(su una riga, più comandi con `;`). Valgono subito nel campo del notch, nel terminale Nothing e nel launcher dopo `>`, come
+se fossero già confermate 3 volte: la sola lettura parte da sola, il resto chiede Invio o un clic, i comandi critici la
+conferma esplicita. Mentre si scrive, sotto il campo compaiono cosa fa il comando (`CommandExplainer`), quando parte e quale
+scorciatoia sostituisce, se la frase ne ha già una (anche di serie). Con `{0}` nella frase e nel comando nasce un modello con
+un valore: "apri progetto {0}" → `code C:\dev\{0}`; il valore accetta solo lettere, cifre, `. _ -`. Le regole stanno in
+`ShortcutMemory.WhyNot` (Core, testato): niente segreti, al massimo un `{0}` che deve stare in tutti e due, e nessun modello
+per un comando critico. Sotto il modulo le ultime 6; dal dettaglio di una scorciatoia *Modifica frase o comando* e
+*Dimentica* (con conferma), e per quelle di serie *Personalizza*, che ne fa una tua partendo dalla prima frase.
+
 Le scorciatoie di serie sono 79 comandi con circa 300 frasi, in italiano e in inglese: data e ora, nome e modello del PC, utenti, CPU, GPU,
 RAM, dischi, risoluzione, USB, stampanti, aggiornamenti installati, programmi, avvio automatico, servizi, errori di Windows,
 IP, MAC, DNS, gateway, Wi-Fi, porte, connessioni, firewall, antivirus, file e git. `--brain-check` le prova dall'esecutore
