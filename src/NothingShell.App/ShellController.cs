@@ -178,6 +178,12 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         }
     }
 
+    public IReadOnlyList<NothingShell.Core.Design.NotchOutfit> Wardrobe
+    {
+        get => _settings.Wardrobe ?? [];
+        set => Update(_settings with { Wardrobe = value });
+    }
+
     public bool NotchEnabled
     {
         get => _settings.Notch;

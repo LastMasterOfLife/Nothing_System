@@ -54,6 +54,7 @@ public readonly record struct Argb(byte A, byte R, byte G, byte B)
 public sealed record Palette
 {
     private const double AccentMinContrast = 4.5;
+    private const double InkMinContrast = 7;
     private static readonly Argb White = Argb.FromRgb(0xFFFFFF);
     private static readonly Argb Black = Argb.FromRgb(0x000000);
 
@@ -105,16 +106,20 @@ public sealed record Palette
     /// <summary>Velo in alto sulle superfici di vetro; senza vetro è uguale a <see cref="Base"/>.</summary>
     public Argb SheenTop { get; private init; }
 
-    public static Palette Create(bool dark, Argb accent, SurfaceTone tone = SurfaceTone.Neutral, double? glass = null)
+    /// <param name="surface">Con <see cref="SurfaceTone.Custom"/>, lo sfondo scelto; senza, quello neutro.</param>
+    public static Palette Create(bool dark, Argb accent, SurfaceTone tone = SurfaceTone.Neutral, double? glass = null, Argb? surface = null)
     {
         var neutral = Argb.FromRgb(dark ? 0x202020u : 0xF3F3F3u);
+        var ink = Argb.FromRgb(dark ? 0xFFFFFFu : 0x1B1B1Bu);
+        var muted = Argb.FromRgb(dark ? 0xC8C8C8u : 0x505050u);
         var solid = tone switch
         {
             SurfaceTone.Tinted => neutral.Mix(accent, dark ? 0.12 : 0.10),
             SurfaceTone.Deep => dark ? Black : White,
+            // un colore qualunque: si scurisce (tema scuro) o si schiarisce (tema chiaro) finché testo e testo secondario si leggono
+            SurfaceTone.Custom when surface is { } chosen => Readable(Readable(chosen.WithAlpha(1), ink, InkMinContrast), muted, AccentMinContrast),
             _ => neutral,
         };
-        var ink = Argb.FromRgb(dark ? 0xFFFFFFu : 0x1B1B1Bu);
         var outline = dark ? White.WithAlpha(0.10) : Black.WithAlpha(0.10);
         var strength = glass is { } g ? Math.Clamp(g, 0, 1) : 0;
         // Più trasparenza, meno velo: oltre questi limiti il testo non si legge più su uno sfondo qualunque.
@@ -131,7 +136,7 @@ public sealed record Palette
             SurfaceHover = dark ? White.WithAlpha(0.12) : Black.WithAlpha(0.09),
             Card = dark ? White.WithAlpha(0.055) : White.WithAlpha(0.70),
             Ink = ink,
-            Muted = Argb.FromRgb(dark ? 0xC8C8C8u : 0x505050u),
+            Muted = muted,
             Accent = adjusted,
             OnAccent = adjusted.ContrastWith(White) >= adjusted.ContrastWith(Black) ? White : Black,
             Critical = Readable(Argb.FromRgb(dark ? 0xFF6B6Bu : 0xC42B1Cu), solid, AccentMinContrast),

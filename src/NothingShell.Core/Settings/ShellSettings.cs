@@ -25,7 +25,8 @@ public sealed record ShellSettings(
     MailReaderLayout? MailReader = null,
     string? AssistantModel = null,
     AppearanceSettings? Appearance = null,
-    bool PowerfulAssistant = false)
+    bool PowerfulAssistant = false,
+    IReadOnlyList<NotchOutfit>? Wardrobe = null)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
 

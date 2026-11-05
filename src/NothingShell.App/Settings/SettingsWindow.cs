@@ -35,6 +35,9 @@ public interface IShellSettingsActions
     /// <summary>Tema, colori e vetro (docs/02-design-system.md): si applicano subito a tutta la shell.</summary>
     AppearanceSettings Appearance { get; set; }
 
+    /// <summary>I vestiti del notch fatti a mano (docs/22-vestiti-notch.md); quelli di serie stanno in <see cref="OutfitCatalog"/>.</summary>
+    IReadOnlyList<NotchOutfit> Wardrobe { get; set; }
+
     string NotificationAccessText { get; }
 
     bool CanRequestNotificationAccess { get; }
@@ -258,7 +261,7 @@ public sealed partial class SettingsWindow : Window
     private static readonly (SettingsPage Page, string Title, string Subtitle)[] Pages =
     [
         (SettingsPage.General, "Generale", "Avvio e componenti della shell"),
-        (SettingsPage.Appearance, "Aspetto", "Tema, colori e vetro"),
+        (SettingsPage.Appearance, "Aspetto", "Tema, colori, vetro e vestiti del notch"),
         (SettingsPage.Notch, "Notch", "Pagine e attività dal vivo"),
         (SettingsPage.Phone, "Telefono", "Chiamate, notifiche e collegamento diretto"),
         (SettingsPage.Mail, "Posta", "Mail nel notch e casella collegata"),
@@ -325,7 +328,7 @@ public sealed partial class SettingsWindow : Window
         {
             if (e.Key == Key.Escape)
             {
-                if (_draft is not null || _llmDraft is not null || _shortcut is not null)
+                if (_draft is not null || _llmDraft is not null || _shortcut is not null || _outfitDraft is not null)
                 {
                     CloseForms();
                     Rebuild();
@@ -354,6 +357,7 @@ public sealed partial class SettingsWindow : Window
         Closed += (_, _) =>
         {
             Theme.Changed -= OnThemeChanged;
+            CloseOutfitEditor(); // il vestito in prova sul notch torna quello indossato
             _shell.BrainChanged -= OnBrainChanged;
             _shell.Phone.Changed -= OnPhoneChanged;
             _shell.MailAccountChanged -= OnMailAccountChanged;
@@ -437,6 +441,8 @@ public sealed partial class SettingsWindow : Window
         _llmDraft = null;
         _shortcut = null;
         _builtIn = null;
+        _openPicker = null;
+        CloseOutfitEditor();
     }
 
     /// <summary>Ridisegna il menù e la pagina aperta (dopo una ricarica dei plugin cambiano i widget e gli errori).</summary>

@@ -69,6 +69,11 @@ public partial class App : Application
                 RenderMascotSheet(folder);
                 Shutdown();
                 return;
+            case ["--outfit-sheet", var folder]:
+                Rendering.Motion.Suspended = true;
+                RenderOutfitSheet(folder);
+                Shutdown();
+                return;
             case ["--glass-check", var folder, .. var mode]:
                 await GlassCheck(folder, mode.Contains("solido"));
                 Shutdown();
@@ -994,6 +999,9 @@ public partial class App : Application
         public IPhoneActions Phone { get; } = new SnapshotPhone();
 
         public AppearanceSettings Appearance { get; set; } = AppearanceSettings.Default;
+
+        public IReadOnlyList<NotchOutfit> Wardrobe { get; set; } =
+            [OutfitCatalog.Copy(OutfitCatalog.BuiltIn[3]) with { Name = "Il mio mare", Pattern = OutfitPattern.Stars, Rim = "#BDF4FF" }];
 
         public bool NotchEnabled { get; set; } = true;
 
@@ -1983,6 +1991,70 @@ public partial class App : Application
         var notch = new NotchWindow(media, DevPageActions.None, ConnectedPageActions.None);
         notch.SayForSnapshot("MENTRE ERI VIA: 2 MAIL, 1 AGENTE HA FINITO");
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Alert, NotchPage.Home), Path.Combine(folder, "mascotte-parla.png"));
+    }
+
+    /// <summary>
+    /// Vestiti del notch (docs/22-vestiti-notch.md): ogni vestito di serie a riposo e aperto, in scuro e in chiaro, sospeso e unito
+    /// al bordo; poi la pagina Aspetto col guardaroba e il selettore colore aperto, e l'editor.
+    /// </summary>
+    private static void RenderOutfitSheet(string folder)
+    {
+        Directory.CreateDirectory(folder);
+        using var media = new MediaService(); // non avviato
+        foreach (var (theme, style) in new[] { ("scuro", NotchStyle.Floating), ("chiaro", NotchStyle.Floating), ("scuro", NotchStyle.Attached) })
+        {
+            var baseLook = new AppearanceSettings { Theme = theme == "scuro" ? AppTheme.Dark : AppTheme.Light, Glass = false, NotchStyle = style };
+            Rendering.Theme.Apply(baseLook);
+            var notch = new NotchWindow(media, DevPageActions.None, ConnectedPageActions.None);
+            notch.SetTime(new DateTime(2026, 11, 5, 12, 34, 0));
+            var sheet = new System.Windows.Controls.Grid { Background = new SolidColorBrush(Rendering.Theme.ToColor(Rendering.Theme.Current.BaseSolid.Mix(Argb.FromRgb(0x808080), 0.25))) };
+            var outfits = new NotchOutfit?[] { null }.Concat(OutfitCatalog.BuiltIn).ToArray();
+            sheet.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = new GridLength(130) });
+            sheet.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition());
+            sheet.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition());
+            for (var i = 0; i < outfits.Length; i++)
+            {
+                sheet.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });
+                var name = new System.Windows.Controls.TextBlock { Text = outfits[i]?.Name ?? "Nessuno", Foreground = Rendering.Theme.InkBrush, Margin = new Thickness(12), VerticalAlignment = VerticalAlignment.Center };
+                System.Windows.Controls.Grid.SetRow(name, i);
+                sheet.Children.Add(name);
+                Rendering.Theme.Apply(baseLook with { NotchOutfit = outfits[i] });
+                foreach (var (state, column) in new[] { (NotchState.Idle, 1), (NotchState.Expanded, 2) })
+                {
+                    var pill = notch.PrepareSnapshot(state, NotchPage.Home);
+                    var size = new Size(pill.Width, pill.Height);
+                    pill.Measure(size);
+                    pill.Arrange(new Rect(size));
+                    pill.UpdateLayout();
+                    var bitmap = new RenderTargetBitmap((int)size.Width * 2, (int)size.Height * 2, 192, 192, PixelFormats.Pbgra32);
+                    bitmap.Render(pill);
+                    var image = new System.Windows.Controls.Image { Source = bitmap, Width = size.Width, Height = size.Height, Margin = new Thickness(12), VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Left };
+                    System.Windows.Controls.Grid.SetRow(image, i);
+                    System.Windows.Controls.Grid.SetColumn(image, column);
+                    sheet.Children.Add(image);
+                }
+            }
+            sheet.Width = 1200;
+            sheet.Measure(new Size(1200, double.PositiveInfinity));
+            sheet.Height = sheet.DesiredSize.Height;
+            SaveSnapshot(sheet, Path.Combine(folder, $"vestiti-{theme}-{(style == NotchStyle.Attached ? "unito" : "sospeso")}.png"), scale: 1);
+            notch.Close();
+        }
+
+        Rendering.Theme.Apply(new AppearanceSettings { Theme = AppTheme.Dark, Glass = false, Accent = "#3A9D8F", NotchOutfit = OutfitCatalog.BuiltIn[1] });
+        var actions = new SnapshotSettings([]) { Appearance = Rendering.Theme.Settings };
+        var settings = new SettingsWindow(actions);
+        var root = (FrameworkElement)settings.Content;
+        root.Width = settings.Width;
+        root.Height = 3000;
+        settings.Show(SettingsPage.Appearance);
+        settings.OpenPickerForSnapshot("accent");
+        SaveSnapshot(root, Path.Combine(folder, "aspetto-guardaroba.png"), scale: 1);
+        settings.EditOutfit(actions.Wardrobe[0], isNew: false);
+        settings.OpenPickerForSnapshot("outfit-fill");
+        root.Height = 1900;
+        SaveSnapshot(root, Path.Combine(folder, "aspetto-editor.png"), scale: 1);
+        settings.Close();
     }
 
     /// <summary>L'aspetto delle immagini: <c>chiaro</c>, <c>scuro</c>, <c>punti</c>, <c>#RRGGBB</c>; RenderTargetBitmap non vede il vetro, quindi senza.</summary>

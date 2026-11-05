@@ -57,6 +57,12 @@ public sealed class NotchWindow : Window
     // Unito al bordo (docs/20-stile-nusa.md): la pillola non ha fondo suo, lo disegna _body con le orecchie.
     private readonly Path _body = new() { Fill = Theme.PanelBrush, Stroke = Theme.RimBrush, StrokeThickness = 1, Visibility = Visibility.Collapsed };
     private readonly Grid _layers = new();
+
+    // Il vestito (docs/22-vestiti-notch.md): fondo e motivo stesi sopra il fondo del notch, con la sua stessa forma.
+    private readonly Path _dress = new() { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+    private readonly Path _dressPattern = new() { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+    private NotchOutfit? _outfit;
+    private (NotchOutfit? Outfit, Palette Palette)? _dressed;
     private readonly BlurEffect _shadowBlur = new() { RenderingBias = RenderingBias.Performance };
     private readonly Path _shadow = new() { Fill = Brushes.Black, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
     private readonly Grid _shadowHost = new() { IsHitTestVisible = false }; // il ritaglio sta qui: su _shadow verrebbe prima della sfocatura
@@ -214,6 +220,7 @@ public sealed class NotchWindow : Window
         Theme.Changed += (_, _) => OnAppearanceChanged();
         ApplyQuiet();
         ApplyStyle();
+        ApplyOutfit();
         UpdateMascot();
         ApplyPillSize();
         ShowPage(NotchPage.Home, animate: false);
@@ -682,6 +689,8 @@ public sealed class NotchWindow : Window
         content.Children.Add(_card);
         var surface = new Grid();
         surface.Children.Add(_body);
+        surface.Children.Add(_dress);
+        surface.Children.Add(_dressPattern);
         surface.Children.Add(content);
         _pill.Child = surface;
         _pill.HorizontalAlignment = HorizontalAlignment.Center;
@@ -829,12 +838,14 @@ public sealed class NotchWindow : Window
         _monitorName = look.NotchMonitor;
         _feel = look.NotchFeel;
         _followTimer.IsEnabled = _screen == NotchScreen.Mouse;
+        _outfit = look.NotchOutfit;
         _applied = AppearanceSettings.Default.WithNotchOf(look);
     }
 
     /// <summary>Scelte del notch cambiate dalla pagina Aspetto: forma, ombra, mascotte, attese e schermo si aggiornano subito.</summary>
     private void OnAppearanceChanged()
     {
+        ApplyOutfit(); // anche col solo tema cambiato: i colori del vestito seguono il testo
         if (AppearanceSettings.Default.WithNotchOf(Theme.Settings) == _applied)
             return;
         ReadAppearance();
@@ -865,6 +876,33 @@ public sealed class NotchWindow : Window
         }
         _pill.Clip = null;
         _layers.Margin = default;
+    }
+
+    /// <summary>
+    /// Il vestito scelto nella pagina Aspetto: fondo, motivo e bordo, con i colori regolati sul testo del tema. Si rifanno i
+    /// pennelli solo se cambia il vestito o il colore del testo.
+    /// </summary>
+    private void ApplyOutfit()
+    {
+        _outfit = Theme.Settings.NotchOutfit;
+        var palette = Theme.Current;
+        if (_dressed is { } dressed && dressed.Outfit == _outfit && dressed.Palette == palette)
+            return;
+        _dressed = (_outfit, palette);
+        if (_outfit is not { } outfit)
+        {
+            _dress.Visibility = _dressPattern.Visibility = Visibility.Collapsed;
+            _body.Stroke = _pill.BorderBrush = Theme.RimBrush;
+            return;
+        }
+        _dress.Fill = OutfitPaint.Fill(outfit, palette);
+        _dress.Opacity = outfit.CoverageAmount;
+        _dress.Visibility = Visibility.Visible;
+        _dressPattern.Fill = OutfitPaint.Pattern(outfit, palette);
+        _dressPattern.Opacity = outfit.PatternStrength * outfit.CoverageAmount;
+        _dressPattern.Visibility = _dressPattern.Fill is null ? Visibility.Collapsed : Visibility.Visible;
+        _body.Stroke = _pill.BorderBrush = OutfitPaint.Rim(outfit) ?? Theme.RimBrush;
+        ApplyPillSize();
     }
 
     /// <summary>
@@ -1252,6 +1290,8 @@ public sealed class NotchWindow : Window
             var shape = NotchShape.Attached(size.Width, size.Height, ear, radius);
             _body.Data = shape;
             _pill.Clip = shape;
+            if (_outfit is not null)
+                _dress.Data = _dressPattern.Data = shape;
             _layers.Margin = new Thickness(ear, 0, ear, 0);
             // il vetro sale oltre il bordo dello schermo: i suoi angoli alti restano fuori, lassù la forma è squadrata
             _glass.SetShape(new Rect(left, top - radius, size.Width, size.Height + radius), radius);
@@ -1260,6 +1300,8 @@ public sealed class NotchWindow : Window
         {
             _pill.CornerRadius = new CornerRadius(radius);
             _glass.SetShape(new Rect(left, top, size.Width, size.Height), radius);
+            if (_outfit is not null) // dentro il bordo da 1 della pillola
+                _dress.Data = _dressPattern.Data = NotchShape.Floating(Math.Max(0, size.Width - 2), Math.Max(0, size.Height - 2), Math.Max(0, radius - 1));
         }
         ApplyShadow(size, left, top, radius, ear);
     }

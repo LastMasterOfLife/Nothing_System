@@ -14,9 +14,17 @@ namespace NothingShell.App.Settings;
 public sealed partial class SettingsWindow
 {
     private const double SwatchSize = 30;
+    private const string AccentKey = "accent";
+    private const string SurfaceKey = "surface";
 
     /// <summary>Durante il trascinamento del cursore la pagina non si rifà, altrimenti il cursore sparirebbe sotto il mouse.</summary>
     private bool _holdRebuild;
+
+    /// <summary>Il selettore colore aperto (uno alla volta): resta aperto anche quando la pagina si rifà.</summary>
+    private string? _openPicker;
+
+    /// <summary>La tinta del selettore aperto, che un grigio da solo non ricorderebbe.</summary>
+    private double? _pickerHue;
 
     private void OnThemeChanged(object? sender, EventArgs e)
     {
@@ -28,6 +36,16 @@ public sealed partial class SettingsWindow
 
     private void AppearancePage()
     {
+        if (_outfitDraft is not null)
+        {
+            OutfitEditor();
+            return;
+        }
+        if (_wardrobeOffset is { } offset) // tornando dall'editor dei vestiti si riparte dal guardaroba
+        {
+            _wardrobeOffset = null;
+            Dispatcher.BeginInvoke(() => _scroll.ScrollToVerticalOffset(offset), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
         var look = _shell.Appearance;
 
         Section("Stile rapido");
@@ -43,9 +61,18 @@ public sealed partial class SettingsWindow
 
         Section("Colori");
         AccentRow(look);
-        ChoiceRow("Sfondo", "Colorato prende una punta dell'accento; Profondo è nero o bianco puro",
-            [("Neutro", SurfaceTone.Neutral), ("Colorato", SurfaceTone.Tinted), ("Profondo", SurfaceTone.Deep)],
-            look.Tone, v => SetAppearance(a => a with { Tone = v }));
+        ChoiceRow("Sfondo", "Colorato prende una punta dell'accento; Profondo è nero o bianco puro; Su misura lo scegli tu",
+            [("Neutro", SurfaceTone.Neutral), ("Colorato", SurfaceTone.Tinted), ("Profondo", SurfaceTone.Deep), ("Su misura", SurfaceTone.Custom)],
+            look.Tone, v => SetAppearance(a => a with
+            {
+                Tone = v,
+                Surface = v == SurfaceTone.Custom ? a.Surface ?? Theme.Current.BaseSolid.ToHex() : a.Surface,
+            }));
+        if (look.Tone == SurfaceTone.Custom)
+            ColorRow(SurfaceKey, "Colore dello sfondo", "Di notch, widget, barra e pannelli. Si scurisce o si schiarisce da solo quanto basta perché il testo si legga",
+                Argb.TryParse(look.Surface) ?? Theme.Current.BaseSolid,
+                c => Theme.Apply(_shell.Appearance with { Tone = SurfaceTone.Custom, Surface = c.ToHex() }),
+                c => SetAppearance(a => a with { Tone = SurfaceTone.Custom, Surface = c.ToHex() }));
 
         Section("Materiale");
         var transparency = Theme.SystemTransparency;
@@ -90,6 +117,9 @@ public sealed partial class SettingsWindow
             [("Subito", 0), ("0,3 s", 300), ("0,7 s", 700), ("1,5 s", 1500)],
             look.NotchCloseDelayMs, v => SetAppearance(a => a with { NotchCloseDelayMs = v }));
         NotchScreenRows(look);
+
+        Section("Vestiti del notch");
+        WardrobeRows(look);
 
         Section("Movimento");
         ChoiceRow("Molla del notch", "Morbida si apre piano senza rimbalzo, Nusa rimbalza appena, Scattante è svelta e vivace",
@@ -154,12 +184,15 @@ public sealed partial class SettingsWindow
         AddRow(row);
     }
 
-    /// <summary>Colore d'accento: quello di Windows, i colori proposti o uno scritto a mano.</summary>
+    /// <summary>Colore d'accento: quello di Windows, i colori proposti o uno su misura col selettore.</summary>
     private void AccentRow(AppearanceSettings look)
     {
         var block = new StackPanel { Margin = new Thickness(0, 8, 0, 8) };
         block.Children.Add(Label("Colore d'accento", 14, Theme.InkBrush));
-        var hint = Label(look.Accent is null ? "Segue il colore d'accento di Windows" : $"Scelto: {look.Accent}", 12, Theme.MutedBrush);
+        var proposed = AppearanceChoices.Accents.FirstOrDefault(a => string.Equals(a.Hex, look.Accent, StringComparison.OrdinalIgnoreCase)).Name;
+        var hint = Label(look.Accent is null ? "Segue il colore d'accento di Windows"
+            : proposed is not null ? proposed
+            : $"Su misura: {look.Accent}", 12, Theme.MutedBrush);
         hint.Margin = new Thickness(0, 3, 0, 10);
         block.Children.Add(hint);
 
@@ -167,8 +200,12 @@ public sealed partial class SettingsWindow
         swatches.Children.Add(Swatch(null, "Colore di Windows", look.Accent is null));
         foreach (var (name, hex) in AppearanceChoices.Accents)
             swatches.Children.Add(Swatch(hex, name, string.Equals(look.Accent, hex, StringComparison.OrdinalIgnoreCase)));
+        swatches.Children.Add(CustomSwatch(look.Accent is not null && proposed is null ? Argb.TryParse(look.Accent) : null));
         block.Children.Add(swatches);
-        block.Children.Add(CustomAccent(look));
+        if (_openPicker == AccentKey)
+            block.Children.Add(Picker(Argb.TryParse(look.Accent) ?? Theme.Current.Accent,
+                c => Theme.Apply(_shell.Appearance with { Accent = c.ToHex() }),
+                c => SetAppearance(a => a with { Accent = c.ToHex() })));
         AddRow(block);
     }
 
@@ -180,113 +217,174 @@ public sealed partial class SettingsWindow
         var fill = new Grid();
         fill.Children.Add(new Ellipse { Fill = new SolidColorBrush(color) });
         if (hex is null)
-            fill.Children.Add(new TextBlock
-            {
-                Text = "\uE713",
-                FontFamily = Theme.IconFont,
-                FontSize = 13,
-                Foreground = Theme.OnAccentBrush,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-            });
+            fill.Children.Add(Glyph("", Theme.OnAccentBrush));
         else if (selected)
-            fill.Children.Add(new TextBlock
-            {
-                Text = "\uE73E",
-                FontFamily = Theme.IconFont,
-                FontSize = 13,
-                Foreground = Argb.TryParse(hex) is { } c && c.ContrastWith(Argb.FromRgb(0xFFFFFF)) >= 3 ? Brushes.White : Brushes.Black,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-            });
-        var swatch = new Border
-        {
-            Width = SwatchSize + 6,
-            Height = SwatchSize + 6,
-            Margin = new Thickness(0, 0, 6, 6),
-            Padding = new Thickness(2),
-            BorderThickness = new Thickness(1.5),
-            BorderBrush = selected ? Theme.InkBrush : Brushes.Transparent,
-            CornerRadius = new CornerRadius((SwatchSize + 6) / 2),
-            Background = Brushes.Transparent,
-            Cursor = Cursors.Hand,
-            ToolTip = name,
-            Child = fill,
-        };
+            fill.Children.Add(Glyph("", CheckBrush(Argb.TryParse(hex))));
+        var swatch = SwatchFrame(fill, name, selected);
         swatch.MouseLeftButtonUp += (_, e) =>
         {
             e.Handled = true;
+            _openPicker = null;
             SetAppearance(a => a with { Accent = hex });
         };
         return swatch;
     }
 
-    /// <summary>Colore scritto a mano: si applica con Invio o col pulsante, così la pagina non si rifà mentre si digita.</summary>
-    private StackPanel CustomAccent(AppearanceSettings look)
+    /// <summary>L'ultimo pallino, con l'arcobaleno: apre e chiude il selettore. Con un accento su misura ne prende il colore.</summary>
+    private Border CustomSwatch(Argb? custom)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
-        var box = new TextBox
+        var fill = new Grid();
+        var rainbow = new GradientStopCollection();
+        for (var i = 0; i <= 6; i++)
+            rainbow.Add(new GradientStop(Theme.ToColor(new Hsv(i * 60, 0.85, 0.95).ToArgb()), i / 6.0));
+        fill.Children.Add(new Ellipse { Fill = new LinearGradientBrush(rainbow, 45) });
+        if (custom is { } color)
         {
-            Text = look.Accent ?? string.Empty,
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0),
-            Foreground = Theme.InkBrush,
-            FontFamily = Theme.BodyFont,
-            FontSize = 13,
-            Width = 96,
-            MaxLength = 7,
-            VerticalContentAlignment = VerticalAlignment.Center,
-        };
-        var frame = new Border
-        {
-            Background = Theme.SurfaceBrush,
-            BorderBrush = Theme.OutlineBrush,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(Theme.RadiusSmall),
-            Padding = new Thickness(10, 5, 10, 5),
-            Margin = new Thickness(0, 0, 8, 0),
-            Child = box,
-        };
-        box.GotKeyboardFocus += (_, _) => frame.BorderBrush = Theme.AccentBrush;
-        box.LostKeyboardFocus += (_, _) => frame.BorderBrush = Theme.OutlineBrush;
-        var problem = Label(string.Empty, 12, Theme.CriticalBrush);
-        problem.VerticalAlignment = VerticalAlignment.Center;
-        problem.Margin = new Thickness(8, 0, 0, 0);
-
-        void Commit()
-        {
-            if (Argb.TryParse(box.Text) is { } color)
-                SetAppearance(a => a with { Accent = color.ToHex() });
-            else
-                problem.Text = "Scrivi un colore come #3A7BD5";
+            fill.Children.Add(new Ellipse { Fill = new SolidColorBrush(Theme.ToColor(color)), Margin = new Thickness(5) });
+            fill.Children.Add(Glyph("", CheckBrush(color), 10));
         }
-        box.KeyDown += (_, e) =>
+        else
         {
-            if (e.Key == Key.Enter)
-            {
-                e.Handled = true;
-                Commit();
-            }
-        };
-        var apply = Button("Usa questo colore", primary: false);
-        apply.MouseLeftButtonUp += (_, e) =>
+            fill.Children.Add(Glyph("", Brushes.White, 12));
+        }
+        var swatch = SwatchFrame(fill, "Scegli un colore", custom is not null || _openPicker == AccentKey);
+        swatch.MouseLeftButtonUp += (_, e) =>
         {
             e.Handled = true;
-            Commit();
+            TogglePicker(AccentKey);
         };
-        row.Children.Add(frame);
-        row.Children.Add(apply);
-        row.Children.Add(problem);
-        return row;
+        return swatch;
     }
 
+    private static Border SwatchFrame(Grid fill, string name, bool selected) => new()
+    {
+        Width = SwatchSize + 6,
+        Height = SwatchSize + 6,
+        Margin = new Thickness(0, 0, 6, 6),
+        Padding = new Thickness(2),
+        BorderThickness = new Thickness(1.5),
+        BorderBrush = selected ? Theme.InkBrush : Brushes.Transparent,
+        CornerRadius = new CornerRadius((SwatchSize + 6) / 2),
+        Background = Brushes.Transparent,
+        Cursor = Cursors.Hand,
+        ToolTip = name,
+        Child = fill,
+    };
+
+    private static TextBlock Glyph(string glyph, Brush brush, double size = 13) => new()
+    {
+        Text = glyph,
+        FontFamily = Theme.IconFont,
+        FontSize = size,
+        Foreground = brush,
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center,
+    };
+
+    /// <summary>Spunta bianca sui colori scuri, nera su quelli chiari.</summary>
+    private static SolidColorBrush CheckBrush(Argb? color) =>
+        color is { } c && c.ContrastWith(Argb.FromRgb(0xFFFFFF)) >= 3 ? Brushes.White : Brushes.Black;
+
+    /// <summary>Apre il selettore <paramref name="key"/>, o lo chiude se era già aperto; ne si apre uno alla volta.</summary>
+    private void TogglePicker(string key)
+    {
+        _openPicker = _openPicker == key ? null : key;
+        _pickerHue = null;
+        Rebuild();
+    }
+
+    /// <summary>
+    /// Il selettore alla Figma: mentre si trascina <paramref name="live"/> mostra il colore senza salvarlo né rifare la pagina,
+    /// al rilascio <paramref name="commit"/> lo salva. La tinta resta anche scegliendo un grigio, che di tinta non ne ha.
+    /// </summary>
+    private ColorPicker Picker(Argb color, Action<Argb> live, Action<Argb> commit)
+    {
+        var picker = new ColorPicker(color, _pickerHue);
+        picker.DragStarted += () => _holdRebuild = true;
+        picker.Changed += c =>
+        {
+            _pickerHue = picker.Hue;
+            live(c);
+        };
+        picker.Committed += c =>
+        {
+            _holdRebuild = false;
+            _pickerHue = picker.Hue;
+            commit(c);
+        };
+        return picker;
+    }
+
+    /// <summary>Riga di un colore: a destra il colore scelto, che apre sotto il selettore.</summary>
+    private void ColorRow(string key, string title, string description, Argb color, Action<Argb> live, Action<Argb> commit)
+    {
+        var block = new StackPanel { Margin = new Thickness(0, 8, 0, 8) };
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition());
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 16, 0) };
+        text.Children.Add(Label(title, 14, Theme.InkBrush));
+        var hint = Label(description, 12, Theme.MutedBrush);
+        hint.Margin = new Thickness(0, 3, 0, 0);
+        hint.TextWrapping = TextWrapping.Wrap;
+        text.Children.Add(hint);
+        row.Children.Add(text);
+
+        var open = _openPicker == key;
+        var content = new StackPanel { Orientation = Orientation.Horizontal };
+        content.Children.Add(new Border
+        {
+            Width = 18,
+            Height = 18,
+            CornerRadius = new CornerRadius(Theme.RadiusSmall),
+            Background = new SolidColorBrush(Theme.ToColor(color)),
+            BorderBrush = Theme.OutlineBrush,
+            BorderThickness = new Thickness(1),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var hex = Label(string.Empty, 13, Theme.InkBrush);
+        hex.Text = color.ToHex(); // tutto maiuscolo: Label lo addolcirebbe come un'etichetta che urla
+        hex.FontFamily = new FontFamily("Cascadia Mono, Consolas");
+        hex.Margin = new Thickness(8, 0, 8, 0);
+        hex.VerticalAlignment = VerticalAlignment.Center;
+        content.Children.Add(hex);
+        content.Children.Add(Glyph(open ? "" : "", Theme.MutedBrush, 10));
+        var button = new Border
+        {
+            Background = open ? Theme.SurfaceHoverBrush : Theme.SurfaceBrush,
+            BorderBrush = open ? Theme.AccentBrush : Theme.OutlineBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(Theme.RadiusSmall),
+            Padding = new Thickness(8, 5, 10, 5),
+            VerticalAlignment = VerticalAlignment.Center,
+            Cursor = Cursors.Hand,
+            ToolTip = open ? "Chiudi il selettore" : "Scegli il colore",
+            Child = content,
+        };
+        button.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            TogglePicker(key);
+        };
+        Grid.SetColumn(button, 1);
+        row.Children.Add(button);
+        block.Children.Add(row);
+        if (open)
+            block.Children.Add(Picker(color, live, commit));
+        AddRow(block);
+    }
     /// <summary>Quanto si vede attraverso il vetro: si applica mentre si trascina.</summary>
     private void GlassStrengthRow(AppearanceSettings look) =>
         SliderRow("Trasparenza", "Più velato si legge meglio, più limpido si vede di più",
             look.GlassStrength, v => _shell.Appearance with { GlassStrength = v });
 
     /// <summary>Cursore da 0 a 1 con <paramref name="change"/> che dice l'aspetto risultante: si vede mentre si trascina.</summary>
-    private void SliderRow(string title, string description, double value, Func<double, AppearanceSettings> change)
+    private void SliderRow(string title, string description, double value, Func<double, AppearanceSettings> change) =>
+        // Mentre si trascina si vede subito ma non si scrive su disco: si salva al rilascio.
+        SliderRow(title, description, value, v => Theme.Apply(change(v)), v => _shell.Appearance = change(v));
+
+    /// <summary>Cursore da 0 a 1: <paramref name="live"/> mentre si trascina, senza rifare la pagina; <paramref name="commit"/> al rilascio.</summary>
+    private void SliderRow(string title, string description, double value, Action<double> live, Action<double> commit)
     {
         var row = new Grid { Margin = new Thickness(0, 8, 0, 8) };
         row.ColumnDefinitions.Add(new ColumnDefinition());
@@ -301,12 +399,11 @@ public sealed partial class SettingsWindow
 
         var slider = new AccentSlider(value);
         slider.DragStarted += () => _holdRebuild = true;
-        // Mentre si trascina si vede subito ma non si scrive su disco: si salva al rilascio.
-        slider.ValueChanged += v => Theme.Apply(change(v));
+        slider.ValueChanged += live;
         slider.DragCompleted += v =>
         {
             _holdRebuild = false;
-            _shell.Appearance = change(v);
+            commit(v);
         };
         Grid.SetColumn(slider, 1);
         row.Children.Add(slider);

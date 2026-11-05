@@ -19,6 +19,9 @@ public enum SurfaceTone
 
     /// <summary>Nero o bianco puri.</summary>
     Deep,
+
+    /// <summary>Un colore scelto col selettore (<see cref="AppearanceSettings.Surface"/>), regolato perché il testo si legga.</summary>
+    Custom,
 }
 
 /// <summary>Come si disegnano testo, icone e barre di notch, widget e barra.</summary>
@@ -106,6 +109,12 @@ public sealed record AppearanceSettings
 
     public SurfaceTone Tone { get; init; } = SurfaceTone.Neutral;
 
+    /// <summary>Colore dello sfondo come <c>#RRGGBB</c>, con <see cref="SurfaceTone.Custom"/>.</summary>
+    public string? Surface { get; init; }
+
+    /// <summary>Il vestito che il notch indossa (docs/22-vestiti-notch.md); null, nessuno.</summary>
+    public NotchOutfit? NotchOutfit { get; init; }
+
     /// <summary>Stile Liquid Glass: superfici traslucide che sfocano ciò che sta dietro.</summary>
     public bool Glass { get; init; } = true;
 
@@ -176,6 +185,7 @@ public sealed record AppearanceSettings
             NotchMonitor = from.NotchMonitor,
             NotchFeel = from.NotchFeel,
             AnimationSpeed = from.AnimationSpeed,
+            NotchOutfit = from.NotchOutfit,
         };
     }
 
@@ -194,7 +204,8 @@ public sealed record AppearanceSettings
             AppTheme.Dark => true,
             _ => systemDark,
         };
-        return Palette.Create(dark, ResolveAccent(systemAccent), Tone, Glass && systemTransparency ? GlassStrength : null);
+        return Palette.Create(dark, ResolveAccent(systemAccent), Tone, Glass && systemTransparency ? GlassStrength : null,
+            Tone == SurfaceTone.Custom ? Argb.TryParse(Surface) : null);
     }
 }
 

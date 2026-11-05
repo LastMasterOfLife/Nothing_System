@@ -11,8 +11,8 @@ le finestre, senza riavvio; con Sistema e con l'accento di Windows la shell segu
 |------|--------|----------|
 | Stile rapido | Windows 11 · Windows solido · Nothing | Windows 11 |
 | Modalità | Sistema · Chiaro · Scuro | Sistema |
-| Colore d'accento | quello di Windows, 10 proposti, oppure `#RRGGBB` | Windows |
-| Sfondo | Neutro · Colorato (punta d'accento) · Profondo (nero/bianco puro) | Neutro |
+| Colore d'accento | quello di Windows, 10 proposti, oppure uno su misura col selettore (docs/22-vestiti-notch.md) | Windows |
+| Sfondo | Neutro · Colorato (punta d'accento) · Profondo (nero/bianco puro) · Su misura (col selettore, regolato perché il testo si legga) | Neutro |
 | Liquid Glass | acceso/spento, con la trasparenza da velato a limpido | acceso, a metà |
 | Testo e icone | Windows (Segoe e Fluent) · Punti | Windows |
 | Notch discreto | a riposo solo una lineetta contro il bordo alto | spento |
@@ -25,6 +25,7 @@ le finestre, senza riavvio; con Sistema e con l'accento di Windows la shell segu
 | Notch › Apertura | col mouse sopra, attesa prima di aprire: subito, 0,15, 0,3 o 0,6 s | 0,3 s (290 ms, come Nusa) |
 | Notch › Chiusura | uscito il mouse, quanto resta aperto: subito, 0,3, 0,7 o 1,5 s | subito |
 | Notch › Schermo | principale, dove sta il mouse (ci passa a notch chiuso, e ci porta avvisi e schede), o uno scelto | principale |
+| Vestiti del notch | Nessuno, 9 di serie (Natale, Halloween, Notte stellata…) o fatti da te: colore, sfumatura, motivo, copertura, bordo (docs/22-vestiti-notch.md) | Nessuno |
 | Movimento › Molla del notch | Morbida (senza rimbalzo), Nusa, Scattante (svelta, rimbalzo vivace) | Nusa |
 | Movimento › Velocità | tutte le animazioni della shell, da 0,5× a 1,5× | 1× |
 
