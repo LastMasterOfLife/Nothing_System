@@ -272,6 +272,16 @@ public interface IShellSettingsActions
     Task UnpairDebugPortalAsync(string id);
 
     void OpenDebugDashboard(string id);
+
+    /// <summary>Svago (docs/25-svago.md): il gioco nel notch, acceso o spento, e il record.</summary>
+    NothingShell.Core.Leisure.LeisureSettings Leisure { get; }
+
+    void SetLeisureEnabled(bool enabled);
+
+    void ResetLeisureRecord();
+
+    /// <summary>Apre il notch sulla pagina Svago.</summary>
+    void OpenLeisure();
 }
 
 /// <summary>Pagine del menù laterale, nell'ordine in cui compaiono.</summary>
@@ -292,6 +302,7 @@ public enum SettingsPage
     Access,
     Widgets,
     Plugins,
+    Leisure,
     Info,
 }
 
@@ -323,6 +334,7 @@ public sealed partial class SettingsWindow : Window
         (SettingsPage.Access, "Accesso", "Blocco e sblocco"),
         (SettingsPage.Widgets, "Widget", "Widget sul desktop"),
         (SettingsPage.Plugins, "Plugin", "Widget aggiuntivi"),
+        (SettingsPage.Leisure, "Svago", "Un gioco nel notch per le pause"),
         (SettingsPage.Info, "Info", "Versione e dati"),
     ];
 
@@ -571,6 +583,9 @@ public sealed partial class SettingsWindow : Window
             case SettingsPage.Plugins:
                 PluginsPage();
                 break;
+            case SettingsPage.Leisure:
+                LeisurePage();
+                break;
             case SettingsPage.Info:
                 InfoPage();
                 break;
@@ -633,6 +648,7 @@ public sealed partial class SettingsWindow : Window
         NotchPage.Clipboard => ("Appunti", "Cronologia degli appunti", "Sviluppo"),
         NotchPage.Timer => ("Timer", "Conto alla rovescia", null),
         NotchPage.System => ("Sistema", "Processore, memoria, disco e app che usano microfono e webcam", null),
+        NotchPage.Leisure => ("Svago", "むちねこ, il gatto che corre sui tetti", "Svago"),
         _ => (page.ToString(), string.Empty, null),
     };
 

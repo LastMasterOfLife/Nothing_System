@@ -18,6 +18,7 @@ public enum NotchPage
     Clipboard,
     Timer,
     System,
+    Leisure,
 }
 
 public enum SwipeDirection

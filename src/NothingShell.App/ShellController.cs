@@ -138,6 +138,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         WireBrain();
         WireRemoteAccess();
         WireDebug();
+        WireLeisure();
         _network.Changed += _bars.SetNetwork;
         _bars.SetNetwork(_network.Current);
         _tracker.FullscreenChanged += monitor =>

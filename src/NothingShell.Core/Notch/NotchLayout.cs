@@ -29,6 +29,9 @@ public static class NotchLayout
     /// <summary>Altezza della Home con la musica, che ha i controlli sopra il campo.</summary>
     public const double HomeMediaHeight = 232;
 
+    /// <summary>Altezza della pagina Svago: lo schermo del gioco viene circa 2 : 1, come il telefono in orizzontale del concept.</summary>
+    public const double LeisureHeight = 232;
+
     /// <summary>Altezza del notch espanso sulle pagine con un elenco che scorre (Posta, Telefono, Agenti, Dispositivi, DNS, Server).</summary>
     public const double TallHeight = 340;
 
@@ -43,6 +46,7 @@ public static class NotchLayout
     public static Size2 Expanded(NotchPage page, bool media = false) =>
         IsTall(page) ? new(For(NotchState.Expanded).Width, TallHeight)
         : page == NotchPage.Home ? new(For(NotchState.Expanded).Width, media ? HomeMediaHeight : HomeHeight)
+        : page == NotchPage.Leisure ? new(For(NotchState.Expanded).Width, LeisureHeight)
         : For(NotchState.Expanded);
 
     /// <summary>A riposo col notch discreto: una lineetta contro il bordo alto, dove il mouse la trova comunque.</summary>

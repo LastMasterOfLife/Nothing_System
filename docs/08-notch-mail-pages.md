@@ -36,6 +36,7 @@ Aggiornamento: evento `NotificationChanged` se disponibile, altrimenti controllo
 | Agenti (alta), Dispositivi (alta) | docs/14-agenti-connettori.md |
 | Timer | conto alla rovescia a punti; preset 5 · 15 · 25 min, stop; a fine timer avviso "TEMPO" rosso |
 | Sistema | CPU, RAM, batteria con barre a punti |
+| Svago (420 × 232) | むちねこ, il gioco del gatto sui tetti; solo se acceso in Impostazioni › Svago (docs/25-svago.md) |
 
 Le pagine con un elenco (Posta, Telefono, Agenti, Dispositivi) **allungano il notch in verticale** fino a 340: l'altezza
 anima con la stessa molla della pillola quando si arriva sulla pagina e quando se ne esce (Core `NotchLayout.Expanded`).

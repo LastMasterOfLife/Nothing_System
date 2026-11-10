@@ -71,7 +71,7 @@ public class NotchPagerTests
         Assert.False(pager.Apply(SwipeDirection.Previous)); // già alla prima
         Assert.True(pager.Apply(SwipeDirection.Next));
         Assert.Equal(NotchPage.Agenda, pager.Current);
-        pager.Show(NotchPage.System);
+        pager.Show(NotchPager.Pages[^1]);
         Assert.False(pager.Apply(SwipeDirection.Next)); // già all'ultima
         Assert.Equal(NotchPager.Pages.Length - 1, pager.Index);
     }
@@ -126,7 +126,7 @@ public class NotchPageOrderTests
         var up = NotchPageOrder.Move(null, NotchPage.Agenda, -1, movable);
         Assert.Equal(NotchPageOrder.Resolve(null), up); // la Home resta la prima
         Assert.Equal(NotchPageOrder.Resolve(null), NotchPageOrder.Move(null, NotchPage.Home, +1, movable));
-        Assert.Equal(NotchPageOrder.Resolve(null), NotchPageOrder.Move(null, NotchPage.System, +1, movable)); // già l'ultima
+        Assert.Equal(NotchPageOrder.Resolve(null), NotchPageOrder.Move(null, NotchPager.Pages[^1], +1, movable)); // già l'ultima
     }
 
     [Fact]

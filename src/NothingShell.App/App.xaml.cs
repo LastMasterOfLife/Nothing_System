@@ -79,6 +79,12 @@ public partial class App : Application
                 RenderMascotSheet(folder);
                 Shutdown();
                 return;
+            case ["--svago-sheet", var folder]:
+                Rendering.Motion.Suspended = true;
+                Rendering.Theme.Apply(SnapshotAppearance(["scuro"]));
+                RenderLeisureSheet(folder);
+                Shutdown();
+                return;
             case ["--outfit-sheet", var folder]:
                 Rendering.Motion.Suspended = true;
                 RenderOutfitSheet(folder);
@@ -1265,6 +1271,20 @@ public partial class App : Application
         public Task UnpairDebugPortalAsync(string id) => Task.CompletedTask;
 
         public void OpenDebugDashboard(string id)
+        {
+        }
+
+        public NothingShell.Core.Leisure.LeisureSettings Leisure { get; } = new(true, 42, 3);
+
+        public void SetLeisureEnabled(bool enabled)
+        {
+        }
+
+        public void ResetLeisureRecord()
+        {
+        }
+
+        public void OpenLeisure()
         {
         }
 

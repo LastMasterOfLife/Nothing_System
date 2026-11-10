@@ -151,6 +151,10 @@ public sealed class NotchWindow : Window
     private readonly DevicesPage _ftp;
     private readonly DiagnosiPage _diagnosi = new();
     private readonly HoursPage _hours = new();
+    private readonly LeisurePage _leisure = new();
+
+    // Svago (docs/25-svago.md): giocando il notch resta aperto e tiene la tastiera, come il campo della Home.
+    private bool _gameHold;
 
     private readonly DispatcherTimer _deadlineTimer = new();
     private readonly DispatcherTimer _equalizerTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
@@ -198,6 +202,9 @@ public sealed class NotchWindow : Window
         _hours.GroupClicked += name => HoursGroupClicked?.Invoke(name);
         _hours.InputClicked += () => BeginAsk(_hours.FocusInput);
         _hours.InputCancelled += () => CancelAsk(_hours.ClearInput);
+        _leisure.PlayRequested += HoldForGame;
+        _leisure.LeaveRequested += EndGameHold;
+        _leisure.Finished += (score, stage) => LeisureFinished?.Invoke(score, stage);
 
         var idle = NotchLayout.For(NotchState.Idle);
         _width = new Spring(idle.Width);
@@ -248,7 +255,15 @@ public sealed class NotchWindow : Window
             NativeMethods.MakeNonActivatingToolWindow(hwnd);
             HwndSource.FromHwnd(hwnd)?.AddHook(OnWindowMessage);
         };
-        Deactivated += (_, _) => ReleaseAsk();
+        Deactivated += (_, _) =>
+        {
+            if (_gameHold)
+            {
+                _gameHold = false; // un clic su un'altra finestra: il gatto si ferma e il notch si richiude come al solito
+                _leisure.Interrupt();
+            }
+            ReleaseAsk();
+        };
         IsVisibleChanged += (_, _) => UpdateMascot();
         Loaded += (_, _) => PlaceOnScreen();
         SystemParameters.StaticPropertyChanged += (_, e) =>
@@ -544,6 +559,14 @@ public sealed class NotchWindow : Window
     /// <summary>Clic sul nome di un gruppo nella pagina Ore: la shell apre il suo calendario.</summary>
     public event Action<string>? HoursGroupClicked;
 
+    /// <summary>Una partita di Svago è finita: punti e tappa, per il record.</summary>
+    public event Action<int, int>? LeisureFinished;
+
+    public void SetLeisureBest(int best, int stage) => _leisure.SetBest(best, stage);
+
+    /// <summary>La pagina Svago ferma su una partita preparata (per <c>--svago-sheet</c>).</summary>
+    public void ShowLeisureForSnapshot(NothingShell.Core.Leisure.RooftopRun run, bool newRecord) => _leisure.ShowForSnapshot(run, newRecord);
+
     /// <summary>La Home con una richiesta scritta nel campo (per <c>--snapshot</c>).</summary>
     public void SetAskForSnapshot(string text) => _home.SetAskText(text);
 
@@ -675,7 +698,7 @@ public sealed class NotchWindow : Window
         _card.HorizontalAlignment = HorizontalAlignment.Center;
         _card.Padding = new Thickness(NotchUi.Padding, 14, NotchUi.Padding, 14);
 
-        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _phone, _work, _agents, _servers, _debugPage, _devices, _database, _ftp, _diagnosi, _hours, _clipboard, _timerPage, _system }.OrderBy(p => p.Page))
+        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _phone, _work, _agents, _servers, _debugPage, _devices, _database, _ftp, _diagnosi, _hours, _clipboard, _timerPage, _system, _leisure }.OrderBy(p => p.Page))
         {
             _pages[page.Page] = page;
             page.Visibility = Visibility.Collapsed;
@@ -789,7 +812,9 @@ public sealed class NotchWindow : Window
 
     private void ApplySwipe(SwipeDirection direction)
     {
-        if (_machine.State != NotchState.Expanded || direction == SwipeDirection.None || _machine.Held)
+        // tenuto aperto per scrivere non si cambia pagina; per giocare sì, ma non mentre il gatto corre
+        var held = _machine.Held && !(_gameHold && !_leisure.IsRunning);
+        if (_machine.State != NotchState.Expanded || direction == SwipeDirection.None || held)
             return;
         if (_pager.Apply(direction))
             ShowPage(_pager.Current, animate: true, fromRight: direction == SwipeDirection.Next);
@@ -797,6 +822,8 @@ public sealed class NotchWindow : Window
 
     private void ShowPage(NotchPage page, bool animate, bool fromRight = true)
     {
+        if (page != NotchPage.Leisure)
+            EndGameHold();
         _pager.Show(page);
         page = _pager.Current; // una pagina spenta non si apre
         foreach (var (kind, view) in _pages)
@@ -999,6 +1026,35 @@ public sealed class NotchWindow : Window
         Activate();
         focus();
         _machine.Hold(true, _pill.IsMouseOver, _clock.Elapsed);
+    }
+
+    /// <summary>
+    /// La partita parte o riprende: come il clic sul campo della Home, il notch prende la tastiera (Spazio salta) e resta aperto
+    /// anche se il mouse va altrove. Ricominciando dopo una partita la tastiera c'è già.
+    /// </summary>
+    private void HoldForGame()
+    {
+        var own = new WindowInteropHelper(this).Handle;
+        var foreground = WindowNative.GetForegroundWindow();
+        if (foreground != own)
+        {
+            _beforeAsk = foreground;
+            WindowNative.BringToFront(own);
+            Activate();
+        }
+        _leisure.FocusGame();
+        _gameHold = true;
+        _machine.Hold(true, _pill.IsMouseOver, _clock.Elapsed);
+    }
+
+    /// <summary>Basta giocare (Esc, un'altra pagina): pausa, il notch si può richiudere e la tastiera torna dov'era.</summary>
+    private void EndGameHold()
+    {
+        if (!_gameHold)
+            return;
+        _gameHold = false;
+        _leisure.Interrupt();
+        CancelAsk(() => { });
     }
 
     private void ReleaseAsk()

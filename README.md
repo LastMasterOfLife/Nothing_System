@@ -60,6 +60,10 @@ lo si scrive in Impostazioni › Debug potenziato e si apre una dashboard con ri
 nell'editor), query lente, percorsi più lenti e controlli del portale. Il notch avvisa da solo di errori nuovi, 5xx,
 richieste lente e portale giù. Dettagli in [docs/24-debug-potenziato.md](docs/24-debug-potenziato.md).
 
+**Svago**: acceso in Impostazioni › Svago, il notch ha in fondo allo swipe la pagina di **むちねこ**, un gatto che corre da
+solo sui tetti: clic o Spazio per saltare (tenuto, più in alto), crocchette e scatolette fanno punti ma pesano, e più pesa
+meno salta. Bandiere a ogni tappa, record nelle impostazioni. Dettagli in [docs/25-svago.md](docs/25-svago.md).
+
 **Telefono Android** tramite Collegamento al telefono di Windows: chiamata in arrivo come scheda nel notch
 (*Rispondi* apre Collegamento al telefono), chiamate perse e notifiche del telefono come avvisi.
 Con il **collegamento diretto** (protocollo KDE Connect, app KDE Connect sul telefono, Impostazioni ›

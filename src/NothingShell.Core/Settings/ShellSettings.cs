@@ -29,12 +29,16 @@ public sealed record ShellSettings(
     IReadOnlyList<NotchOutfit>? Wardrobe = null,
     IReadOnlyList<NotchPage>? NotchPageOrder = null,
     IReadOnlyList<NotchPage>? HiddenNotchPages = null,
-    NothingShell.Core.PortalDebug.DebugSettings? Debug = null)
+    NothingShell.Core.PortalDebug.DebugSettings? Debug = null,
+    NothingShell.Core.Leisure.LeisureSettings? Leisure = null)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
 
     /// <summary>Debug potenziato (docs/24-debug-potenziato.md): portali collegati e regole degli avvisi.</summary>
     public NothingShell.Core.PortalDebug.DebugSettings DebugOrDefault() => Debug ?? NothingShell.Core.PortalDebug.DebugSettings.Default;
+
+    /// <summary>Svago (docs/25-svago.md): il gioco nel notch e il record.</summary>
+    public NothingShell.Core.Leisure.LeisureSettings LeisureOrDefault() => Leisure ?? NothingShell.Core.Leisure.LeisureSettings.Default;
 
     /// <summary>
     /// Permesso di eseguire comandi e azioni dato a un connettore (docs/14-agenti-connettori.md): vale solo per il
