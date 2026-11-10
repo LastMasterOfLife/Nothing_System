@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -50,6 +52,8 @@ public interface IMailReaderActions
 /// rispondi, webmail, segna come letta e il codice di verifica a punti. Si ridimensiona dai bordi, si ingrandisce
 /// col doppio clic sull'intestazione, il divisore sposta l'elenco; sotto i 700 DIP mostra un riquadro alla volta.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001",
+    Justification = "Una Window non è IDisposable: la vista HTML si rilascia in Closed.")]
 public sealed class MailReaderWindow : Window
 {
     private const double SegmentAll = 66;
@@ -78,7 +82,9 @@ public sealed class MailReaderWindow : Window
     private Border? _searchBox;
     private MailReaderLayout _layout;
     private MailItem? _selected;
-    private TextBox? _body;
+    private TextBoxBase? _body;
+    private MailHtmlView? _html;
+    private readonly HashSet<ImapMessageRef> _remoteAllowed = []; // "Mostra immagini": vale finché il lettore è aperto
     private bool _unreadOnly;
     private bool _compact;
     private bool _showList = true; // solo in modalità compatta: elenco o mail
@@ -134,6 +140,7 @@ public sealed class MailReaderWindow : Window
         {
             _mail.MailsChanged -= OnMailsChanged;
             _generation++;
+            _html?.Dispose();
         };
         ApplyCompact();
         RebuildList();
@@ -343,6 +350,7 @@ public sealed class MailReaderWindow : Window
     private void ShowEmptyDetail()
     {
         _body = null;
+        DetachHtml();
         var empty = EmptyState("POSTA", "Scegli una mail dall'elenco.");
         empty.VerticalAlignment = VerticalAlignment.Center;
         empty.Margin = new Thickness(0);
@@ -436,6 +444,13 @@ public sealed class MailReaderWindow : Window
             if (MailLinks.Reply(content.ReplyAddress, content.Subject) is { } reply)
                 AddButton(actions, "RISPONDI", () => OpenUri(reply), primary: true);
             AddWebmailButton(actions);
+            if (ShowsHtml(content) && !RemoteAllowed(mail) && MailHtml.HasRemoteContent(content.Html!))
+                AddButton(actions, "MOSTRA IMMAGINI", () =>
+                {
+                    if (mail.Imap is { } r)
+                        _remoteAllowed.Add(r);
+                    Render(mail, content, null, null, animate: false);
+                });
             if (mail.IsUnread)
                 AddButton(actions, "SEGNA COME LETTA", async () =>
                 {
@@ -476,7 +491,15 @@ public sealed class MailReaderWindow : Window
         Grid.SetRow(card, 4);
         grid.Children.Add(card);
         _body = null;
-        if (content is not null)
+        DetachHtml();
+        if (content is not null && ShowsHtml(content))
+        {
+            // la mail com'è, su carta bianca come la prepara il mittente
+            card.Background = Brushes.White;
+            card.Padding = new Thickness(4);
+            card.Child = HtmlBody(mail, content);
+        }
+        else if (content is not null)
             card.Child = Body(content.Body);
         else if (loading)
             card.Child = Loader("Apertura dal server");
@@ -530,14 +553,69 @@ public sealed class MailReaderWindow : Window
         return row;
     }
 
-    /// <summary>Il testo della mail: si seleziona e copia, scorre con la rotellina; Ctrl+rotellina lo ingrandisce.</summary>
+    private static bool ShowsHtml(MailContent content) =>
+        content.Html is { Length: > 0 and <= MailHtml.MaxLength } && !MailHtmlView.Unavailable;
+
+    private bool RemoteAllowed(MailItem mail) => mail.Imap is { } r && _remoteAllowed.Contains(r);
+
+    /// <summary>
+    /// La mail in HTML (pulsanti e link compresi); i link si aprono nel browser. Se WebView2 non parte si torna al testo.
+    /// </summary>
+    private MailHtmlView HtmlBody(MailItem mail, MailContent content)
+    {
+        if (_html is null)
+        {
+            _html = new MailHtmlView();
+            _html.Failed += () =>
+            {
+                if (_selected is { } current && Same(current, mail))
+                    Render(current, content, null, null, animate: false);
+            };
+        }
+        _html.Show(MailHtml.Document(content.Html!, RemoteAllowed(mail)), _layout.BodySize / MailReaderLayout.Default.BodySize);
+        return _html;
+    }
+
+    /// <summary>La vista HTML si riusa: prima di metterla in una nuova scheda va tolta dalla vecchia.</summary>
+    private void DetachHtml()
+    {
+        if (_html?.Parent is Border parent)
+            parent.Child = null;
+    }
+
+    /// <summary>
+    /// Il testo della mail: si seleziona e copia, scorre con la rotellina; Ctrl+rotellina lo ingrandisce. Gli indirizzi
+    /// web e di posta sono link (si aprono nel browser o nell'app di posta).
+    /// </summary>
     private Grid Body(string text)
     {
-        var body = new TextBox
+        var paragraph = new Paragraph { Margin = new Thickness(0) };
+        foreach (var run in MailHtml.Linkify(text.Length > 0 ? text : "(nessun testo)"))
         {
-            Text = text.Length > 0 ? text : "(nessun testo)",
+            if (run.Link is not { } link)
+            {
+                AddText(paragraph, run.Text);
+                continue;
+            }
+            var hyperlink = new Hyperlink(new Run(run.Text))
+            {
+                NavigateUri = link,
+                Foreground = Theme.AccentBrush,
+                Cursor = Cursors.Hand,
+                ToolTip = link.AbsoluteUri,
+            };
+            hyperlink.RequestNavigate += (_, e) =>
+            {
+                e.Handled = true;
+                OpenUri(e.Uri.AbsoluteUri);
+            };
+            paragraph.Inlines.Add(hyperlink);
+        }
+        var body = new RichTextBox
+        {
+            Document = new FlowDocument(paragraph) { PagePadding = new Thickness(0) },
             IsReadOnly = true,
-            TextWrapping = TextWrapping.Wrap,
+            IsDocumentEnabled = true, // i link si cliccano anche in sola lettura
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
             Foreground = Theme.InkBrush,
@@ -578,6 +656,19 @@ public sealed class MailReaderWindow : Window
         grid.Children.Add(body);
         grid.Children.Add(thumb);
         return grid;
+    }
+
+    /// <summary>Testo con gli a capo come interruzioni di riga.</summary>
+    private static void AddText(Paragraph paragraph, string text)
+    {
+        var lines = text.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (i > 0)
+                paragraph.Inlines.Add(new LineBreak());
+            if (lines[i].Length > 0)
+                paragraph.Inlines.Add(new Run(lines[i]));
+        }
     }
 
     private static Border CodeCard(string code)
@@ -1123,6 +1214,7 @@ public sealed class MailReaderWindow : Window
         _layout = _layout with { BodySize = size };
         if (_body is not null)
             _body.FontSize = size;
+        _html?.SetZoom(size / MailReaderLayout.Default.BodySize);
     }
 
     // ── Testo ───────────────────────────────────────────────────────────────────

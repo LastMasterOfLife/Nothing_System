@@ -366,6 +366,23 @@ public class DevServerTests
         Assert.Equal(3000, DevServers.Added(before, after).Single().Port);
         Assert.True(DevServers.Same(before, [new DevServer(5173, 200, "node", null, false)]));
     }
+
+    [Fact]
+    public void SaysWhoCanReachTheServer()
+    {
+        Assert.Equal("da tutta la rete", DevServers.Reach(["127.0.0.1", "::"]));
+        Assert.Equal("da tutta la rete", DevServers.Reach(["0.0.0.0"]));
+        Assert.Equal("solo da questo PC", DevServers.Reach(["127.0.0.1", "::1"]));
+        Assert.Equal("dalla rete di 192.168.1.20", DevServers.Reach(["127.0.0.1", "192.168.1.20"]));
+        Assert.Equal("non noto", DevServers.Reach([]));
+    }
+
+    [Fact]
+    public void FormatsBindingsWithBracketsForIpv6()
+    {
+        Assert.Equal("0.0.0.0:3000", DevServers.FormatBinding("0.0.0.0", 3000));
+        Assert.Equal("[::1]:5173", DevServers.FormatBinding("::1", 5173));
+    }
 }
 
 public class EditorCommandTests

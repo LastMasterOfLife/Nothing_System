@@ -142,6 +142,7 @@ public sealed class NotchWindow : Window
     private readonly SystemPage _system = new();
     private readonly WorkPage _work;
     private readonly ServersPage _servers;
+    private readonly DebugNotchPage _debugPage = new();
     private readonly ClipboardPage _clipboard;
     private readonly PhonePage _phone;
     private readonly AgentsPage _agents = new();
@@ -184,7 +185,7 @@ public sealed class NotchWindow : Window
         _ftp = new DevicesPage(connected, NotchPage.Ftp, "FTP", "Nessun server FTP. Attiva il connettore Server FTP in Impostazioni › CONNETTORI › LIBRERIA.");
         _home = new HomePage(media);
         _work = new WorkPage(dev.OpenTask);
-        _servers = new ServersPage(dev.OpenServer, dev.KillServer);
+        _servers = new ServersPage(dev);
         _clipboard = new ClipboardPage(dev.CopyClip, dev.ClipAction);
         _agenda = new AgendaPage(e => AppointmentOpened?.Invoke(e));
         _timerPage = new TimerPage(StartTimer, StopTimer);
@@ -397,6 +398,22 @@ public sealed class NotchWindow : Window
 
     public void SetServers(IReadOnlyList<DevServer> servers) => _servers.Update(servers);
 
+    /// <summary>Pagina Debug: i portali collegati con le cose da guardare (docs/24-debug-potenziato.md).</summary>
+    public void SetDebug(IReadOnlyList<NothingShell.Core.PortalDebug.DebugPortalView> portals) => _debugPage.Update(portals);
+
+    /// <summary>Dettaglio o una riga della pagina Debug: la dashboard del portale, sull'evento se c'è.</summary>
+    public event Action<string, NothingShell.Core.PortalDebug.DebugEvent?>? DebugOpened
+    {
+        add => _debugPage.Opened += value;
+        remove => _debugPage.Opened -= value;
+    }
+
+    public event Action? DebugSettingsRequested
+    {
+        add => _debugPage.SettingsRequested += value;
+        remove => _debugPage.SettingsRequested -= value;
+    }
+
     public void SetPhone(PhonePageData data) => _phone.Update(data);
 
     /// <summary>
@@ -443,7 +460,7 @@ public sealed class NotchWindow : Window
         ShowBanner(text, icon, iconColor, Theme.Ink, page, NoticeDuration);
     }
 
-    /// <summary>Le pagine delle funzioni accese; le altre spariscono dallo swipe e dagli indicatori.</summary>
+    /// <summary>Le pagine delle funzioni accese, nell'ordine dello swipe; le altre spariscono dallo swipe e dagli indicatori.</summary>
     public void SetAvailablePages(IEnumerable<NotchPage> pages)
     {
         ArgumentNullException.ThrowIfNull(pages);
@@ -455,8 +472,9 @@ public sealed class NotchWindow : Window
     {
         var current = _pager.Current;
         _pager.SetAvailable(_allowedPages.Where(p => !ConnectorSections.IsSection(p) || _sectionsInUse.Contains(p)));
-        foreach (var (page, dot) in _indicatorDots)
-            dot.Visibility = _pager.IsAvailable(page) ? Visibility.Visible : Visibility.Collapsed;
+        _indicators.Children.Clear(); // i pallini seguono l'ordine scelto in Impostazioni › Notch
+        foreach (var page in _pager.Available)
+            _indicators.Children.Add(_indicatorDots[page]);
         if (current != _pager.Current)
             ShowPage(_pager.Current, animate: false);
     }
@@ -657,7 +675,7 @@ public sealed class NotchWindow : Window
         _card.HorizontalAlignment = HorizontalAlignment.Center;
         _card.Padding = new Thickness(NotchUi.Padding, 14, NotchUi.Padding, 14);
 
-        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _phone, _work, _agents, _servers, _devices, _database, _ftp, _diagnosi, _hours, _clipboard, _timerPage, _system }.OrderBy(p => p.Page))
+        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _phone, _work, _agents, _servers, _debugPage, _devices, _database, _ftp, _diagnosi, _hours, _clipboard, _timerPage, _system }.OrderBy(p => p.Page))
         {
             _pages[page.Page] = page;
             page.Visibility = Visibility.Collapsed;

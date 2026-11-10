@@ -18,9 +18,50 @@ public sealed record DevServer(int Port, int Pid, string Process, string? Servic
     public string Address => $"localhost:{Port}";
 }
 
+/// <summary>
+/// Tutto quello che si sa del processo dietro un server, per il dettaglio nella pagina Server: gli indirizzi su cui
+/// ascolta (<c>0.0.0.0</c>, <c>::1</c>), l'eseguibile, la riga di comando, chi l'ha avviato, da quando,
+/// memoria e thread. Quello che Windows non lascia leggere (processi di un amministratore) resta null.
+/// </summary>
+public sealed record DevServerDetails(
+    IReadOnlyList<string> Addresses,
+    string? Path,
+    string? CommandLine,
+    string? Parent,
+    DateTimeOffset? Started,
+    long? Memory,
+    int? Threads)
+{
+    public static DevServerDetails Empty { get; } = new([], null, null, null, null, null, null);
+}
+
 /// <summary>Quali porte in ascolto sono server di sviluppo (docs/12-sviluppo.md).</summary>
 public static class DevServers
 {
+    /// <summary>"0.0.0.0:3000", "[::1]:3000".</summary>
+    public static string FormatBinding(string address, int port)
+    {
+        ArgumentNullException.ThrowIfNull(address);
+        return address.Contains(':', StringComparison.Ordinal) ? $"[{address}]:{port}" : $"{address}:{port}";
+    }
+
+    /// <summary>
+    /// Chi può raggiungere il server dagli indirizzi su cui ascolta: tutti gli indirizzi (0.0.0.0, ::) vuol dire la rete,
+    /// solo loopback (127.x, ::1) vuol dire questo PC, altrimenti la rete dell'indirizzo scelto.
+    /// </summary>
+    public static string Reach(IEnumerable<string> addresses)
+    {
+        ArgumentNullException.ThrowIfNull(addresses);
+        var list = addresses.ToArray();
+        if (list.Length == 0)
+            return "non noto";
+        if (list.Any(a => a is "0.0.0.0" or "::"))
+            return "da tutta la rete";
+        if (list.All(a => a.StartsWith("127.", StringComparison.Ordinal) || a == "::1"))
+            return "solo da questo PC";
+        return $"dalla rete di {list.First(a => !a.StartsWith("127.", StringComparison.Ordinal) && a != "::1")}";
+    }
+
     public const int EphemeralStart = 49152;
 
     private static readonly HashSet<string> SystemProcesses = new(StringComparer.OrdinalIgnoreCase)

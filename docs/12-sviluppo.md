@@ -155,14 +155,21 @@ Le porte note hanno un nome: 5432 Postgres, 3306 MySQL, 1433 SQL Server, 6379 Re
 ### Nel notch
 - **Avviso** (4 s) quando una porta nuova si mette in ascolto, per esempio `LOCALHOST:5173 - NODE`.
   Passandoci sopra si apre la pagina Server. Le porte già aperte all'avvio della shell non danno avvisi.
-- **Pagina Server**: fino a tre righe con la porta a punti, il processo (`node · PID 18244`) o il nome del
+- **Pagina Server** (alta, scorre): tutti i server, una riga ciascuno con la porta a punti, il processo (`node · PID 18244`) o il nome del
   servizio, e due pulsanti:
   - *Apri*: `http://localhost:<porta>` nel browser;
   - *✕*: termina il processo. Il primo clic trasforma il pulsante in un `TERMINA?` rosso, il secondo termina;
     dopo 3 s senza conferma torna com'era. Docker, WSL e i servizi di Windows non hanno ✕ (fermarli
     spegnerebbe tutto). Se il processo è di un amministratore, per 3 s al posto dei pulsanti compare in rosso
     `serve l'amministratore`.
-- Con più di tre server, il titolo dice quanti sono (`5 server`) e si vedono i primi tre.
+- Il titolo dice quanti sono (`12 server`); se non ci stanno, l'elenco scorre con la rotellina.
+- **Dettaglio**: un clic su una riga apre tutto quello che si sa del server, con `‹ SERVER` per tornare:
+  - *Rete*: indirizzo, su quali indirizzi ascolta (`0.0.0.0:3000`, `[::1]:3000`), se è raggiungibile solo da
+    questo PC o da tutta la rete, le altre porte dello stesso processo;
+  - *Processo*: nome e PID, quando è partito e da quanto, chi l'ha avviato (processo padre), memoria e thread;
+  - *Eseguibile* con *Cartella*, e la *riga di comando* con *Copia* (letta con WMI).
+  Apri e ✕ restano anche qui. Un clic su un valore lo copia. Per i processi di un amministratore percorso e
+  comando non si leggono e lo si dice. Se il server si ferma mentre il dettaglio è aperto, si torna all'elenco.
 
 ## Diagnostica
 `NothingShell.exe --dev-check <file>` è in sola lettura e scrive:

@@ -91,6 +91,61 @@ public class NotchPagerTests
     }
 }
 
+public class NotchPageOrderTests
+{
+    [Fact]
+    public void SwipeFollowsTheGivenOrderWithHomeFirst()
+    {
+        var pager = new NotchPager();
+        pager.SetAvailable([NotchPage.Timer, NotchPage.Home, NotchPage.Agenda]);
+        Assert.Equal(new[] { NotchPage.Home, NotchPage.Timer, NotchPage.Agenda }, pager.Available);
+        Assert.True(pager.Apply(SwipeDirection.Next));
+        Assert.Equal(NotchPage.Timer, pager.Current);
+    }
+
+    [Fact]
+    public void ResolveKeepsSavedOrderAndAppendsMissingPages()
+    {
+        var order = NotchPageOrder.Resolve([NotchPage.System, NotchPage.Mail, NotchPage.System, (NotchPage)999]);
+        Assert.Equal(NotchPage.Home, order[0]);
+        Assert.Equal(NotchPage.System, order[1]);
+        Assert.Equal(NotchPage.Mail, order[2]);
+        Assert.Equal(NotchPage.Agenda, order[3]); // le altre nell'ordine di serie
+        Assert.Equal(NotchPager.Pages.Length, order.Count);
+        Assert.Equal(NotchPager.Pages.Order(), order.Order());
+    }
+
+    [Fact]
+    public void MoveSkipsPagesThatAreNotShownAndNeverPassesHome()
+    {
+        // Agenda, Mail, Phone…: col Telefono spento, la Posta scende direttamente dopo il Lavoro
+        var movable = NotchPager.Pages.Except([NotchPage.Phone]).ToList();
+        var order = NotchPageOrder.Move(null, NotchPage.Mail, +1, movable);
+        Assert.Equal(new[] { NotchPage.Home, NotchPage.Agenda, NotchPage.Work, NotchPage.Phone, NotchPage.Mail }, order.Take(5));
+
+        var up = NotchPageOrder.Move(null, NotchPage.Agenda, -1, movable);
+        Assert.Equal(NotchPageOrder.Resolve(null), up); // la Home resta la prima
+        Assert.Equal(NotchPageOrder.Resolve(null), NotchPageOrder.Move(null, NotchPage.Home, +1, movable));
+        Assert.Equal(NotchPageOrder.Resolve(null), NotchPageOrder.Move(null, NotchPage.System, +1, movable)); // già l'ultima
+    }
+
+    [Fact]
+    public void SettingsRememberHiddenPagesAndOrder()
+    {
+        var settings = ShellSettings.Default.WithNotchPage(NotchPage.Timer, false).WithNotchPage(NotchPage.Home, false);
+        Assert.False(settings.IsNotchPageShown(NotchPage.Timer));
+        Assert.True(settings.IsNotchPageShown(NotchPage.Home)); // la Home non si toglie
+        Assert.True(settings.WithNotchPage(NotchPage.Timer, true).IsNotchPageShown(NotchPage.Timer));
+
+        var moved = settings.WithNotchPageMoved(NotchPage.Agenda, +1, NotchPager.Pages);
+        var json = ShellSettingsStore.Serialize(moved);
+        var loaded = ShellSettingsStore.Deserialize(json);
+        Assert.Equal(new[] { NotchPage.Home, NotchPage.Mail, NotchPage.Agenda }, loaded.NotchPages.Take(3));
+        Assert.False(loaded.IsNotchPageShown(NotchPage.Timer));
+        Assert.Equal(NotchPageOrder.Resolve(null), ShellSettings.Default.NotchPages);
+    }
+}
+
 public class SwipeDetectorTests
 {
     private static TimeSpan Ms(int ms) => TimeSpan.FromMilliseconds(ms);

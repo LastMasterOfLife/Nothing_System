@@ -83,6 +83,20 @@ public interface IShellSettingsActions
 
     void SetActivityEnabled(LiveActivity activity, bool enabled);
 
+    /// <summary>Tutte le pagine del notch nell'ordine dello swipe, la Home per prima.</summary>
+    IReadOnlyList<NotchPage> NotchPages { get; }
+
+    /// <summary>La funzione della pagina è accesa (altrimenti la pagina non c'è comunque).</summary>
+    bool IsNotchPageAvailable(NotchPage page);
+
+    /// <summary>Pagina tenuta nel notch fra quelle disponibili.</summary>
+    bool IsNotchPageShown(NotchPage page);
+
+    void SetNotchPageShown(NotchPage page, bool shown);
+
+    /// <summary>Sposta la pagina di un posto (−1 prima, +1 dopo) fra quelle disponibili.</summary>
+    void MoveNotchPage(NotchPage page, int delta);
+
     /// <summary>Link iCal (.ics) dei calendari, oltre al calendario di Windows (docs/11-agenda-pannello-rapido.md).</summary>
     IReadOnlyList<string> CalendarFeeds { get; }
 
@@ -234,6 +248,30 @@ public interface IShellSettingsActions
 
     /// <summary>Apre il file dei comandi critici aggiunti dall'utente, creandolo se manca.</summary>
     void OpenCriticalCommands();
+
+    /// <summary>Debug potenziato (docs/24-debug-potenziato.md): portali collegati e regole degli avvisi.</summary>
+    NothingShell.Core.PortalDebug.DebugSettings DebugSettings { get; }
+
+    IReadOnlyList<PortalLink> DebugLinks { get; }
+
+    /// <summary>Cartella dell'app Django da installare nel portale.</summary>
+    string DebugSdkFolder { get; }
+
+    /// <summary>Raggiungibilità di un portale cambiata, portale collegato o tolto.</summary>
+    event Action? DebugChanged;
+
+    void SetDebugEnabled(bool enabled);
+
+    void SetDebugPortalWatch(string id, bool watch);
+
+    void SetDebugRules(NothingShell.Core.PortalDebug.DebugAlertRules rules);
+
+    /// <summary>Collega il portale col codice: null se collegato, altrimenti il motivo.</summary>
+    Task<string?> PairDebugPortalAsync(string address, string code);
+
+    Task UnpairDebugPortalAsync(string id);
+
+    void OpenDebugDashboard(string id);
 }
 
 /// <summary>Pagine del menù laterale, nell'ordine in cui compaiono.</summary>
@@ -246,6 +284,7 @@ public enum SettingsPage
     Mail,
     Agenda,
     Dev,
+    Debug,
     Hours,
     Shortcuts,
     Agents,
@@ -276,6 +315,7 @@ public sealed partial class SettingsWindow : Window
         (SettingsPage.Mail, "Posta", "Mail nel notch e casella collegata"),
         (SettingsPage.Agenda, "Agenda", "Appuntamenti, calendari e riepilogo"),
         (SettingsPage.Dev, "Sviluppo", "Build, appunti e server locali"),
+        (SettingsPage.Debug, "Debug potenziato", "Portali in sviluppo: richieste, log ed errori dal vivo"),
         (SettingsPage.Hours, "Ore", "Ore lavorate per progetto e gruppo"),
         (SettingsPage.Shortcuts, "Scorciatoie", "Frasi che diventano comandi: le tue e quelle di serie"),
         (SettingsPage.Agents, "Agenti", "Claude Code e altri agenti al lavoro"),
@@ -361,6 +401,7 @@ public sealed partial class SettingsWindow : Window
         _shell.CalendarChanged += OnCalendarChanged;
         _shell.Phone.Changed += OnPhoneChanged;
         _shell.BrainChanged += OnBrainChanged;
+        _shell.DebugChanged += OnDebugChanged;
         Theme.Changed += OnThemeChanged;
         GlassBackdrop.Attach(this, (FrameworkElement)Content);
         Closed += (_, _) =>
@@ -368,6 +409,7 @@ public sealed partial class SettingsWindow : Window
             Theme.Changed -= OnThemeChanged;
             CloseOutfitEditor(); // il vestito in prova sul notch torna quello indossato
             _shell.BrainChanged -= OnBrainChanged;
+            _shell.DebugChanged -= OnDebugChanged;
             _shell.Phone.Changed -= OnPhoneChanged;
             _shell.MailAccountChanged -= OnMailAccountChanged;
             _shell.CalendarChanged -= OnCalendarChanged;
@@ -483,7 +525,7 @@ public sealed partial class SettingsWindow : Window
                 AppearancePage();
                 break;
             case SettingsPage.Notch:
-                NotchPage();
+                NotchSettingsPage();
                 break;
             case SettingsPage.Phone:
                 PhonePage();
@@ -496,6 +538,9 @@ public sealed partial class SettingsWindow : Window
                 break;
             case SettingsPage.Dev:
                 DevPage();
+                break;
+            case SettingsPage.Debug:
+                DebugPage();
                 break;
             case SettingsPage.Hours:
                 HoursPage();
@@ -553,11 +598,12 @@ public sealed partial class SettingsWindow : Window
         Note("Ctrl+Win spegne e riaccende la shell. Ctrl+Tab passa alla pagina successiva delle impostazioni, Esc chiude.", Theme.MutedBrush);
     }
 
-    private void NotchPage()
+    private void NotchSettingsPage()
     {
         Section("PAGINE");
-        Note("Swipe sul notch aperto (touchpad, rotellina o trascinamento) per Agenda, Posta, Telefono, Lavoro, Agenti, Server, " +
-             "Dispositivi, Appunti, Timer e Sistema. Le pagine si accendono e spengono con le loro funzioni.", Theme.MutedBrush);
+        Note("Swipe sul notch aperto (touchpad, rotellina o trascinamento) per passare da una pagina all'altra, in quest'ordine. " +
+             "Scegli quali tenere fra quelle con la funzione accesa e spostale con le frecce.", Theme.MutedBrush);
+        NotchPageRows();
 
         Section("ATTIVITÀ DAL VIVO");
         ActivityRow(LiveActivity.Volume, "Volume", "Con i tasti del volume, al posto dell'indicatore di Windows");
@@ -566,6 +612,113 @@ public sealed partial class SettingsWindow : Window
         ActivityRow(LiveActivity.Downloads, "Download", "In corso dalla cartella Download, poi Apri e Cartella");
         ActivityRow(LiveActivity.Screenshots, "Screenshot rapido", "Strumento di cattura (Win+Maiusc+S, Stamp) e Greenshot: anteprima da trascinare");
         ActivityRow(LiveActivity.Bluetooth, "Cuffie Bluetooth", "Collegamento e batteria");
+    }
+
+    /// <summary>Nome, descrizione e, per le pagine legate a una funzione, dove si accende.</summary>
+    private static (string Title, string Description, string? Where) NotchPageInfo(NotchPage page) => page switch
+    {
+        NotchPage.Home => ("Home", "Ora, musica e il campo per chiedere: sempre la prima", null),
+        NotchPage.Agenda => ("Agenda", "Appuntamenti di oggi e dei prossimi giorni", null),
+        NotchPage.Mail => ("Posta", "Ultime mail arrivate", null),
+        NotchPage.Phone => ("Telefono", "Batteria, chiamate e notifiche del telefono", "Telefono"),
+        NotchPage.Work => ("Lavoro", "Build, test e pipeline in corso", "Sviluppo"),
+        NotchPage.Agents => ("Agenti", "Claude Code e gli altri agenti al lavoro", "Agenti"),
+        NotchPage.Servers => ("Server", "Server locali in ascolto sulle porte", "Sviluppo"),
+        NotchPage.Debug => ("Debug", "Portali collegati: errori, 5xx, lentezze e Dettaglio per la dashboard", "Debug potenziato"),
+        NotchPage.Devices => ("Dispositivi", "Stato dei connettori", "Connettori"),
+        NotchPage.Database => ("Database", "Solo se c'è un connettore Database", "Connettori"),
+        NotchPage.Ftp => ("FTP", "Solo se c'è un connettore Server FTP", "Connettori"),
+        NotchPage.Diagnosi => ("Diagnosi", "Rete, DNS e porte a colpo d'occhio", null),
+        NotchPage.Hours => ("Ore", "Ore lavorate oggi per progetto", "Ore"),
+        NotchPage.Clipboard => ("Appunti", "Cronologia degli appunti", "Sviluppo"),
+        NotchPage.Timer => ("Timer", "Conto alla rovescia", null),
+        NotchPage.System => ("Sistema", "Processore, memoria, disco e app che usano microfono e webcam", null),
+        _ => (page.ToString(), string.Empty, null),
+    };
+
+    /// <summary>
+    /// Le pagine del notch nell'ordine dello swipe: frecce per spostarle, interruttore per tenerle. Quelle con la funzione
+    /// spenta restano in grigio al loro posto, con dove si accende; la Home è sempre la prima.
+    /// </summary>
+    private void NotchPageRows()
+    {
+        var pages = _shell.NotchPages;
+        var movable = pages.Where(p => p != NotchPage.Home && _shell.IsNotchPageAvailable(p)).ToList();
+        foreach (var page in pages)
+        {
+            var (title, description, where) = NotchPageInfo(page);
+            var available = _shell.IsNotchPageAvailable(page);
+            var row = new Grid { Margin = new Thickness(0, 8, 0, 8) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var index = movable.IndexOf(page);
+            var arrows = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 12, 0),
+                Visibility = index >= 0 ? Visibility.Visible : Visibility.Hidden, // Home e funzioni spente: fermi, ma allineati
+            };
+            arrows.Children.Add(OrderArrow("", "Sposta prima", index > 0, () => _shell.MoveNotchPage(page, -1)));
+            arrows.Children.Add(OrderArrow("", "Sposta dopo", index >= 0 && index < movable.Count - 1, () => _shell.MoveNotchPage(page, +1)));
+            row.Children.Add(arrows);
+
+            var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 16, 0) };
+            text.Children.Add(Label(title, 14, available ? Theme.InkBrush : Theme.MutedBrush));
+            var d = Label(available || where is null ? description : $"Funzione spenta: si accende in Impostazioni › {where}", 12, Theme.MutedBrush);
+            d.Margin = new Thickness(0, 3, 0, 0);
+            d.TextWrapping = TextWrapping.Wrap;
+            text.Children.Add(d);
+            Grid.SetColumn(text, 1);
+            row.Children.Add(text);
+
+            if (page != NotchPage.Home && available)
+            {
+                var toggle = new DotToggle(_shell.IsNotchPageShown(page)) { VerticalAlignment = VerticalAlignment.Center };
+                toggle.Toggled += v => _shell.SetNotchPageShown(page, v);
+                Grid.SetColumn(toggle, 2);
+                row.Children.Add(toggle);
+            }
+            AddRow(row);
+        }
+    }
+
+    /// <summary>Freccia per l'ordine delle pagine: grigio tenue quando non si può spostare oltre.</summary>
+    private Border OrderArrow(string glyph, string tip, bool enabled, Action move)
+    {
+        var button = new Border
+        {
+            Width = 24,
+            Height = 24,
+            CornerRadius = new CornerRadius(4),
+            Background = Brushes.Transparent,
+            ToolTip = enabled ? tip : null,
+            Cursor = enabled ? Cursors.Hand : Cursors.Arrow,
+            Opacity = enabled ? 1 : 0.25,
+            Child = new TextBlock
+            {
+                Text = glyph,
+                FontFamily = Theme.IconFont,
+                FontSize = 11,
+                Foreground = Theme.InkBrush,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+        if (!enabled)
+            return button;
+        button.MouseEnter += (_, _) => button.Background = Theme.SurfaceHoverBrush;
+        button.MouseLeave += (_, _) => button.Background = Brushes.Transparent;
+        button.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            move();
+            _listOffset = _scroll.VerticalOffset; // la lista si ricostruisce senza saltare in cima
+            Rebuild();
+        };
+        return button;
     }
 
     /// <summary>Lavoro nel notch, appunti intelligenti e server locali (docs/12-sviluppo.md).</summary>
@@ -1703,6 +1856,7 @@ public sealed partial class SettingsWindow : Window
             var count = page switch
             {
                 SettingsPage.Connectors => _shell.ConnectorResults.Count,
+                SettingsPage.Debug => _shell.DebugLinks.Count,
                 SettingsPage.Plugins => _shell.PluginResults.Count(r => r.Manifest is not null),
                 SettingsPage.Shortcuts => _shell.LearnedShortcuts.Count + _shell.BuiltInShortcuts.Sum(s => s.Commands.Count),
                 _ => 0,

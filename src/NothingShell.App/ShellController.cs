@@ -137,6 +137,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         WireConnected();
         WireBrain();
         WireRemoteAccess();
+        WireDebug();
         _network.Changed += _bars.SetNetwork;
         _bars.SetNetwork(_network.Current);
         _tracker.FullscreenChanged += monitor =>
@@ -527,6 +528,7 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         _kde.Dispose();
         DisposeDev();
         DisposeConnected();
+        DisposeDebug();
         _winKey.Dispose();
         _pins.Dispose();
         _bars.Dispose();

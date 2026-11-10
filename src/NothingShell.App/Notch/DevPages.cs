@@ -18,10 +18,13 @@ public sealed record DevPageActions(
     Action<DevServer> OpenServer,
     Func<DevServer, bool> KillServer,
     Action<ClipEntry> CopyClip,
-    Func<ClipEntry, ClipAction?> ClipAction)
+    Func<ClipEntry, ClipAction?> ClipAction,
+    Func<DevServer, Task<DevServerDetails>> ServerDetails,
+    Action<string> ShowFile)
 {
     /// <summary>Nessuna azione (anteprime di <c>--snapshot</c>).</summary>
-    public static DevPageActions None { get; } = new(_ => { }, _ => { }, _ => true, _ => { }, _ => null);
+    public static DevPageActions None { get; } =
+        new(_ => { }, _ => { }, _ => true, _ => { }, _ => null, _ => Task.FromResult(DevServerDetails.Empty), _ => { });
 }
 
 /// <summary>Righe e pulsanti piccoli delle pagine Lavoro, Server e Appunti (docs/12-sviluppo.md).</summary>
@@ -235,37 +238,65 @@ public sealed class WorkPage : NotchPageView
 }
 
 /// <summary>
-/// Pagina Server (docs/12-sviluppo.md): porta a punti, processo o servizio, Apri e ✕ (due clic: il primo chiede
-/// conferma per 3 s). Se il processo è di un amministratore, al posto dei pulsanti "serve l'amministratore".
+/// Pagina Server (docs/12-sviluppo.md, alta, scorre): tutti i server con la porta a punti, processo o servizio, Apri e ✕
+/// (due clic: il primo chiede conferma per 3 s). Se il processo è di un amministratore, al posto dei pulsanti "serve
+/// l'amministratore". Un clic su una riga apre il dettaglio: indirizzi e chi li raggiunge, eseguibile, riga di comando,
+/// chi l'ha avviato, da quando, memoria e le altre porte dello stesso processo; ‹ SERVER torna all'elenco.
 /// </summary>
 public sealed class ServersPage : NotchPageView
 {
     private static readonly TimeSpan ConfirmTimeout = TimeSpan.FromSeconds(3);
+    private static readonly FontFamily Mono = new("Cascadia Mono, Consolas");
 
-    private readonly Action<DevServer> _open;
-    private readonly Func<DevServer, bool> _kill;
+    private readonly DevPageActions _actions;
     private readonly TextBlock _count;
-    private readonly StackPanel _rows = new() { Margin = new Thickness(0, 8, 0, 0) };
+    private readonly StackPanel _rows = new();
     private readonly TextBlock _empty = DevRows.Empty();
+    private readonly DockPanel _listView = new();
+    private readonly DockPanel _detailView = new() { Visibility = Visibility.Collapsed };
+    private readonly StackPanel _detail = new();
+    private readonly NotchScrollList _detailScroll;
+    private readonly TextBlock _detailCount;
     private readonly DispatcherTimer _confirmTimer = new() { Interval = ConfirmTimeout };
     private IReadOnlyList<DevServer> _servers = [];
     private DevServer? _confirming;
     private DevServer? _denied;
+    private DevServer? _selected;
+    private DevServerDetails? _details;
+    private int _generation; // un dettaglio nuovo (o l'elenco) rende vecchia la lettura in corso
 
-    public ServersPage(Action<DevServer> open, Func<DevServer, bool> kill)
+    public ServersPage(DevPageActions actions)
     {
-        ArgumentNullException.ThrowIfNull(open);
-        ArgumentNullException.ThrowIfNull(kill);
-        _open = open;
-        _kill = kill;
+        ArgumentNullException.ThrowIfNull(actions);
+        _actions = actions;
+
         var (header, _, count) = DevRows.Header("SERVER");
         _count = count;
         _empty.Text = "Nessun server in ascolto su questo PC.";
-        var stack = new StackPanel();
-        stack.Children.Add(header);
-        stack.Children.Add(_rows);
-        stack.Children.Add(_empty);
-        Children.Add(stack);
+        var list = new StackPanel();
+        list.Children.Add(_rows);
+        list.Children.Add(_empty);
+        var scroll = new NotchScrollList(list) { Margin = new Thickness(0, 8, 0, 0) };
+        DockPanel.SetDock(header, Dock.Top);
+        _listView.Children.Add(header);
+        _listView.Children.Add(scroll);
+
+        var back = DevRows.Button("‹ SERVER", ShowList);
+        back.Margin = new Thickness(0);
+        back.HorizontalAlignment = HorizontalAlignment.Left;
+        _detailCount = NotchUi.Text(11, Theme.MutedBrush);
+        _detailCount.HorizontalAlignment = HorizontalAlignment.Right;
+        _detailCount.VerticalAlignment = VerticalAlignment.Center;
+        var detailHeader = new Grid();
+        detailHeader.Children.Add(back);
+        detailHeader.Children.Add(_detailCount);
+        _detailScroll = new NotchScrollList(_detail) { Margin = new Thickness(0, 6, 0, 0) };
+        DockPanel.SetDock(detailHeader, Dock.Top);
+        _detailView.Children.Add(detailHeader);
+        _detailView.Children.Add(_detailScroll);
+
+        Children.Add(_listView);
+        Children.Add(_detailView);
         _confirmTimer.Tick += (_, _) =>
         {
             _confirmTimer.Stop();
@@ -283,7 +314,7 @@ public sealed class ServersPage : NotchPageView
         _confirmTimer.Stop();
         _confirming = null;
         _denied = null;
-        Render();
+        ShowList();
     }
 
     public void Update(IReadOnlyList<DevServer> servers)
@@ -292,6 +323,45 @@ public sealed class ServersPage : NotchPageView
         _servers = servers;
         if (_confirming is { } c && !servers.Contains(c))
             _confirming = null;
+        if (_selected is { } s && !servers.Contains(s))
+        {
+            ShowList(); // il server si è fermato
+            return;
+        }
+        Render();
+    }
+
+    private void ShowList()
+    {
+        _generation++;
+        _selected = null;
+        _details = null;
+        _detailView.Visibility = Visibility.Collapsed;
+        _listView.Visibility = Visibility.Visible;
+        Render();
+    }
+
+    private async void ShowDetail(DevServer server)
+    {
+        var generation = ++_generation;
+        _selected = server;
+        _details = null;
+        _listView.Visibility = Visibility.Collapsed;
+        _detailView.Visibility = Visibility.Visible;
+        _detailScroll.ScrollToTop();
+        Render();
+        DevServerDetails details;
+        try
+        {
+            details = await _actions.ServerDetails(server);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+        {
+            details = DevServerDetails.Empty;
+        }
+        if (generation != _generation)
+            return;
+        _details = details;
         Render();
     }
 
@@ -304,40 +374,183 @@ public sealed class ServersPage : NotchPageView
             var n => $"{n} server",
         };
         _rows.Children.Clear();
-        foreach (var server in _servers.Take(DevRows.MaxRows))
-        {
-            var name = server.Service is { } service && !service.Equals(server.Process, StringComparison.OrdinalIgnoreCase)
-                ? $"{service} · {server.Process}"
-                : $"{server.Service ?? server.Process} · PID {server.Pid}";
-            var buttons = new List<UIElement>();
-            if (server == _denied)
-                buttons.Add(DevRows.Detail("serve l'amministratore", Theme.CriticalBrush));
-            else if (server.CanOpen)
-                buttons.Add(DevRows.Button("APRI", () => _open(server)));
-            if (server.CanKill && server != _denied)
-                buttons.Add(server == _confirming
-                    ? DevRows.Button("TERMINA?", () =>
-                    {
-                        _confirmTimer.Stop();
-                        _confirming = null;
-                        if (!_kill(server))
-                        {
-                            _denied = server;
-                            _confirmTimer.Start();
-                        }
-                        Render();
-                    }, Theme.CriticalBrush)
-                    : DevRows.Button("✕", () =>
-                    {
-                        _confirming = server;
-                        _confirmTimer.Stop();
-                        _confirmTimer.Start();
-                        Render();
-                    }));
-            _rows.Children.Add(DevRows.Row(DevRows.Dots(server.Port.ToString(NotchUi.Italian), Theme.Ink), name,
-                DevRows.Buttons([.. buttons]), server.CanOpen ? () => _open(server) : null, $"{server.Address} · {server.Process} (PID {server.Pid})"));
-        }
+        foreach (var server in _servers)
+            _rows.Children.Add(DevRows.Row(DevRows.Dots(server.Port.ToString(NotchUi.Italian), Theme.Ink), Label(server),
+                DevRows.Buttons([.. Buttons(server)]), () => ShowDetail(server), "Clic: tutti i dettagli"));
         _empty.Visibility = _servers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (_selected is { } selected)
+            RenderDetail(selected);
+    }
+
+    private static string Label(DevServer server) =>
+        server.Service is { } service && !service.Equals(server.Process, StringComparison.OrdinalIgnoreCase)
+            ? $"{service} · {server.Process}"
+            : $"{server.Service ?? server.Process} · PID {server.Pid}";
+
+    /// <summary>Apri e ✕ (poi TERMINA?), o "serve l'amministratore" in rosso.</summary>
+    private List<UIElement> Buttons(DevServer server)
+    {
+        var buttons = new List<UIElement>();
+        if (server == _denied)
+            buttons.Add(DevRows.Detail("serve l'amministratore", Theme.CriticalBrush));
+        else if (server.CanOpen)
+            buttons.Add(DevRows.Button("APRI", () => _actions.OpenServer(server)));
+        if (server.CanKill && server != _denied)
+            buttons.Add(server == _confirming
+                ? DevRows.Button("TERMINA?", () =>
+                {
+                    _confirmTimer.Stop();
+                    _confirming = null;
+                    if (!_actions.KillServer(server))
+                    {
+                        _denied = server;
+                        _confirmTimer.Start();
+                    }
+                    Render();
+                }, Theme.CriticalBrush)
+                : DevRows.Button("✕", () =>
+                {
+                    _confirming = server;
+                    _confirmTimer.Stop();
+                    _confirmTimer.Start();
+                    Render();
+                }));
+        return buttons;
+    }
+
+    private void RenderDetail(DevServer server)
+    {
+        _detailCount.Text = server.Address;
+        _detail.Children.Clear();
+        var kind = server.Service ?? (server.CanOpen ? "server web" : "servizio");
+        var where = server.IsBackgroundService ? "servizio di Windows" : "app";
+        _detail.Children.Add(TallRows.Item(DevRows.Dots(server.Port.ToString(NotchUi.Italian), Theme.Ink),
+            Label(server), null, $"{kind} · {where}", DevRows.Buttons([.. Buttons(server)])));
+
+        if (_details is not { } details)
+        {
+            _detail.Children.Add(Hint("Lettura del processo…"));
+            return;
+        }
+
+        _detail.Children.Add(TallRows.Caption("RETE"));
+        _detail.Children.Add(Field("Indirizzo", $"http://{server.Address}"));
+        if (details.Addresses.Count > 0)
+            _detail.Children.Add(Field("In ascolto su", string.Join("   ", details.Addresses.Select(a => DevServers.FormatBinding(a, server.Port)))));
+        _detail.Children.Add(Field("Raggiungibile", DevServers.Reach(details.Addresses)));
+        var others = _servers.Where(s => s.Pid == server.Pid && s.Port != server.Port).Select(s => s.Port.ToString(NotchUi.Italian)).ToArray();
+        if (others.Length > 0)
+            _detail.Children.Add(Field("Altre porte", string.Join(", ", others)));
+
+        _detail.Children.Add(TallRows.Caption("PROCESSO"));
+        _detail.Children.Add(Field("Nome", $"{server.Process} · PID {server.Pid}"));
+        if (details.Started is { } started)
+            _detail.Children.Add(Field("Avviato", $"{started.ToLocalTime().ToString("d MMM HH:mm", NotchUi.Italian)} · da {Uptime(DateTimeOffset.Now - started)}"));
+        if (details.Parent is { } parent)
+            _detail.Children.Add(Field("Avviato da", parent));
+        if (details.Memory is { } memory)
+            _detail.Children.Add(Field("Memoria", DownloadTracker.FormatBytes(memory)));
+        if (details.Threads is { } threads)
+            _detail.Children.Add(Field("Thread", threads.ToString(NotchUi.Italian)));
+
+        if (details.Path is { } path)
+        {
+            _detail.Children.Add(TallRows.Caption("ESEGUIBILE"));
+            _detail.Children.Add(Block(path, DevRows.Button("CARTELLA", () => _actions.ShowFile(path))));
+        }
+        if (details.CommandLine is { } command)
+        {
+            _detail.Children.Add(TallRows.Caption("COMANDO"));
+            _detail.Children.Add(Block(command, DevRows.Button("COPIA", () => Copy(command))));
+        }
+        if (details.Path is null && details.CommandLine is null)
+            _detail.Children.Add(Hint("Eseguibile e comando non si leggono: il processo è di un amministratore."));
+    }
+
+    /// <summary>"45 s", "12 min", "3 h 20 min", "2 g 4 h".</summary>
+    private static string Uptime(TimeSpan span) => span.TotalMinutes switch
+    {
+        < 1 => $"{Math.Max(0, (int)span.TotalSeconds)} s",
+        < 60 => $"{(int)span.TotalMinutes} min",
+        < 24 * 60 => span.Minutes > 0 ? $"{(int)span.TotalHours} h {span.Minutes} min" : $"{(int)span.TotalHours} h",
+        _ => span.Hours > 0 ? $"{(int)span.TotalDays} g {span.Hours} h" : $"{(int)span.TotalDays} g",
+    };
+
+    /// <summary>Etichetta grigia a sinistra, valore bianco a destra che va a capo; un clic copia il valore.</summary>
+    private Border Field(string label, string value)
+    {
+        var key = NotchUi.Text(11, Theme.MutedBrush, label);
+        key.VerticalAlignment = VerticalAlignment.Top;
+        key.Margin = new Thickness(0, 1, 0, 0);
+        var text = NotchUi.Text(12, Theme.InkBrush, value);
+        text.TextWrapping = TextWrapping.Wrap;
+        text.TextTrimming = TextTrimming.None;
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(96) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        Grid.SetColumn(text, 1);
+        grid.Children.Add(key);
+        grid.Children.Add(text);
+        return Copyable(grid, value, 2, 2);
+    }
+
+    /// <summary>Testo lungo (percorso, comando) a tutta larghezza, a capo, col pulsante sotto a destra.</summary>
+    private Border Block(string value, FrameworkElement button)
+    {
+        var text = NotchUi.Text(11, Theme.InkBrush, value);
+        text.TextWrapping = TextWrapping.Wrap;
+        text.TextTrimming = TextTrimming.None;
+        text.FontFamily = Mono;
+        button.HorizontalAlignment = HorizontalAlignment.Right;
+        button.Margin = new Thickness(0, 4, 0, 0);
+        var stack = new StackPanel();
+        stack.Children.Add(text);
+        stack.Children.Add(button);
+        return Copyable(stack, value, 2, 4);
+    }
+
+    private Border Copyable(UIElement child, string value, double top, double bottom)
+    {
+        var row = new Border
+        {
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(8, top, 8, bottom),
+            Margin = new Thickness(-8, 0, -8, 0),
+            Background = Brushes.Transparent,
+            Cursor = Cursors.Hand,
+            ToolTip = "Clic: copia",
+            Child = child,
+        };
+        row.MouseEnter += (_, _) => row.Background = Theme.SurfaceBrush;
+        row.MouseLeave += (_, _) => row.Background = Brushes.Transparent;
+        row.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            Copy(value);
+        };
+        return row;
+    }
+
+    private void Copy(string value)
+    {
+        try
+        {
+            Clipboard.SetText(value);
+            _detailCount.Text = "copiato";
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            _detailCount.Text = "appunti occupati";
+        }
+    }
+
+    private static TextBlock Hint(string text)
+    {
+        var hint = NotchUi.Text(12, Theme.MutedBrush, text);
+        hint.TextWrapping = TextWrapping.Wrap;
+        hint.TextTrimming = TextTrimming.None;
+        hint.Margin = new Thickness(0, 8, 0, 0);
+        return hint;
     }
 }
 

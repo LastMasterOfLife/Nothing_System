@@ -21,7 +21,7 @@ public sealed partial class ShellController
     private readonly PortWatcher _ports = new();
     private readonly WorkClock _work = new(new NothingShell.Core.Work.WorkStore(NothingShell.Core.Work.WorkStore.DefaultFolder));
 
-    private DevPageActions DevActions => new(OpenTask, OpenServer, KillServer, CopyClip, ClipActionFor);
+    private DevPageActions DevActions => new(OpenTask, OpenServer, KillServer, CopyClip, ClipActionFor, PortWatcher.DetailsAsync, ShowFile);
 
     private void WireDev()
     {
@@ -93,9 +93,25 @@ public sealed partial class ShellController
             hidden.Add(NotchPage.Servers);
         if (!history)
             hidden.Add(NotchPage.Clipboard);
+        if (!DebugSettings.Enabled)
+            hidden.Add(NotchPage.Debug);
         ApplyConnected(hidden);
-        _notch.SetAvailablePages(NotchPager.Pages.Except(hidden));
+        _featurePages = [.. NotchPager.Pages.Except(hidden)];
+        _notch.SetAvailablePages(_settings.NotchPages.Where(p => _featurePages.Contains(p) && _settings.IsNotchPageShown(p)));
     }
+
+    /// <summary>Pagine del notch con la funzione accesa: fra queste si scelgono quali tenere e in che ordine.</summary>
+    private HashSet<NotchPage> _featurePages = [.. NotchPager.Pages];
+
+    public IReadOnlyList<NotchPage> NotchPages => _settings.NotchPages;
+
+    public bool IsNotchPageAvailable(NotchPage page) => _featurePages.Contains(page);
+
+    public bool IsNotchPageShown(NotchPage page) => _settings.IsNotchPageShown(page);
+
+    public void SetNotchPageShown(NotchPage page, bool shown) => Update(_settings.WithNotchPage(page, shown));
+
+    public void MoveNotchPage(NotchPage page, int delta) => Update(_settings.WithNotchPageMoved(page, delta, _featurePages));
 
     private readonly Dictionary<string, HoursDetailWindow> _hoursWindows = new(StringComparer.OrdinalIgnoreCase);
 

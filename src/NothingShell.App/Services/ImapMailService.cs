@@ -290,12 +290,16 @@ public sealed class ImapMailService : IDisposable
         };
     }
 
-    /// <summary>Testo semplice se c'è, altrimenti l'HTML ripulito; degli allegati solo il nome.</summary>
+    /// <summary>
+    /// Testo semplice se c'è, altrimenti l'HTML ripulito; l'HTML com'è, con le immagini incorporate al loro posto,
+    /// per mostrarlo; degli allegati solo il nome.
+    /// </summary>
     private static MailContent ToContent(MimeMessage mime)
     {
         var from = mime.From.Mailboxes.FirstOrDefault();
+        var html = mime.HtmlBody is { Length: > 0 } h ? MailHtml.InlineImages(h, InlineImages(mime)) : null;
         var body = mime.TextBody is { Length: > 0 } text ? MailText.Normalize(text)
-            : mime.HtmlBody is { } html ? MailText.FromHtml(html)
+            : html is not null ? MailText.FromHtml(html)
             : string.Empty;
         return new MailContent(
             from is null ? string.Empty : string.IsNullOrWhiteSpace(from.Name) ? from.Address : $"{from.Name} <{from.Address}>",
@@ -304,7 +308,27 @@ public sealed class ImapMailService : IDisposable
             string.IsNullOrWhiteSpace(mime.Subject) ? "(senza oggetto)" : mime.Subject,
             body,
             mime.Attachments.Select(a => a.ContentDisposition?.FileName ?? a.ContentType.Name ?? "allegato").ToArray(),
-            mime.ReplyTo.Mailboxes.FirstOrDefault()?.Address ?? from?.Address);
+            mime.ReplyTo.Mailboxes.FirstOrDefault()?.Address ?? from?.Address,
+            html);
+    }
+
+    /// <summary>Immagini con Content-ID (loghi, firme) come URI data:, fino a 5 MB in tutto.</summary>
+    private static Dictionary<string, string> InlineImages(MimeMessage mime)
+    {
+        var images = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        long total = 0;
+        foreach (var part in mime.BodyParts.OfType<MimePart>())
+        {
+            if (string.IsNullOrEmpty(part.ContentId) || !part.ContentType.MediaType.Equals("image", StringComparison.OrdinalIgnoreCase) || part.Content is null)
+                continue;
+            using var data = new MemoryStream();
+            part.Content.DecodeTo(data);
+            total += data.Length;
+            if (total > 5 * 1024 * 1024)
+                break;
+            images[part.ContentId.Trim('<', '>')] = $"data:{part.ContentType.MimeType};base64,{Convert.ToBase64String(data.GetBuffer(), 0, (int)data.Length)}";
+        }
+        return images;
     }
 
     /// <summary>Casella collegata e password dal Gestore credenziali; null se scollegata.</summary>

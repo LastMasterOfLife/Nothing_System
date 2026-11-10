@@ -29,7 +29,7 @@ public static class NotchLayout
     /// <summary>Altezza della Home con la musica, che ha i controlli sopra il campo.</summary>
     public const double HomeMediaHeight = 232;
 
-    /// <summary>Altezza del notch espanso sulle pagine con un elenco che scorre (Posta, Telefono, Agenti, Dispositivi, DNS).</summary>
+    /// <summary>Altezza del notch espanso sulle pagine con un elenco che scorre (Posta, Telefono, Agenti, Dispositivi, DNS, Server).</summary>
     public const double TallHeight = 340;
 
     public static NotchSize Size { get; private set; } = NotchSize.Small;
@@ -37,7 +37,7 @@ public static class NotchLayout
     /// <summary>La misura per tutta la sessione: le pagine si impaginano sulla larghezza del notch quando nascono.</summary>
     public static void Use(NotchSize size) => Size = size;
 
-    public static bool IsTall(NotchPage page) => page is NotchPage.Mail or NotchPage.Phone or NotchPage.Agents or NotchPage.Devices or NotchPage.Database or NotchPage.Ftp or NotchPage.Diagnosi or NotchPage.Hours;
+    public static bool IsTall(NotchPage page) => page is NotchPage.Mail or NotchPage.Phone or NotchPage.Agents or NotchPage.Devices or NotchPage.Database or NotchPage.Ftp or NotchPage.Diagnosi or NotchPage.Hours or NotchPage.Servers or NotchPage.Debug;
 
     /// <summary>Notch espanso su <paramref name="page"/>: le pagine con un elenco si allungano in verticale.</summary>
     public static Size2 Expanded(NotchPage page, bool media = false) =>

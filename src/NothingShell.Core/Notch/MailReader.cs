@@ -7,7 +7,10 @@ namespace NothingShell.Core.Notch;
 /// <summary>Messaggio nella casella collegata: UID valido finché il server non cambia <c>UIDVALIDITY</c>.</summary>
 public readonly record struct ImapMessageRef(uint UidValidity, uint Uid);
 
-/// <summary>Mail aperta nel lettore (docs/08-notch-mail-pages.md). Solo in memoria.</summary>
+/// <summary>
+/// Mail aperta nel lettore (docs/08-notch-mail-pages.md). Solo in memoria. <see cref="Body"/> è sempre il testo
+/// (per il codice di verifica e quando l'HTML non si può mostrare); <see cref="Html"/> la mail com'è, se ce l'ha.
+/// </summary>
 public sealed record MailContent(
     string From,
     string To,
@@ -15,7 +18,8 @@ public sealed record MailContent(
     string Subject,
     string Body,
     IReadOnlyList<string> Attachments,
-    string? ReplyAddress);
+    string? ReplyAddress,
+    string? Html = null);
 
 /// <summary>Testo leggibile del corpo di una mail.</summary>
 public static partial class MailText

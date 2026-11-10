@@ -1,7 +1,10 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Management;
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Windows.Threading;
+using NothingShell.App.Interop;
 using NothingShell.Core.Dev;
 
 namespace NothingShell.App.Services;
@@ -70,6 +73,82 @@ public sealed class PortWatcher : IDisposable
         }
     }
 
+    /// <summary>
+    /// Il dettaglio di un server, fuori dal thread della UI: indirizzi su cui ascolta, eseguibile, riga di comando e
+    /// processo padre (WMI), avvio, memoria e thread. Quello che non si può leggere resta null.
+    /// </summary>
+    public static Task<DevServerDetails> DetailsAsync(DevServer server)
+    {
+        ArgumentNullException.ThrowIfNull(server);
+        return Task.Run(() => Details(server));
+    }
+
+    private static DevServerDetails Details(DevServer server)
+    {
+        var addresses = new List<(PortListener Listener, IPAddress Address)>();
+        Read(AfInet, Ipv4RowSize, portOffset: 8, pidOffset: 20, ipv6: false, listeners: null, addresses);
+        Read(AfInet6, Ipv6RowSize, portOffset: 20, pidOffset: 52, ipv6: true, listeners: null, addresses);
+        var bound = addresses
+            .Where(a => a.Listener.Port == server.Port && a.Listener.Pid == server.Pid)
+            .Select(a => a.Address.ToString())
+            .Distinct()
+            .ToArray();
+
+        DateTimeOffset? started = null;
+        long? memory = null;
+        int? threads = null;
+        try
+        {
+            using var process = Process.GetProcessById(server.Pid);
+            memory = process.WorkingSet64;
+            threads = process.Threads.Count;
+            started = process.StartTime; // negato per i processi di un amministratore
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception or NotSupportedException)
+        {
+            // processo chiuso o protetto: si mostra quello che si è letto
+        }
+
+        var path = WindowNative.GetProcessPath((uint)server.Pid);
+        string? commandLine = null;
+        string? parent = null;
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                $"SELECT CommandLine, ExecutablePath, ParentProcessId FROM Win32_Process WHERE ProcessId = {server.Pid}");
+            using var results = searcher.Get();
+            foreach (var item in results)
+            {
+                using (item)
+                {
+                    commandLine = item["CommandLine"] as string;
+                    path ??= item["ExecutablePath"] as string;
+                    if (item["ParentProcessId"] is uint parentPid && parentPid > 0)
+                        parent = ParentName((int)parentPid);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is ManagementException or COMException or UnauthorizedAccessException)
+        {
+            // WMI non disponibile: niente riga di comando
+        }
+
+        return new DevServerDetails(bound, path, commandLine is { Length: > 0 } ? commandLine.Trim() : null, parent, started, memory, threads);
+    }
+
+    private static string ParentName(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return $"{process.ProcessName} · PID {pid}";
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception)
+        {
+            return $"PID {pid} (chiuso)";
+        }
+    }
+
     /// <summary>Tutte le porte in ascolto con il proprietario (per <c>--dev-check</c>).</summary>
     public static IReadOnlyList<(PortListener Listener, PortOwner? Owner)> ReadAll()
     {
@@ -134,16 +213,18 @@ public sealed class PortWatcher : IDisposable
     private static List<PortListener> Listeners()
     {
         var listeners = new List<PortListener>();
-        Read(AfInet, Ipv4RowSize, portOffset: 8, pidOffset: 20, ipv6: false, listeners);
-        Read(AfInet6, Ipv6RowSize, portOffset: 20, pidOffset: 52, ipv6: true, listeners);
+        Read(AfInet, Ipv4RowSize, portOffset: 8, pidOffset: 20, ipv6: false, listeners, addresses: null);
+        Read(AfInet6, Ipv6RowSize, portOffset: 20, pidOffset: 52, ipv6: true, listeners, addresses: null);
         return listeners;
     }
 
     /// <summary>
     /// Righe <c>MIB_TCPROW_OWNER_PID</c> (stato, indirizzo, porta, …, PID) e <c>MIB_TCP6ROW_OWNER_PID</c>
-    /// (indirizzo 16 byte, scope, porta, …, stato, PID); la porta è in ordine di rete nei 16 bit bassi.
+    /// (indirizzo 16 byte, scope, porta, …, stato, PID); la porta è in ordine di rete nei 16 bit bassi. L'indirizzo locale
+    /// sta a 4 (IPv4, 4 byte) o a 0 (IPv6, 16 byte) e si legge solo se serve (<paramref name="addresses"/>).
     /// </summary>
-    private static void Read(int family, int rowSize, int portOffset, int pidOffset, bool ipv6, List<PortListener> into)
+    private static void Read(int family, int rowSize, int portOffset, int pidOffset, bool ipv6, List<PortListener>? listeners,
+        List<(PortListener Listener, IPAddress Address)>? addresses)
     {
         var size = 0;
         _ = GetExtendedTcpTable(0, ref size, false, family, TcpTableOwnerPidListener, 0);
@@ -163,7 +244,14 @@ public sealed class PortWatcher : IDisposable
                     var row = buffer + 4 + (i * rowSize);
                     var raw = Marshal.ReadInt32(row + portOffset);
                     var port = ((raw & 0xFF) << 8) | ((raw >> 8) & 0xFF);
-                    into.Add(new PortListener(port, Marshal.ReadInt32(row + pidOffset), ipv6));
+                    var listener = new PortListener(port, Marshal.ReadInt32(row + pidOffset), ipv6);
+                    listeners?.Add(listener);
+                    if (addresses is not null)
+                    {
+                        var bytes = new byte[ipv6 ? 16 : 4];
+                        Marshal.Copy(row + (ipv6 ? 0 : 4), bytes, 0, bytes.Length);
+                        addresses.Add((listener, new IPAddress(bytes)));
+                    }
                 }
                 return;
             }

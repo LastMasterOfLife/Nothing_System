@@ -63,6 +63,16 @@ public partial class App : Application
                 await RenderAccessSnapshots(folder);
                 Shutdown();
                 return;
+            case ["--debug-snapshot", var folder, .. var look]:
+                Rendering.Motion.Suspended = true;
+                Rendering.Theme.Apply(SnapshotAppearance(look));
+                await RenderDebugSnapshots(folder);
+                Shutdown();
+                return;
+            case ["--debug-check", var address, var code, .. var output]:
+                await DebugCheck(address, code, output.FirstOrDefault());
+                Shutdown();
+                return;
             case ["--mascot-sheet", var folder]:
                 Rendering.Motion.Suspended = true;
                 Rendering.Theme.Apply(SnapshotAppearance(["scuro", "mascotte"]));
@@ -72,6 +82,10 @@ public partial class App : Application
             case ["--outfit-sheet", var folder]:
                 Rendering.Motion.Suspended = true;
                 RenderOutfitSheet(folder);
+                Shutdown();
+                return;
+            case ["--mail-check", var folder]:
+                await MailCheck(folder);
                 Shutdown();
                 return;
             case ["--glass-check", var folder, .. var mode]:
@@ -616,6 +630,10 @@ public partial class App : Application
             new NothingShell.Core.Dev.DevServer(3000, 18244, "node", null, false),
             new NothingShell.Core.Dev.DevServer(5173, 18990, "node", null, false),
             new NothingShell.Core.Dev.DevServer(5432, 4120, "postgres", "Postgres", true),
+            new NothingShell.Core.Dev.DevServer(6379, 5210, "redis-server", "Redis", true),
+            new NothingShell.Core.Dev.DevServer(8000, 22110, "python", null, false),
+            new NothingShell.Core.Dev.DevServer(8080, 23400, "java", null, false),
+            new NothingShell.Core.Dev.DevServer(11434, 9001, "ollama", "Ollama", false),
         ]);
         SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Servers), Path.Combine(folder, "notch-servers.png"));
         notch.ShowHint(NothingShell.Core.Design.DotIcons.Plug, Rendering.Theme.Ink, "LOCALHOST:5173 - NODE", NotchPage.Servers);
@@ -956,7 +974,7 @@ public partial class App : Application
     }
 
     /// <summary>Mail d'esempio per disegnare il lettore senza collegarsi a una casella.</summary>
-    private sealed class SnapshotMail(IReadOnlyList<MailItem> mails) : IMailReaderActions
+    private sealed class SnapshotMail(IReadOnlyList<MailItem> mails, string? html = null) : IMailReaderActions
     {
         public IReadOnlyList<MailItem> Mails => mails;
 
@@ -976,9 +994,11 @@ public partial class App : Application
                 mail.Subject,
                 MailText.FromHtml("<p>Ciao Andrea,</p><p>ti giro l'ordine del giorno aggiornato:</p><ul><li>stato del progetto</li>" +
                                   "<li>budget del trimestre</li><li>varie ed eventuali</li></ul><p>Per entrare nella stanza " +
-                                  "virtuale usa il codice 482913.</p><p>A domani,<br>Mario</p>"),
+                                  "virtuale usa il codice 482913.</p><p>Il documento è su https://intranet.example.it/odg " +
+                                  "o scrivi a segreteria@example.it.</p><p>A domani,<br>Mario</p>"),
                 ["ordine-del-giorno.pdf"],
-                mail.SenderAddress), null));
+                mail.SenderAddress,
+                html), null));
 
         public Task<string?> MarkReadAsync(MailItem mail) => Task.FromResult<string?>(null);
 
@@ -1064,6 +1084,20 @@ public partial class App : Application
         public bool IsActivityEnabled(LiveActivity activity) => activity != LiveActivity.Brightness;
 
         public void SetActivityEnabled(LiveActivity activity, bool enabled)
+        {
+        }
+
+        public IReadOnlyList<NotchPage> NotchPages => NotchPageOrder.Resolve(null);
+
+        public bool IsNotchPageAvailable(NotchPage page) => page is not (NotchPage.Database or NotchPage.Ftp);
+
+        public bool IsNotchPageShown(NotchPage page) => page != NotchPage.Diagnosi;
+
+        public void SetNotchPageShown(NotchPage page, bool shown)
+        {
+        }
+
+        public void MoveNotchPage(NotchPage page, int delta)
         {
         }
 
@@ -1199,6 +1233,38 @@ public partial class App : Application
         }
 
         public void OpenCriticalCommands()
+        {
+        }
+
+        public NothingShell.Core.PortalDebug.DebugSettings DebugSettings { get; } = NothingShell.Core.PortalDebug.DebugSettings.Default;
+
+        public IReadOnlyList<PortalLink> DebugLinks { get; } = [];
+
+        public string DebugSdkFolder => @"C:\Program Files\NothingShell\sdk\django";
+
+        public event Action? DebugChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public void SetDebugEnabled(bool enabled)
+        {
+        }
+
+        public void SetDebugPortalWatch(string id, bool watch)
+        {
+        }
+
+        public void SetDebugRules(NothingShell.Core.PortalDebug.DebugAlertRules rules)
+        {
+        }
+
+        public Task<string?> PairDebugPortalAsync(string address, string code) => Task.FromResult<string?>(null);
+
+        public Task UnpairDebugPortalAsync(string id) => Task.CompletedTask;
+
+        public void OpenDebugDashboard(string id)
         {
         }
 
@@ -1910,6 +1976,36 @@ public partial class App : Application
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
     private static extern bool SetWindowPos(nint hwnd, nint insertAfter, int x, int y, int width, int height, uint flags);
+
+    /// <summary>
+    /// Il lettore vero, sullo schermo, con una mail di consenso in HTML (pulsanti Allow/Deny e un'immagine remota)
+    /// e poi con la stessa mail in testo semplice: <c>mail-html.png</c>, <c>mail-html-immagini.png</c>, <c>mail-testo.png</c>.
+    /// </summary>
+    private static async Task MailCheck(string folder)
+    {
+        Directory.CreateDirectory(folder);
+        const string Consent =
+            "<html><body style=\"font-family:Arial;background:#f4f4f4;padding:24px\"><table width=\"520\" style=\"background:#fff;padding:24px;border-radius:8px\">" +
+            "<tr><td><img src=\"https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png\" alt=\"[logo remoto]\" height=\"30\">" +
+            "<h2>Richiesta di accesso</h2><p>L'app <b>Nothing Shell</b> chiede di leggere la tua posta.</p>" +
+            "<p><a href=\"https://example.com/allow?t=1\" style=\"display:inline-block;background:#1a73e8;color:#fff;padding:10px 22px;border-radius:4px;text-decoration:none\">Allow</a> " +
+            "<a href=\"https://example.com/deny?t=1\" style=\"display:inline-block;border:1px solid #1a73e8;color:#1a73e8;padding:10px 22px;border-radius:4px;text-decoration:none\">Deny</a></p>" +
+            "<p style=\"color:#666;font-size:12px\">Non sei stato tu? <a href=\"https://example.com/help\">Segnalalo</a>.</p><script>document.body.innerHTML='SCRIPT ESEGUITO'</script></td></tr></table></body></html>";
+        var mail = new MailItem("Sicurezza account", "Richiesta di accesso alla posta", "Casella collegata", DateTimeOffset.Now)
+        {
+            Imap = new ImapMessageRef(1, 1),
+            SenderAddress = "no-reply@example.com",
+        };
+        foreach (var (name, html) in new[] { ("mail-html", Consent), ("mail-testo", (string?)null) })
+        {
+            var reader = new MailReaderWindow(new SnapshotMail([mail], html)) { ShowActivated = false, Topmost = true, Left = 80, Top = 60, Width = 1000, Height = 720 };
+            reader.Show();
+            reader.Select(mail);
+            await Task.Delay(TimeSpan.FromSeconds(5));
+            CaptureWindow(reader, Path.Combine(folder, $"{name}.png"));
+            reader.Close();
+        }
+    }
 
     private static void CaptureWindow(Window window, string path)
     {

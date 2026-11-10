@@ -26,9 +26,15 @@ public sealed record ShellSettings(
     string? AssistantModel = null,
     AppearanceSettings? Appearance = null,
     bool PowerfulAssistant = false,
-    IReadOnlyList<NotchOutfit>? Wardrobe = null)
+    IReadOnlyList<NotchOutfit>? Wardrobe = null,
+    IReadOnlyList<NotchPage>? NotchPageOrder = null,
+    IReadOnlyList<NotchPage>? HiddenNotchPages = null,
+    NothingShell.Core.PortalDebug.DebugSettings? Debug = null)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
+
+    /// <summary>Debug potenziato (docs/24-debug-potenziato.md): portali collegati e regole degli avvisi.</summary>
+    public NothingShell.Core.PortalDebug.DebugSettings DebugOrDefault() => Debug ?? NothingShell.Core.PortalDebug.DebugSettings.Default;
 
     /// <summary>
     /// Permesso di eseguire comandi e azioni dato a un connettore (docs/14-agenti-connettori.md): vale solo per il
@@ -56,6 +62,24 @@ public sealed record ShellSettings(
             disabled.Add(activity);
         return this with { DisabledActivities = disabled };
     }
+
+    /// <summary>Pagina del notch tenuta tra quelle da swipe (docs/03-notch.md); la Home c'è sempre.</summary>
+    public bool IsNotchPageShown(NotchPage page) => page == NotchPage.Home || HiddenNotchPages?.Contains(page) != true;
+
+    public ShellSettings WithNotchPage(NotchPage page, bool shown)
+    {
+        var hidden = (HiddenNotchPages ?? []).Where(p => p != page).ToList();
+        if (!shown && page != NotchPage.Home)
+            hidden.Add(page);
+        return this with { HiddenNotchPages = hidden };
+    }
+
+    /// <summary>Le pagine nell'ordine scelto, la Home per prima.</summary>
+    public IReadOnlyList<NotchPage> NotchPages => global::NothingShell.Core.Notch.NotchPageOrder.Resolve(NotchPageOrder);
+
+    /// <summary>Sposta una pagina di un posto fra quelle in <paramref name="movable"/>: le altre restano dove sono.</summary>
+    public ShellSettings WithNotchPageMoved(NotchPage page, int delta, IEnumerable<NotchPage> movable) =>
+        this with { NotchPageOrder = global::NothingShell.Core.Notch.NotchPageOrder.Move(NotchPageOrder, page, delta, movable) };
 
     /// <summary>
     /// I widget integrati e dei plugin ci sono finché non si spengono; quelli dei connettori solo se accesi

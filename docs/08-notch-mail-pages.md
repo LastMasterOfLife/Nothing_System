@@ -42,6 +42,17 @@ anima con la stessa molla della pillola quando si arriva sulla pagina e quando s
 L'elenco **scorre con la rotellina** (o due dita in verticale sul touchpad), a pixel; una sottile barra grigia a destra
 dice dove si è. Riaprendo la Posta l'elenco torna in cima.
 
+### Quali pagine e in che ordine
+In Impostazioni › Notch, sezione **PAGINE**, una riga per pagina nell'ordine dello swipe:
+- **frecce su/giù** spostano la pagina di un posto; scavalcano le pagine con la funzione spenta, che restano dove sono;
+- **interruttore** per tenerla o toglierla dal notch, solo fra quelle con la funzione accesa (le altre sono in grigio
+  con dove si accendono: Sviluppo, Agenti, Connettori, Telefono, Ore);
+- la **Home** è sempre la prima e non si toglie.
+
+Le pagine nuove o mai ordinate seguono nell'ordine di serie. Anche i pallini degli indicatori seguono l'ordine.
+`settings.json`: `notchPageOrder` (elenco di pagine), `hiddenNotchPages`. Core: `NotchPageOrder.Resolve` / `Move`,
+`ShellSettings.WithNotchPage` / `WithNotchPageMoved` (testati).
+
 In basso, indicatori di pagina: pallino bianco = pagina corrente, grigi le altre.
 Il cambio pagina scorre di lato (150 ms). Con un timer in corso la pillola compatta mostra il
 tempo rimanente al posto dell'ora, con il punto rosso.
@@ -83,7 +94,8 @@ Un clic su una mail della pagina Posta (righe evidenziate al passaggio del mouse
   per giorno (OGGI, IERI, QUESTA SETTIMANA, PRIMA; Core `MailGroups`) con avatar a punti delle iniziali (Core
   `MailSearch.Initials`), punto rosso se non letta e trattino rosso sulla scelta; a destra la mail scelta. La mail si scarica con una
   connessione a parte, Posta in arrivo in sola lettura e `BODY.PEEK`: **aprirla non la segna come letta**.
-  Testo semplice se c'è, altrimenti l'HTML ripulito (Core `MailText`); degli allegati solo i nomi.
+  Se la mail ha una parte HTML si mostra **com'è** (vedi *Mail in HTML* sotto); il testo semplice (o l'HTML ripulito,
+  Core `MailText`) serve al codice di verifica e quando l'HTML non si può mostrare. Degli allegati solo i nomi.
   Contenuti solo in memoria, finché il lettore è aperto.
 - **notifica** → si apre l'app che l'ha mandata (AppUserModelID della notifica, se è nello Start); altrimenti
   il lettore mostra oggetto e mittente.
@@ -106,9 +118,36 @@ Il testo della mail è in una scheda che occupa lo spazio rimasto e segue il rid
 grigia che dice dove si è. Il **codice di verifica** compare in grande, a punti, in una scheda rossa con *Copia*; gli
 allegati sono gettoni (un clic apre la webmail).
 
+### Mail in HTML
+Le mail con pulsanti (per esempio *Allow* / *Deny* per autorizzare un accesso), tabelle e colori si vedono come le ha
+preparate il mittente, su una scheda bianca, con **WebView2 in composizione** (`MailHtmlView`: il lettore è una finestra
+trasparente, dove il WebView2 classico non si vedrebbe). Il controllo disegna con Direct3D, quindi la shell, che di
+solito disegna in software per non caricare il driver GPU, passa all'hardware solo mentre un lettore con l'HTML è aperto.
+Sicurezza (Core `MailHtml.Document`, testato):
+- **script spenti** (impostazione di WebView2 e `script-src 'none'`), tolti `<script>`, `<iframe>`, `<object>`,
+  `<form>`, `<base>`, `<meta http-equiv>` (redirect) e gli attributi `on…`; i link `javascript:` diventano `#`;
+- **nessuna navigazione dentro il lettore**: ogni link si apre nel **browser** (o nell'app di posta per `mailto:`), solo
+  `http`, `https`, `mailto` (Core `MailHtml.Openable`); i redirect fatti da codice si bloccano e basta. Passando sopra un
+  link, in basso si vede dove porta;
+- **immagini da internet bloccate** (Content-Security-Policy: solo `data:`): i pixel di tracciamento direbbero al
+  mittente che la mail è stata aperta. Se la mail ne ha, compare *Mostra immagini*, che vale per quella mail finché il
+  lettore è aperto. Le immagini incorporate (`cid:`, loghi e firme) si vedono subito, sostituite dai loro dati
+  (Core `MailHtml.InlineImages`, fino a 5 MB);
+- profilo di WebView2 in `~\.nothing-shell\WebView2`, senza compilazione automatica né password salvate.
+
+Ctrl+rotellina ingrandisce anche l'HTML (zoom della pagina). Senza WebView2 Runtime, o se l'HTML supera 1,5 MB, la mail
+si mostra come testo.
+
+Nel **testo semplice** gli indirizzi web (`https://…`, `www.…`) e di posta sono link (Core `MailHtml.Linkify`, testato):
+un clic li apre nel browser o nell'app di posta, la punteggiatura finale resta fuori.
+
+`--mail-check <cartella>` apre il lettore vero con una mail di consenso in HTML e la fotografa (`mail-html.png`,
+`mail-testo.png`).
+
 Azioni del lettore:
 | Azione | Cosa fa |
 |---|---|
+| *Mostra immagini* | solo per le mail in HTML con immagini da internet: le scarica (vedi sopra) |
 | *Rispondi* | `mailto:` al mittente (o Reply-To) con "Re: oggetto", nell'app di posta predefinita (Core `MailLinks.Reply`) |
 | *Apri in …* | la webmail: quella indicata nelle impostazioni, dei provider noti o `https://<server>/`. Se il sito è installato come **app di Edge** (AppUserModelID `host-…`) si apre l'app (Core `MailLinks`) |
 | *Segna come letta* | aggiunge `\Seen` sul server (connessione in lettura e scrittura solo per questo): l'unica modifica alla casella, e solo su richiesta |
@@ -138,6 +177,6 @@ Sezione **POSTA NEL NOTCH**: interruttore *Mail nel notch*, poi:
 `settings.json`: `mailInNotch`, `extraMailApps`, `mailAccount` (`address`, `server`, `port`, `userName`, `webmail`).
 
 ## Logica nel Core (testata)
-`NotchStateMachine` (stato Alert e scadenze), `NotchPager`, `SwipeDetector`, `Countdown`,
+`NotchStateMachine` (stato Alert e scadenze), `NotchPager`, `NotchPageOrder`, `SwipeDetector`, `Countdown`,
 `MailDetector`, `ImapSetup`, `ImapCursor`, `MailFeed` (dei doppioni tiene la mail della casella, che si
 può riaprire), `MailText`, `MailCodes`, `MailLinks`.

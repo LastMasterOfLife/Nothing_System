@@ -484,3 +484,7 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Python (sdk/)
+*.egg-info/
+__pycache__/

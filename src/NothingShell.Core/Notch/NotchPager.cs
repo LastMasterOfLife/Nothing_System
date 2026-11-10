@@ -9,6 +9,7 @@ public enum NotchPage
     Work,
     Agents,
     Servers,
+    Debug,
     Devices,
     Database,
     Ftp,
@@ -42,12 +43,13 @@ public sealed class NotchPager
 
     public int Index => Array.IndexOf(_available, Current);
 
-    /// <summary>Le pagine visibili, nell'ordine fisso; true se la corrente è sparita (si torna alla Home).</summary>
+    /// <summary>
+    /// Le pagine visibili, nell'ordine dato (la Home è sempre la prima); true se la corrente è sparita (si torna alla Home).
+    /// </summary>
     public bool SetAvailable(IEnumerable<NotchPage> pages)
     {
         ArgumentNullException.ThrowIfNull(pages);
-        var set = pages.ToHashSet();
-        _available = Pages.Where(p => p == NotchPage.Home || set.Contains(p)).ToArray();
+        _available = [NotchPage.Home, .. pages.Where(p => p != NotchPage.Home).Distinct()];
         if (_available.Contains(Current))
             return false;
         Current = NotchPage.Home;
@@ -74,6 +76,48 @@ public sealed class NotchPager
             return false;
         Current = page;
         return true;
+    }
+}
+
+/// <summary>
+/// Ordine delle pagine scelto in Impostazioni › Notch: la Home resta la prima, le pagine mai ordinate (nuove o
+/// assenti dal file) seguono nell'ordine di serie.
+/// </summary>
+public static class NotchPageOrder
+{
+    /// <summary>Tutte le pagine, una volta sola, nell'ordine salvato.</summary>
+    public static IReadOnlyList<NotchPage> Resolve(IEnumerable<NotchPage>? saved)
+    {
+        var order = new List<NotchPage> { NotchPage.Home };
+        foreach (var page in (saved ?? []).Concat(NotchPager.Pages))
+        {
+            if (Enum.IsDefined(page) && !order.Contains(page))
+                order.Add(page);
+        }
+        return order;
+    }
+
+    /// <summary>
+    /// Sposta una pagina di un posto (<paramref name="delta"/> −1 su, +1 giù) scavalcando quelle che ora non si vedono
+    /// (<paramref name="movable"/>: le funzioni spente restano dove sono). La Home non si sposta e non si scavalca.
+    /// </summary>
+    public static IReadOnlyList<NotchPage> Move(IEnumerable<NotchPage>? saved, NotchPage page, int delta, IEnumerable<NotchPage> movable)
+    {
+        ArgumentNullException.ThrowIfNull(movable);
+        var order = Resolve(saved).ToList();
+        var candidates = movable.ToHashSet();
+        var from = order.IndexOf(page);
+        if (page == NotchPage.Home || delta == 0 || from < 0)
+            return order;
+        var step = Math.Sign(delta);
+        for (var to = from + step; to > 0 && to < order.Count; to += step)
+        {
+            if (!candidates.Contains(order[to]))
+                continue;
+            (order[from], order[to]) = (order[to], order[from]);
+            break;
+        }
+        return order;
     }
 }
 

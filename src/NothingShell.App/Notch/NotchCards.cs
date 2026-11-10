@@ -382,6 +382,34 @@ internal static class NotchCards
         return Layout(tile, name, lines, Actions([.. buttons]), Theme.Critical);
     }
 
+    /// <summary>Avviso del Debug potenziato: errore nuovo, 5xx, lentezza, portale giù; Dashboard apre l'evento.</summary>
+    public static UIElement DebugAlert(string portal, Core.PortalDebug.DebugAlert alert, Action open, Action? copy, Action dismiss)
+    {
+        ArgumentNullException.ThrowIfNull(portal);
+        ArgumentNullException.ThrowIfNull(alert);
+        ArgumentNullException.ThrowIfNull(open);
+        ArgumentNullException.ThrowIfNull(dismiss);
+        var color = alert.IsBad ? Theme.Critical : Theme.Ink;
+        var tile = Tile(new DotMatrixView { Pitch = 4, Dots = DotText.Render(alert.Kind == Core.PortalDebug.DebugAlertKind.Slow ? "MS" : alert.IsBad ? "ERR" : "OK"), DotColor = color, HorizontalAlignment = HorizontalAlignment.Center });
+        var buttons = new List<(string, Action)>
+        {
+            ("DASHBOARD", () =>
+            {
+                open();
+                dismiss();
+            }),
+        };
+        if (copy is not null)
+            buttons.Add(("COPIA", () =>
+            {
+                copy();
+                dismiss();
+            }));
+        var detail = alert.Detail.Split('\n');
+        string[] lines = [$"{portal} · {detail[0]}", .. detail.Skip(1).Take(1)];
+        return Layout(tile, alert.Title, lines, Actions([.. buttons]), color);
+    }
+
     private static Border Tile(params UIElement[] content)
     {
         var stack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };

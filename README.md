@@ -55,6 +55,11 @@ Appunti con Formatta, Apri, Copia HEX…) e tolgono dagli appunti dopo 30 s chia
 La pagina **Server** elenca le porte in ascolto (node, dotnet, Postgres…) con Apri e Termina.
 Tutto si spegne in Impostazioni › Sviluppo. Dettagli in [docs/12-sviluppo.md](docs/12-sviluppo.md).
 
+**Debug potenziato** per i portali in sviluppo: l'app Django `nothing_debug` ([sdk/django](sdk/django/)) stampa un codice,
+lo si scrive in Impostazioni › Debug potenziato e si apre una dashboard con richieste, log, errori (con lo stack che si apre
+nell'editor), query lente, percorsi più lenti e controlli del portale. Il notch avvisa da solo di errori nuovi, 5xx,
+richieste lente e portale giù. Dettagli in [docs/24-debug-potenziato.md](docs/24-debug-potenziato.md).
+
 **Telefono Android** tramite Collegamento al telefono di Windows: chiamata in arrivo come scheda nel notch
 (*Rispondi* apre Collegamento al telefono), chiamate perse e notifiche del telefono come avvisi.
 Con il **collegamento diretto** (protocollo KDE Connect, app KDE Connect sul telefono, Impostazioni ›
