@@ -226,6 +226,85 @@ public class JumpListTests
         Assert.Equal(@"""C:\\""", JumpLists.Quote(@"C:\"));
         Assert.Equal(@"""C:\a b""", JumpLists.Quote(@"C:\a b"));
     }
+
+    private static JumpItem Folder(string name) =>
+        new(name, @"C:\VS Code\Code.exe", $@"--folder-uri ""file:///c%3A/dev/{name}""", true);
+
+    [Fact]
+    public void ComposePutsAppCategoriesBeforeRecentFiles()
+    {
+        var sections = JumpLists.Compose(
+            [new JumpSection("Recent Folders", [Folder("a"), Folder("b")])],
+            [new("x.md", @"C:\x.md", null, false)], frequent: false);
+
+        Assert.Equal(["RECENT FOLDERS", JumpLists.RecentTitle], sections.Select(s => s.Title));
+        Assert.Equal(["a", "b"], sections[0].Items.Select(i => i.Title));
+    }
+
+    [Fact]
+    public void ComposeFillsOnlyTheSlotsLeftWithFiles()
+    {
+        var sections = JumpLists.Compose(
+            [new JumpSection("Recent Folders", Enumerable.Range(0, 9).Select(i => Folder($"p{i}")).ToArray())],
+            Enumerable.Range(0, 5).Select(i => new JumpItem($"f{i}", $@"C:\f{i}.md", null, false)), frequent: true);
+
+        Assert.Equal(JumpLists.MaxItems, sections.Sum(s => s.Items.Count));
+        Assert.Equal(JumpLists.FrequentTitle, sections[1].Title);
+        Assert.Single(sections[1].Items);
+    }
+
+    [Fact]
+    public void ComposeDropsEmptySections() =>
+        Assert.Empty(JumpLists.Compose([new JumpSection("Vuota", [])], [], frequent: false));
+}
+
+public class CustomDestinationsTests
+{
+    [Theory]
+    [InlineData("Microsoft.VisualStudioCode", "1ced32d74a95c7bc")]
+    [InlineData("Chrome", "5d696d521de238c3")]
+    [InlineData("MSEdge", "ccba5a5986c77e43")]
+    public void FileNameIsCrc64OfTheAppId(string appId, string hash) =>
+        Assert.Equal($"{hash}.customDestinations-ms", CustomDestinations.FileName(appId));
+
+    /// <summary>File come quello di VS Code: attività, categoria "Recent Folders", recenti di Windows.</summary>
+    private static byte[] Sample(bool truncated = false)
+    {
+        using var stream = new MemoryStream();
+        using var w = new BinaryWriter(stream);
+        void Link(byte tag)
+        {
+            w.Write(CustomDestinations.ShellLinkClsid.ToByteArray());
+            w.Write([tag, 0, 0, 0]); // collegamento finto: 4 byte, il primo dice quale
+        }
+
+        w.Write(2u); w.Write(3u); w.Write(0u);
+        w.Write(2u); w.Write(1u); Link(9); w.Write(CustomDestinations.Footer);
+        w.Write(0u); w.Write((ushort)14); w.Write(System.Text.Encoding.Unicode.GetBytes("Recent Folders"));
+        w.Write(2u); Link(1); Link(2); w.Write(CustomDestinations.Footer);
+        w.Write(1u); w.Write(2u); w.Write(CustomDestinations.Footer);
+        var bytes = stream.ToArray();
+        return truncated ? bytes[..^22] : bytes; // l'ultimo collegamento resta a metà
+    }
+
+    private static (JumpItem?, int)? FakeLink(byte[] data, int offset) =>
+        (new JumpItem($"p{data[offset]}", @"C:\Code.exe", null, true), 4);
+
+    [Fact]
+    public void ParseReadsCustomCategoriesAndSkipsTasks()
+    {
+        var section = Assert.Single(CustomDestinations.Parse(Sample(), FakeLink));
+        Assert.Equal("Recent Folders", section.Title);
+        Assert.Equal(["p1", "p2"], section.Items.Select(i => i.Title));
+    }
+
+    [Fact]
+    public void ParseStopsAtUnreadableLinkOrTruncatedFile()
+    {
+        Assert.Empty(CustomDestinations.Parse(Sample(), (_, _) => null));
+        Assert.Empty(CustomDestinations.Parse(Sample(truncated: true), FakeLink));
+        Assert.Empty(CustomDestinations.Parse([1, 2, 3], FakeLink));
+    }
 }
 
 public class MultiMonitorBarTests

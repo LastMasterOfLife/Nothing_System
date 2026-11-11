@@ -388,12 +388,10 @@ public sealed class BarWindow : Window
         var appId = _tracker.AppIdOf(group);
         var exe = _tracker.ExePathOf(group);
         var appIcon = IconOf(group);
-        var (items, frequent) = appId is null ? ((IReadOnlyList<JumpItem>)[], false) : ShellNative.ReadJumpList(appId);
         return new JumpListModel(
             AppName(group, appId, exe),
             appIcon,
-            frequent,
-            JumpLists.Clean(items),
+            appId is null ? [] : ShellNative.ReadJumpList(appId),
             group.Windows.Count,
             item => item.IsLink ? appIcon : _icons.ForFile(item.Path),
             item => Run(JumpLists.Open(item, exe)),

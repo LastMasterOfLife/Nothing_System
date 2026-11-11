@@ -18,8 +18,7 @@ namespace NothingShell.App.Bar;
 public sealed record JumpListModel(
     string AppName,
     ImageSource? AppIcon,
-    bool Frequent,
-    IReadOnlyList<JumpItem> Items,
+    IReadOnlyList<JumpSection> Sections,
     int OpenWindows,
     Func<JumpItem, ImageSource?> IconOf,
     Action<JumpItem> OpenItem,
@@ -126,26 +125,22 @@ public sealed class JumpListWindow : Window
     private void Build(JumpListModel model)
     {
         var stack = new StackPanel();
-        stack.Children.Add(new DotMatrixView
+        if (model.Sections.Count == 0)
         {
-            Pitch = 2,
-            DotColor = Theme.Accent,
-            Dots = DotText.Render(model.Frequent ? "FREQUENTI" : "RECENTI"),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Margin = new Thickness(10, 0, 0, 10),
-        });
-
-        if (model.Items.Count == 0)
-        {
+            stack.Children.Add(Header(JumpLists.RecentTitle, first: true));
             var none = Label("Nessun elemento recente", Theme.MutedBrush);
             none.Margin = new Thickness(10, 0, 0, 8);
             stack.Children.Add(none);
         }
-        foreach (var item in model.Items)
+        foreach (var section in model.Sections)
         {
-            var row = Row(IconView(model.IconOf(item)), item.Title, Theme.InkBrush, () => model.OpenItem(item));
-            row.ToolTip = item.IsLink && !string.IsNullOrEmpty(item.Arguments) ? $"{item.Path} {item.Arguments}" : item.Path;
-            stack.Children.Add(row);
+            stack.Children.Add(Header(section.Title, first: stack.Children.Count == 0));
+            foreach (var item in section.Items)
+            {
+                var row = Row(IconView(model.IconOf(item)), item.Title, Theme.InkBrush, () => model.OpenItem(item));
+                row.ToolTip = item.IsLink && !string.IsNullOrEmpty(item.Arguments) ? $"{item.Path} {item.Arguments}" : item.Path;
+                stack.Children.Add(row);
+            }
         }
 
         stack.Children.Add(new Rectangle { Height = 1, Fill = Theme.OutlineBrush, Margin = new Thickness(10, 8, 10, 8) });
@@ -165,6 +160,15 @@ public sealed class JumpListWindow : Window
         }
         _panel.Child = stack;
     }
+
+    private static DotMatrixView Header(string title, bool first) => new()
+    {
+        Pitch = 2,
+        DotColor = Theme.Accent,
+        Dots = DotText.Render(title),
+        HorizontalAlignment = HorizontalAlignment.Left,
+        Margin = new Thickness(10, first ? 0 : 10, 0, 10),
+    };
 
     private Border Row(UIElement icon, string text, Brush foreground, Action action)
     {

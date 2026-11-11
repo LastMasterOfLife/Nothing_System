@@ -6,6 +6,9 @@ namespace NothingShell.Core.Bar;
 /// </summary>
 public sealed record JumpItem(string Title, string Path, string? Arguments, bool IsLink);
 
+/// <summary>Gruppo di voci con un titolo: una categoria dell'app (es. "Recent Folders" di VS Code) o i recenti di Windows.</summary>
+public sealed record JumpSection(string Title, IReadOnlyList<JumpItem> Items);
+
 /// <summary>Comando da avviare: eseguibile o documento, con argomenti opzionali.</summary>
 public sealed record LaunchCommand(string FileName, string? Arguments);
 
@@ -13,6 +16,32 @@ public sealed record LaunchCommand(string FileName, string? Arguments);
 public static class JumpLists
 {
     public const int MaxItems = 10;
+    public const string RecentTitle = "RECENTI";
+    public const string FrequentTitle = "FREQUENTI";
+
+    /// <summary>
+    /// Sezioni da mostrare: prima le categorie dell'app (i progetti di VS Code), poi i file recenti di Windows
+    /// nei posti rimasti. In tutto al massimo <see cref="MaxItems"/> voci, senza doppioni fra le sezioni.
+    /// </summary>
+    public static IReadOnlyList<JumpSection> Compose(IEnumerable<JumpSection> custom, IEnumerable<JumpItem> documents, bool frequent)
+    {
+        ArgumentNullException.ThrowIfNull(custom);
+        ArgumentNullException.ThrowIfNull(documents);
+        var sections = new List<JumpSection>();
+        var seen = new HashSet<(string, string?)>();
+        var left = MaxItems;
+        foreach (var section in custom.Append(new JumpSection(frequent ? FrequentTitle : RecentTitle, documents.ToArray())))
+        {
+            var items = Clean(section.Items).Where(i => seen.Add((i.Path.ToUpperInvariant(), i.Arguments))).Take(left).ToArray();
+            if (items.Length == 0)
+                continue;
+            sections.Add(section with { Title = section.Title.Trim().ToUpperInvariant(), Items = items });
+            left -= items.Length;
+            if (left == 0)
+                break;
+        }
+        return sections;
+    }
 
     /// <summary>
     /// Solo file e cartelle (niente <c>mailto:</c>, <c>tel:</c> e altri URI interni), senza doppioni,

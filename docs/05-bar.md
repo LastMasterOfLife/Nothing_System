@@ -111,17 +111,24 @@ finestra dell'app (le stesse di Windows: `DwmRegisterThumbnail`, un video contin
 ## Recenti (clic destro su un'app)
 Pannello con bordo e vetro delle superfici, angoli 8, sopra l'icona; si chiude cliccando altrove o con Esc.
 ```
- R E C E N T I          (titolo a punti rossi; FREQUENTI se l'app tiene solo quelli)
+ R E C E N T   F O L D E R S   (categoria dell'app, titolo a punti rossi)
+ [icona] Nothing_System
+ [icona] PlaiNest
+ R E C E N T I                 (FREQUENTI se l'app tiene solo quelli; solo se restano posti)
  [▣] istruzioni_report.md
- [▣] Totem_ENVI_park
  ───────────────
  [icona] Visual Studio Code   → nuova finestra
  [×]     Chiudi 2 finestre    → solo se l'app è aperta
 ```
-- Elementi da `IApplicationDocumentLists` (API documentata della shell): recenti, o frequenti se i recenti
-  sono vuoti; al massimo 10, senza URI interni (`mailto:`, `tel:`…) e senza doppioni.
-- Le categorie personalizzate e le attività delle jump list (es. "Nuova finestra in incognito") e gli
-  elementi bloccati nella jump list non hanno un'API di lettura: non sono mostrati.
+- Prima le **categorie personalizzate** dell'app (i progetti recenti di VS Code), poi i file recenti nei posti
+  rimasti; in tutto al massimo 10 voci, senza URI interni (`mailto:`, `tel:`…) e senza doppioni.
+- Le categorie personalizzate non hanno un'API di lettura: si leggono dal file
+  `%APPDATA%\Microsoft\Windows\Recent\CustomDestinations\<CRC-64 dell'AppID>.customDestinations-ms`
+  (formato in `CustomDestinations.cs`); ogni voce è un collegamento serializzato, caricato con
+  `IPersistStream`. Titolo dalla proprietà `System.Title`; si saltano i collegamenti a eseguibili che non esistono.
+- I file recenti da `IApplicationDocumentLists` (API documentata della shell): recenti, o frequenti se i
+  recenti sono vuoti.
+- Le attività delle jump list (es. "Nuova finestra in incognito") e gli elementi bloccati non sono mostrati.
 - Un file si apre **con l'app** (il PDF in Chrome, la cartella in VS Code); per Esplora file e le app
   senza eseguibile si apre il percorso. Un collegamento (progetti di Android Studio, connessioni Desktop
   remoto) avvia il suo eseguibile con i suoi argomenti.

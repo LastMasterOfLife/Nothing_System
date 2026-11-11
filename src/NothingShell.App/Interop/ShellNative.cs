@@ -16,6 +16,7 @@ internal static class ShellNative
     public static readonly PropertyKey AppUserModelId = new(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5);
     public static readonly PropertyKey LinkTargetParsingPath = new(new Guid("B9B4B3FC-2B51-4A42-B5D8-324146AFCF25"), 2);
     public static readonly PropertyKey LinkArguments = new(new Guid("436F2667-14E2-4FEB-B30A-146C53B5B674"), 100);
+    private static readonly PropertyKey LinkTitle = new(new Guid("F29F85E0-4FF9-1068-AB91-08002B27B3D9"), 2);
 
     private const ushort VtLpwstr = 31;
     private const int AdltRecent = 0;
@@ -80,17 +81,7 @@ internal static class ShellNative
             return null;
         try
         {
-            var key = AppUserModelId;
-            if (store.GetValue(ref key, out var value) != 0)
-                return null;
-            try
-            {
-                return value.Type == VtLpwstr && value.Pointer != 0 ? Marshal.PtrToStringUni(value.Pointer) : null;
-            }
-            finally
-            {
-                _ = PropVariantClear(ref value);
-            }
+            return ReadString(store, AppUserModelId);
         }
         finally
         {
@@ -99,13 +90,66 @@ internal static class ShellNative
     }
 
     /// <summary>
-    /// Recenti dell'app (o i frequenti, se l'app non tiene i recenti), come nella jump list di Windows.
-    /// Restituisce anche se l'elenco è dei frequenti.
+    /// Jump list dell'app come la mostra Windows: le categorie dell'app (i progetti recenti di VS Code),
+    /// poi i file recenti (o i frequenti, se l'app non tiene i recenti).
     /// </summary>
-    public static (IReadOnlyList<JumpItem> Items, bool Frequent) ReadJumpList(string appId)
+    public static IReadOnlyList<JumpSection> ReadJumpList(string appId)
     {
         var recent = ReadDocumentList(appId, AdltRecent);
-        return recent.Count > 0 ? (recent, false) : (ReadDocumentList(appId, AdltFrequent), true);
+        var frequent = recent.Count == 0;
+        return JumpLists.Compose(ReadCustomCategories(appId), frequent ? ReadDocumentList(appId, AdltFrequent) : recent, frequent);
+    }
+
+    /// <summary>Categorie personalizzate dal file <c>CustomDestinations</c> dell'app; nessuna se manca o non si legge.</summary>
+    private static IReadOnlyList<JumpSection> ReadCustomCategories(string appId)
+    {
+        if (GetKnownFolderPath("{AE50C081-EBD2-438A-8655-8A092E34987A}") is not { } recentFolder)
+            return [];
+        var file = System.IO.Path.Combine(recentFolder, "CustomDestinations", CustomDestinations.FileName(appId));
+        try
+        {
+            return System.IO.File.Exists(file) ? CustomDestinations.Parse(System.IO.File.ReadAllBytes(file), ReadSerializedLink) : [];
+        }
+        catch (System.IO.IOException)
+        {
+            return [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>Carica un collegamento serializzato (formato .lnk) e ne misura la lunghezza dalla posizione del flusso.</summary>
+    private static (JumpItem? Item, int Length)? ReadSerializedLink(byte[] data, int offset)
+    {
+        var type = Type.GetTypeFromCLSID(CustomDestinations.ShellLinkClsid);
+        if (type is null || Activator.CreateInstance(type) is not IShellLinkW link)
+            return null;
+        System.Runtime.InteropServices.ComTypes.IStream? stream = null;
+        var position = Marshal.AllocCoTaskMem(sizeof(long));
+        try
+        {
+            stream = SHCreateMemStream(data[offset..], (uint)(data.Length - offset));
+            if (stream is null || ((IPersistStream)link).Load(stream) != 0)
+                return null;
+            stream.Seek(0, 1 /* STREAM_SEEK_CUR */, position);
+            var length = (int)Marshal.ReadInt64(position);
+            // Voci verso app UWP o eseguibili spariti (Teams) non si saprebbero aprire: si saltano.
+            var item = DescribeLink(link);
+            return (System.IO.File.Exists(item.Path) ? item : null, length);
+        }
+        catch (Exception ex) when (ex is COMException or InvalidCastException)
+        {
+            return null;
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(position);
+            if (stream is not null)
+                Marshal.ReleaseComObject(stream);
+            Marshal.ReleaseComObject(link);
+        }
     }
 
     private static List<JumpItem> ReadDocumentList(string appId, int listType)
@@ -147,19 +191,41 @@ internal static class ShellNative
     private static JumpItem? Describe(object element)
     {
         if (element is IShellLinkW link)
-        {
-            var path = new StringBuilder(1024);
-            var arguments = new StringBuilder(4096);
-            var description = new StringBuilder(1024);
-            link.GetPath(path, path.Capacity, 0, 0);
-            link.GetArguments(arguments, arguments.Capacity);
-            link.GetDescription(description, description.Capacity);
-            return new JumpItem(description.ToString(), path.ToString(), arguments.ToString(), IsLink: true);
-        }
+            return DescribeLink(link);
         if (element is IShellItem2 item)
             return new JumpItem(DisplayName(item, SigdnNormalDisplay) ?? string.Empty,
                 DisplayName(item, SigdnFileSysPath) ?? string.Empty, null, IsLink: false);
         return null;
+    }
+
+    /// <summary>
+    /// Titolo dalla proprietà Title che le app impostano sulle voci della jump list (VS Code: il nome della cartella),
+    /// altrimenti dalla descrizione del collegamento.
+    /// </summary>
+    private static JumpItem DescribeLink(IShellLinkW link)
+    {
+        var path = new StringBuilder(1024);
+        var arguments = new StringBuilder(4096);
+        var description = new StringBuilder(1024);
+        link.GetPath(path, path.Capacity, 0, 0);
+        link.GetArguments(arguments, arguments.Capacity);
+        link.GetDescription(description, description.Capacity);
+        var title = link is IPropertyStore store ? ReadString(store, LinkTitle) : null;
+        return new JumpItem(title ?? description.ToString(), path.ToString(), arguments.ToString(), IsLink: true);
+    }
+
+    private static string? ReadString(IPropertyStore store, PropertyKey key)
+    {
+        if (store.GetValue(ref key, out var value) != 0)
+            return null;
+        try
+        {
+            return value.Type == VtLpwstr && value.Pointer != 0 ? Marshal.PtrToStringUni(value.Pointer) : null;
+        }
+        finally
+        {
+            _ = PropVariantClear(ref value);
+        }
     }
 
     /// <summary>Cartella Download dell'utente (anche se spostata su un altro disco).</summary>
@@ -271,6 +337,21 @@ internal static class ShellNative
         void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string dir);
         void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder args, int capacity);
     }
+
+    [ComImport]
+    [Guid("00000109-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IPersistStream
+    {
+        void GetClassID(out Guid clsid);
+        [PreserveSig]
+        int IsDirty();
+        [PreserveSig]
+        int Load(System.Runtime.InteropServices.ComTypes.IStream stream);
+    }
+
+    [DllImport("shlwapi.dll")]
+    private static extern System.Runtime.InteropServices.ComTypes.IStream? SHCreateMemStream(byte[] init, uint size);
 
     [DllImport("shell32.dll")]
     private static extern int SHCreateItemFromIDList(nint idList, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IShellItem2? item);

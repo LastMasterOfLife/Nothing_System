@@ -43,7 +43,7 @@ public sealed class ConnectorHost : IDisposable
     /// <param name="ledgerPath">Dove salvare il registro dei costi LLM; null = solo in memoria (diagnostica).</param>
     public ConnectorHost(string? ledgerPath)
     {
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd("NothingShell/0.12");
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd($"NothingShell/{typeof(ConnectorHost).Assembly.GetName().Version?.ToString(3) ?? "1.0.0"}");
         _ledgerPath = ledgerPath;
         _ledger = ledgerPath is null ? new LlmLedger() : LlmLedger.Load(ledgerPath);
     }

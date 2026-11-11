@@ -1378,9 +1378,11 @@ public partial class App : Application
         lines.Add("Appuntate:");
         foreach (var pin in pins)
         {
-            var (items, frequent) = Interop.ShellNative.ReadJumpList(pin.AppId);
+            var sections = Interop.ShellNative.ReadJumpList(pin.AppId);
             lines.Add($"  {pin.Name} | {pin.AppId} | {pin.LaunchPath} | exe={pin.ExePath} args={pin.HasArguments} | " +
-                      $"{(frequent ? "frequenti" : "recenti")}={NothingShell.Core.Bar.JumpLists.Clean(items).Count}");
+                      string.Join(", ", sections.Select(s => $"{s.Title}={s.Items.Count}")));
+            foreach (var section in sections)
+                lines.AddRange(section.Items.Select(i => $"      [{section.Title}] {i.Title} | {i.Path} {i.Arguments}"));
         }
         File.WriteAllLines(file, lines);
     }
@@ -1448,12 +1450,11 @@ public partial class App : Application
         var appIcons = new AppIcons();
         foreach (var pin in pins)
         {
-            var (items, frequent) = Interop.ShellNative.ReadJumpList(pin.AppId);
-            var clean = NothingShell.Core.Bar.JumpLists.Clean(items);
-            if (clean.Count < 3)
+            var sections = Interop.ShellNative.ReadJumpList(pin.AppId);
+            if (sections.Sum(s => s.Items.Count) < 3)
                 continue;
             var icon = shellIcons.GetForPath(pin.LaunchPath);
-            var model = new JumpListModel(pin.Name, icon, frequent, clean, 2,
+            var model = new JumpListModel(pin.Name, icon, sections, 2,
                 item => item.IsLink ? icon : appIcons.ForFile(item.Path), _ => { }, () => { }, () => { });
             SaveSnapshot(new JumpListWindow().PrepareSnapshot(model), Path.Combine(folder, "jumplist.png"));
             break;
