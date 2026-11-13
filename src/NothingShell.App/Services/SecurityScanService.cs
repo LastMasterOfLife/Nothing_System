@@ -15,10 +15,10 @@ public sealed record ScanOptions
 
     public bool IncludeSubdomains { get; init; }
 
-    public TimeSpan MaxDuration { get; init; } = TimeSpan.FromMinutes(15);
+    public TimeSpan MaxDuration { get; init; } = TimeSpan.FromMinutes(12);
 
-    /// <summary>Durata massima di un singolo strumento.</summary>
-    public TimeSpan PerToolTimeout { get; init; } = TimeSpan.FromMinutes(8);
+    /// <summary>Durata massima di un singolo strumento: scaduto, quello strumento si salta (con l'eventuale parziale) e si prosegue.</summary>
+    public TimeSpan PerToolTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
     public string OutputFolder { get; init; } = SecurityScanService.DefaultFolder;
 }
@@ -219,70 +219,91 @@ public sealed class SecurityScanService
         var url = target.Display;
         var output = new StringBuilder();
 
-        switch (step.Tool)
+        try
         {
-            case "nuclei":
+            switch (step.Tool)
             {
-                // -jsonl su stdout; esclusi i tag distruttivi; limiti di ritmo e tempo. Niente fuzzing aggressivo.
-                var args = new[]
+                case "nuclei":
                 {
-                    "-target", url, "-jsonl", "-no-color", "-disable-update-check",
-                    "-exclude-tags", "dos,intrusive,fuzz", "-severity", "low,medium,high,critical", // niente «info»: solo debolezze vere, e più veloce
-                    "-stats", "-stats-interval", "15", // righe di avanzamento periodiche: così il notch non sembra fermo durante i minuti di scansione
-                    "-rate-limit", "25", "-timeout", "10", "-retries", "1",
-                };
-                await RunProcessAsync(exe, args, line =>
-                {
-                    output.AppendLine(line);
-                    var preview = Short(line, 70);
-                    session.NoteActivity($"nuclei: {preview}");
-                    onProgress(session.Snapshot());
-                }, perTool.Token);
-                foreach (var f in NucleiParser.Parse(output.ToString()).Where(f => ScopeGuard.IsInScope(target, f.Where, options.IncludeSubdomains) || f.Where.Length == 0))
-                    session.AddFinding(f);
-                break;
-            }
+                    // -jsonl su stdout; esclusi i tag distruttivi; limiti di ritmo e tempo. Niente fuzzing aggressivo.
+                    var args = new[]
+                    {
+                        "-target", url, "-jsonl", "-no-color", "-disable-update-check",
+                        "-exclude-tags", "dos,intrusive,fuzz", "-severity", "low,medium,high,critical", // niente «info»: solo debolezze vere, e più veloce
+                        "-stats", "-stats-interval", "15", // righe di avanzamento periodiche: così il notch non sembra fermo durante i minuti di scansione
+                        "-rate-limit", "25", "-timeout", "10", "-retries", "1",
+                    };
+                    await RunProcessAsync(exe, args, line =>
+                    {
+                        output.AppendLine(line);
+                        session.NoteActivity($"nuclei: {Short(line, 70)}");
+                        onProgress(session.Snapshot());
+                    }, perTool.Token);
+                    AddNucleiFindings(session, target, options, output);
+                    break;
+                }
 
-            case "zap":
-            {
-                var json = Path.Combine(options.OutputFolder, $"zap-{Stamp()}.json");
-                Directory.CreateDirectory(options.OutputFolder);
-                // Scansione rapida baseline: passiva + attiva sicura, report JSON standard (site[].alerts[]).
-                // -silent: niente chiamate di aggiornamento/add-on a ogni avvio (più prevedibile e senza rete di troppo).
-                var args = new[] { "-cmd", "-silent", "-quickurl", url, "-quickout", json, "-quickprogress" };
-                await RunProcessAsync(exe, args, line =>
+                case "zap":
                 {
-                    session.NoteActivity($"ZAP: {Short(line, 70)}");
-                    onProgress(session.Snapshot());
-                }, perTool.Token);
-                if (File.Exists(json))
-                    foreach (var f in ZapParser.Parse(await File.ReadAllTextAsync(json, perTool.Token)))
-                        session.AddFinding(f);
-                break;
-            }
+                    var json = Path.Combine(options.OutputFolder, $"zap-{Stamp()}.json");
+                    Directory.CreateDirectory(options.OutputFolder);
+                    // Scansione rapida baseline: passiva + attiva sicura, report JSON standard (site[].alerts[]).
+                    // -silent: niente chiamate di aggiornamento/add-on a ogni avvio (più prevedibile e senza rete di troppo).
+                    var args = new[] { "-cmd", "-silent", "-quickurl", url, "-quickout", json, "-quickprogress" };
+                    await RunProcessAsync(exe, args, line =>
+                    {
+                        session.NoteActivity($"ZAP: {Short(line, 70)}");
+                        onProgress(session.Snapshot());
+                    }, perTool.Token);
+                    if (File.Exists(json))
+                        foreach (var f in ZapParser.Parse(await File.ReadAllTextAsync(json, perTool.Token)))
+                            session.AddFinding(f);
+                    break;
+                }
 
-            default:
-            {
-                // nikto, testssl: non hanno (ancora) un parser dedicato. Li eseguiamo in modo prudente, salviamo l'uscita grezza
-                // accanto al report e la citiamo nell'azione; non inventiamo debolezze da testo non strutturato.
-                var raw = Path.Combine(options.OutputFolder, $"{step.Tool}-{Stamp()}.txt");
-                Directory.CreateDirectory(options.OutputFolder);
-                var args = step.Tool == "nikto"
-                    ? new[] { "-host", url, "-nointeractive", "-Tuning", "123bde", "-maxtime", ((int)options.PerToolTimeout.TotalSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture) }
-                    : new[] { "--quiet", "--color", "0", url };
-                await RunProcessAsync(exe, args, line =>
+                default:
                 {
-                    output.AppendLine(line);
-                    session.NoteActivity($"{step.Tool}: {Short(line, 70)}");
-                    onProgress(session.Snapshot());
-                }, perTool.Token);
-                await File.WriteAllTextAsync(raw, output.ToString(), token);
-                return (StepStatus.Done, $"uscita salvata in {Path.GetFileName(raw)}");
+                    // nikto, testssl: non hanno (ancora) un parser dedicato. Li eseguiamo in modo prudente, salviamo l'uscita grezza
+                    // accanto al report e la citiamo nell'azione; non inventiamo debolezze da testo non strutturato.
+                    var raw = Path.Combine(options.OutputFolder, $"{step.Tool}-{Stamp()}.txt");
+                    Directory.CreateDirectory(options.OutputFolder);
+                    var args = step.Tool == "nikto"
+                        ? new[] { "-host", url, "-nointeractive", "-Tuning", "123bde", "-maxtime", ((int)options.PerToolTimeout.TotalSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture) }
+                        : new[] { "--quiet", "--color", "0", url };
+                    await RunProcessAsync(exe, args, line =>
+                    {
+                        output.AppendLine(line);
+                        session.NoteActivity($"{step.Tool}: {Short(line, 70)}");
+                        onProgress(session.Snapshot());
+                    }, perTool.Token);
+                    await File.WriteAllTextAsync(raw, output.ToString(), token);
+                    return (StepStatus.Done, $"uscita salvata in {Path.GetFileName(raw)}");
+                }
             }
+        }
+        catch (OperationCanceledException) when (perTool.IsCancellationRequested && !token.IsCancellationRequested)
+        {
+            // Lo strumento ha superato il SUO tempo massimo: si salta e si prosegue col prossimo, senza abortire la sessione.
+            // Per nuclei si tiene quello trovato finora (uscita parziale).
+            var minutes = ((int)options.PerToolTimeout.TotalMinutes).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (step.Tool == "nuclei")
+            {
+                AddNucleiFindings(session, target, options, output);
+                var partial = session.Snapshot().Actions.FirstOrDefault(a => a.StepId == step.Id)?.Findings ?? 0;
+                return (StepStatus.Skipped, $"tempo massimo ({minutes} min)" + (partial > 0 ? $", {partial} parziali" : ", niente di trovato"));
+            }
+            return (StepStatus.Skipped, $"tempo massimo ({minutes} min)");
         }
 
         var found = session.Snapshot().Actions.FirstOrDefault(a => a.StepId == step.Id)?.Findings ?? 0;
         return (StepStatus.Done, found == 0 ? "nessuna debolezza" : $"{found} trovate");
+    }
+
+    private static void AddNucleiFindings(SecuritySession session, SecurityTarget target, ScanOptions options, StringBuilder output)
+    {
+        foreach (var finding in NucleiParser.Parse(output.ToString())
+                     .Where(f => f.Where.Length == 0 || ScopeGuard.IsInScope(target, f.Where, options.IncludeSubdomains)))
+            session.AddFinding(finding);
     }
 
     private void TryWriteReport(SecuritySnapshot snapshot, IReadOnlyList<ScanTool> tools, ScanOptions options, SecurityTarget target)
