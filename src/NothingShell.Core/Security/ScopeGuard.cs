@@ -22,7 +22,11 @@ public static class ScopeGuard
         if (s.Length == 0)
             return null;
         if (!s.Contains("://", StringComparison.Ordinal))
-            s = "https://" + s;
+        {
+            // Senza schema: https di norma, ma http per localhost e 127.x (i dev server girano quasi sempre in chiaro).
+            var hostOnly = s.Split('/', 2)[0].Split(':', 2)[0];
+            s = (IsLoopbackName(hostOnly) ? "http://" : "https://") + s;
+        }
         if (!Uri.TryCreate(s, UriKind.Absolute, out var url) || url.Scheme is not ("http" or "https"))
             return null;
         var host = NormalizeHost(url.DnsSafeHost);
@@ -32,6 +36,14 @@ public static class ScopeGuard
     /// <summary>Host confrontabile: senza spazi, senza punto finale, minuscolo.</summary>
     public static string NormalizeHost(string? host) =>
         (host ?? string.Empty).Trim().TrimEnd('.').ToLowerInvariant();
+
+    /// <summary>Un nome locale (localhost, 127.x, *.localhost): per questi, senza schema, si assume http.</summary>
+    public static bool IsLoopbackName(string? host)
+    {
+        var h = NormalizeHost(host).Trim('[', ']');
+        return h == "localhost" || h.EndsWith(".localhost", StringComparison.Ordinal)
+            || h == "::1" || h.StartsWith("127.", StringComparison.Ordinal);
+    }
 
     /// <summary>
     /// true se <paramref name="candidate"/> è una richiesta che resta dentro il bersaglio: stesso host, oppure (con

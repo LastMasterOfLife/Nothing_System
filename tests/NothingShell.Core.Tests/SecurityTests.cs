@@ -8,6 +8,9 @@ public class SecurityScopeTests
     [InlineData("miosito.it", "https", "miosito.it")]
     [InlineData("http://x.local:8080/a", "http", "x.local")]
     [InlineData("HTTPS://Esempio.IT/Path", "https", "esempio.it")]
+    [InlineData("localhost:8000", "http", "localhost")] // dev server: http di default
+    [InlineData("127.0.0.1:5000/app", "http", "127.0.0.1")]
+    [InlineData("https://localhost:8443", "https", "localhost")] // schema esplicito rispettato
     public void ParsesWebUrls(string input, string expectedScheme, string expectedHost)
     {
         var target = ScopeGuard.Parse(input);

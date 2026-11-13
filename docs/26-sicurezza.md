@@ -26,6 +26,9 @@ dell'utente»*).
   http/https sono sempre fuori. Serve a tenere in riga anche un redirect o un link che porterebbe lo scanner altrove.
 - Da riga di comando il cancello resta esplicito: senza `--confirm` non parte nulla (e non si manda **nessuna** richiesta al
   bersaglio).
+- Senza schema si assume `https://`, ma `http://` per **localhost** e `127.x` (i dev server girano quasi sempre in chiaro):
+  così un portale in sviluppo su `localhost:8000` parte giusto. Un'app dinamica in locale è anzi il bersaglio migliore
+  (niente CDN che limita le richieste, superficie vera per nuclei e ZAP).
 
 ## Cosa NON fa
 - Non è uno strumento «punta un sito qualsiasi ed entra». Niente bersagli non autorizzati, nessun uso senza il cancello.
