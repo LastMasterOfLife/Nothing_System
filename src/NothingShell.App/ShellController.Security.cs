@@ -58,15 +58,27 @@ public sealed partial class ShellController
 
     private void OpenSecurityReport()
     {
+        // Niente report scritto: apri almeno la cartella dei report.
         if (_securityReportPath is not { Length: > 0 } path || !File.Exists(path))
+        {
+            DevTools.OpenPath(SecurityScanService.DefaultFolder);
             return;
+        }
         try
         {
             Process.Start(new ProcessStartInfo(path) { UseShellExecute = true })?.Dispose();
         }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException)
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
         {
-            // nessuna app associata ai .md: pazienza, il file resta nella cartella
+            // Nessuna app associata ai .md: mostra il file in Esplora risorse, così lo si apre da lì.
+            try
+            {
+                DevTools.ShowInFolder(path);
+            }
+            catch (Exception ex2) when (ex2 is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
+            {
+                // pazienza: il file resta nella cartella dei report
+            }
         }
     }
 }
