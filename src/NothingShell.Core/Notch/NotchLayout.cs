@@ -40,7 +40,7 @@ public static class NotchLayout
     /// <summary>La misura per tutta la sessione: le pagine si impaginano sulla larghezza del notch quando nascono.</summary>
     public static void Use(NotchSize size) => Size = size;
 
-    public static bool IsTall(NotchPage page) => page is NotchPage.Mail or NotchPage.Phone or NotchPage.Agents or NotchPage.Devices or NotchPage.Database or NotchPage.Ftp or NotchPage.Diagnosi or NotchPage.Hours or NotchPage.Servers or NotchPage.Debug;
+    public static bool IsTall(NotchPage page) => page is NotchPage.Mail or NotchPage.Phone or NotchPage.Agents or NotchPage.Devices or NotchPage.Database or NotchPage.Ftp or NotchPage.Diagnosi or NotchPage.Hours or NotchPage.Servers or NotchPage.Debug or NotchPage.Security;
 
     /// <summary>Notch espanso su <paramref name="page"/>: le pagine con un elenco si allungano in verticale.</summary>
     public static Size2 Expanded(NotchPage page, bool media = false) =>

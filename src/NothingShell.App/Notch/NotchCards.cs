@@ -10,6 +10,7 @@ using NothingShell.App.Services;
 using NothingShell.Core.Design;
 using NothingShell.Core.DotMatrix;
 using NothingShell.Core.Notch;
+using NothingShell.Core.Security;
 
 namespace NothingShell.App.Notch;
 
@@ -321,6 +322,41 @@ internal static class NotchCards
         var tokens = $"IN {Core.Agents.AgentFormat.Tokens(turn.Usage.AllInput)} · OUT {Core.Agents.AgentFormat.Tokens(turn.Usage.Output)} · " +
                      Core.Dev.TaskTracker.FormatDuration(turn.Duration);
         return Layout(tile, "HA FINITO", [model.Length > 0 ? $"{turn.Title} · {model}" : turn.Title, tokens], Actions([.. buttons]), Theme.Ink);
+    }
+
+    /// <summary>
+    /// Sessione di sicurezza finita (docs/26-sicurezza.md): lucchetto tinto alla gravità più alta, totale e quante gravi,
+    /// e <i>Apri report</i>. È l'avviso di fine, dopo il quale la modalità si spegne da sola.
+    /// </summary>
+    public static UIElement SecurityFinished(SecuritySnapshot snapshot, Action openReport, Action dismiss)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(openReport);
+        ArgumentNullException.ThrowIfNull(dismiss);
+        var color = snapshot.Findings.Count == 0 ? Theme.Ink : NotchWindow.SecuritySeverityColor(snapshot.Peak);
+        var tile = Tile(
+            new DotMatrixView { Pitch = 4, Dots = DotGrid.From(DotIcons.Lock), DotColor = color, HorizontalAlignment = HorizontalAlignment.Center },
+            new DotMatrixView
+            {
+                Pitch = 1.5,
+                Dots = DotText.Render(snapshot.Findings.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 8, 0, 0),
+            });
+        var title = snapshot.Status switch
+        {
+            SessionStatus.Completed => "SICUREZZA: FATTO",
+            SessionStatus.Aborted => "SICUREZZA: FERMATA",
+            _ => "SICUREZZA: ERRORE",
+        };
+        var grave = snapshot.Count(Severity.Critical) + snapshot.Count(Severity.High);
+        var summary = $"{grave} gravi · {snapshot.Findings.Count} in tutto";
+        var target = snapshot.Target?.Display ?? string.Empty;
+        return Layout(tile, title, [target, summary], Actions(("APRI REPORT", () =>
+        {
+            openReport();
+            dismiss();
+        })), color);
     }
 
     /// <summary>CI conclusa: CI OK o CI FALLITA con i workflow falliti; Apri la pagina dell'esecuzione, Rilancia i job falliti.</summary>

@@ -98,6 +98,9 @@ public sealed partial class ShellController : IShellSettingsActions, IMailReader
         _notch.SettingsRequested += OpenSettings;
         _notch.MailOpened += OpenMail;
         _notch.AppointmentOpened += OpenAppointment;
+        _notch.SecurityScanRequested += StartSecurityScan;
+        _notch.SecurityStopRequested += StopSecurityScan;
+        _notch.SecurityOpenReportRequested += OpenSecurityReport;
         _bars.QuickPanelRequested += bar =>
         {
             _quickPanel ??= new QuickPanelWindow(Lock, OpenSettings, _kde, () => _settings.PhoneDirect);

@@ -537,6 +537,25 @@ public partial class App : Application
         foreach (var page in NotchPager.Pages)
             SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, page),
                 Path.Combine(folder, $"notch-{page}.png".ToLowerInvariant()));
+
+        // Modalità Sicurezza (docs/26-sicurezza.md): una sessione in corso e una conclusa, con debolezze d'esempio.
+        var secSession = new NothingShell.Core.Security.SecuritySession();
+        var secTarget = NothingShell.Core.Security.ScopeGuard.Parse("https://tuo-sito-di-test.it")!;
+        secSession.SetTarget(secTarget);
+        secSession.Authorize(new NothingShell.Core.Security.ScanAuthorization(secTarget.Host, DateTimeOffset.Now));
+        secSession.Begin([NothingShell.Core.Security.ScanPlan.Recon, NothingShell.Core.Security.ScanPlan.Nuclei], DateTimeOffset.Now);
+        secSession.StartStep("recon", TimeSpan.FromSeconds(1), "Ricognizione: leggo intestazioni, TLS e cookie");
+        secSession.AddFinding(new NothingShell.Core.Security.Finding(NothingShell.Core.Security.Severity.High, "Sito raggiungibile in HTTP (non cifrato)", "http://tuo-sito-di-test.it/", "Risposta 200 su http:// senza TLS.", "Reindirizza a HTTPS e attiva HSTS.", "CWE-319"));
+        secSession.AddFinding(new NothingShell.Core.Security.Finding(NothingShell.Core.Security.Severity.Medium, "Manca Content-Security-Policy", "https://tuo-sito-di-test.it/", "Nessuna CSP.", "Definisci una CSP restrittiva.", "CWE-693"));
+        secSession.AddFinding(new NothingShell.Core.Security.Finding(NothingShell.Core.Security.Severity.Low, "Cookie senza SameSite", "https://tuo-sito-di-test.it/", "Cookie senza SameSite.", "Imposta SameSite=Lax.", "CWE-352"));
+        notch.SetSecurity(secSession.Snapshot(), null);
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Security), Path.Combine(folder, "notch-security-live.png"));
+        secSession.CompleteStep("recon", NothingShell.Core.Security.StepStatus.Done, TimeSpan.FromSeconds(3));
+        secSession.CompleteStep("nuclei", NothingShell.Core.Security.StepStatus.Skipped, TimeSpan.FromSeconds(3), "non installato");
+        secSession.Complete(DateTimeOffset.Now.AddSeconds(3));
+        notch.SetSecurity(secSession.Snapshot(), Path.Combine(folder, "report.md"));
+        SaveSnapshot(notch.PrepareSnapshot(NotchState.Expanded, NotchPage.Security), Path.Combine(folder, "notch-security-fatto.png"));
+        notch.SetSecurity(null, null);
         notch.SetPhone(new PhonePageData(true,
             new NothingShell.Core.Phone.PhoneDevice("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", "Nothing Phone (2)", true, true)
             {

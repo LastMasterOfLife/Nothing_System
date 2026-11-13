@@ -19,6 +19,7 @@ using NothingShell.Core.Dev;
 using NothingShell.Core.DotMatrix;
 using NothingShell.Core.Media;
 using NothingShell.Core.Notch;
+using NothingShell.Core.Security;
 using NothingShell.Core.Sensors;
 
 namespace NothingShell.App.Notch;
@@ -118,6 +119,11 @@ public sealed class NotchWindow : Window
     private readonly StackPanel _agentView = new() { Orientation = Orientation.Horizontal };
     private readonly DotMatrixView _agentIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Agent) };
     private readonly DotMatrixView _agentText = new() { Pitch = 2 };
+    // Modalità Sicurezza in corso (docs/26-sicurezza.md): lucchetto tinto alla gravità più alta e avanzamento n/m
+    private readonly StackPanel _securityView = new() { Orientation = Orientation.Horizontal };
+    private readonly DotMatrixView _securityIcon = new() { Pitch = 2.5, Dots = DotGrid.From(DotIcons.Lock), DotColor = Theme.Accent };
+    private readonly DotMatrixView _securityText = new() { Pitch = 2 };
+    private bool _securityRunning;
 
     // Avviso: [icona] testo che scorre, oppure [icona] livello a punti e valore (volume, luminosità)
     private readonly Grid _alert = new() { VerticalAlignment = VerticalAlignment.Top, Opacity = 0 };
@@ -152,6 +158,7 @@ public sealed class NotchWindow : Window
     private readonly DiagnosiPage _diagnosi = new();
     private readonly HoursPage _hours = new();
     private readonly LeisurePage _leisure = new();
+    private readonly SecurityPage _security = new();
 
     // Svago (docs/25-svago.md): giocando il notch resta aperto e tiene la tastiera, come il campo della Home.
     private bool _gameHold;
@@ -205,6 +212,11 @@ public sealed class NotchWindow : Window
         _leisure.PlayRequested += HoldForGame;
         _leisure.LeaveRequested += EndGameHold;
         _leisure.Finished += (score, stage) => LeisureFinished?.Invoke(score, stage);
+        _security.InputClicked += () => BeginAsk(_security.FocusInput);
+        _security.InputCancelled += () => CancelAsk(_security.ClearInput);
+        _security.ScanRequested += target => SecurityScanRequested?.Invoke(target);
+        _security.StopRequested += () => SecurityStopRequested?.Invoke();
+        _security.OpenReportRequested += () => SecurityOpenReportRequested?.Invoke();
 
         var idle = NotchLayout.For(NotchState.Idle);
         _width = new Spring(idle.Width);
@@ -413,6 +425,43 @@ public sealed class NotchWindow : Window
 
     public void SetServers(IReadOnlyList<DevServer> servers) => _servers.Update(servers);
 
+    /// <summary>La pagina Sicurezza chiede di eseguire una sessione (l'utente ha confermato l'autorizzazione).</summary>
+    public event Action<SecurityTarget>? SecurityScanRequested;
+
+    /// <summary>La pagina Sicurezza chiede di fermare la sessione in corso.</summary>
+    public event Action? SecurityStopRequested;
+
+    /// <summary>La pagina Sicurezza (o la scheda di fine) chiede di aprire il report.</summary>
+    public event Action? SecurityOpenReportRequested;
+
+    /// <summary>Scrive nel campo della pagina Sicurezza e propone (per <c>--snapshot</c>).</summary>
+    public void ProposeSecurity(string text) => _security.Propose(text);
+
+    /// <summary>
+    /// Istantanea della sessione di sicurezza (dal vivo o finale): aggiorna la pagina e, mentre è in corso, la pillola
+    /// compatta mostra il lucchetto tinto alla gravità più alta e l'avanzamento.
+    /// </summary>
+    public void SetSecurity(SecuritySnapshot? snapshot, string? reportPath)
+    {
+        _security.Update(snapshot, reportPath);
+        _securityRunning = snapshot?.IsRunning == true;
+        if (snapshot is not null)
+        {
+            _securityIcon.DotColor = SecuritySeverityColor(snapshot.Peak);
+            _securityText.Dots = DotText.Render($"{snapshot.Done}/{snapshot.Total}");
+        }
+        OnActivitiesChanged();
+    }
+
+    /// <summary>Colore della gravità per la pillola e le schede (il rosso del tema per alta/critica, ambra per media).</summary>
+    internal static Color SecuritySeverityColor(Severity severity) => severity switch
+    {
+        Severity.Critical or Severity.High => Theme.Critical,
+        Severity.Medium => Color.FromRgb(0xE6, 0xA2, 0x3C),
+        Severity.Low => Theme.Accent,
+        _ => Theme.Muted,
+    };
+
     /// <summary>Pagina Debug: i portali collegati con le cose da guardare (docs/24-debug-potenziato.md).</summary>
     public void SetDebug(IReadOnlyList<NothingShell.Core.PortalDebug.DebugPortalView> portals) => _debugPage.Update(portals);
 
@@ -616,7 +665,7 @@ public sealed class NotchWindow : Window
 
     private bool HasActivity =>
         _countdown.IsRunning || _media?.IsPlaying == true || _privacy.Any || _downloads.Count > 0 || _tasks.Count > 0 || _ciRunning
-        || _working.Length > 0;
+        || _working.Length > 0 || _securityRunning;
 
     private Grid BuildVisualTree()
     {
@@ -660,6 +709,14 @@ public sealed class NotchWindow : Window
         _agentText.Margin = new Thickness(6, 0, 0, 0);
         _agentView.Children.Add(_agentIcon);
         _agentView.Children.Add(_agentText);
+        _securityView.HorizontalAlignment = HorizontalAlignment.Right;
+        _securityView.VerticalAlignment = VerticalAlignment.Center;
+        _securityView.Margin = new Thickness(0, 0, 18, 0);
+        _securityIcon.VerticalAlignment = VerticalAlignment.Center;
+        _securityText.VerticalAlignment = VerticalAlignment.Center;
+        _securityText.Margin = new Thickness(6, 0, 0, 0);
+        _securityView.Children.Add(_securityIcon);
+        _securityView.Children.Add(_securityText);
         _compact.Children.Add(_compactClock);
         _compact.Children.Add(_mascot);
         _compact.Children.Add(_liveDot);
@@ -668,6 +725,7 @@ public sealed class NotchWindow : Window
         _compact.Children.Add(_downloadView);
         _compact.Children.Add(_taskView);
         _compact.Children.Add(_agentView);
+        _compact.Children.Add(_securityView);
         SetActivityVisible(false);
 
         var alertSize = NotchLayout.For(NotchState.Alert);
@@ -698,7 +756,7 @@ public sealed class NotchWindow : Window
         _card.HorizontalAlignment = HorizontalAlignment.Center;
         _card.Padding = new Thickness(NotchUi.Padding, 14, NotchUi.Padding, 14);
 
-        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _phone, _work, _agents, _servers, _debugPage, _devices, _database, _ftp, _diagnosi, _hours, _clipboard, _timerPage, _system, _leisure }.OrderBy(p => p.Page))
+        foreach (var page in new NotchPageView[] { _home, _agenda, _mail, _phone, _work, _agents, _servers, _debugPage, _devices, _database, _ftp, _diagnosi, _hours, _clipboard, _timerPage, _system, _leisure, _security }.OrderBy(p => p.Page))
         {
             _pages[page.Page] = page;
             page.Visibility = Visibility.Collapsed;
@@ -745,7 +803,7 @@ public sealed class NotchWindow : Window
         };
         _pill.PreviewMouseLeftButtonDown += (_, e) =>
         {
-            if (!_home.IsMouseOverAsk && !_diagnosi.IsMouseOverInput && !_hours.IsMouseOverInput) // lì si seleziona il testo
+            if (!_home.IsMouseOverAsk && !_diagnosi.IsMouseOverInput && !_hours.IsMouseOverInput && !_security.IsMouseOverInput) // lì si seleziona il testo
                 _swipe.OnDragStart(e.GetPosition(_pill).X);
         };
         _pill.PreviewMouseMove += (_, e) =>
@@ -1298,13 +1356,15 @@ public sealed class NotchWindow : Window
         var privacy = visible && _privacy.Any;
         _privacyIcons.Visibility = privacy ? Visibility.Visible : Visibility.Hidden;
         _liveDot.Visibility = visible && !privacy ? Visibility.Visible : Visibility.Hidden;
-        var task = visible && _tasks.Count > 0;
+        var security = visible && _securityRunning;
+        _securityView.Visibility = security ? Visibility.Visible : Visibility.Hidden;
+        var task = visible && !security && _tasks.Count > 0;
         _taskView.Visibility = task ? Visibility.Visible : Visibility.Hidden;
-        var agent = visible && !task && _working.Length > 0;
+        var agent = visible && !security && !task && _working.Length > 0;
         _agentView.Visibility = agent ? Visibility.Visible : Visibility.Hidden;
-        var downloading = visible && !task && !agent && _downloads.Count > 0;
+        var downloading = visible && !security && !task && !agent && _downloads.Count > 0;
         _downloadView.Visibility = downloading ? Visibility.Visible : Visibility.Hidden;
-        var music = visible && !task && !agent && !downloading && _media?.IsPlaying == true;
+        var music = visible && !security && !task && !agent && !downloading && _media?.IsPlaying == true;
         _equalizerView.Visibility = music ? Visibility.Visible : Visibility.Hidden;
         if (music)
             _equalizerTimer.Start();

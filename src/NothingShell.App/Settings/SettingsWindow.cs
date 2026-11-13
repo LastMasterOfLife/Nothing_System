@@ -649,6 +649,7 @@ public sealed partial class SettingsWindow : Window
         NotchPage.Timer => ("Timer", "Conto alla rovescia", null),
         NotchPage.System => ("Sistema", "Processore, memoria, disco e app che usano microfono e webcam", null),
         NotchPage.Leisure => ("Svago", "むちねこ, il gatto che corre sui tetti", "Svago"),
+        NotchPage.Security => ("Sicurezza", "Prova autorizzata di un tuo sito: attacchi non distruttivi e report", null),
         _ => (page.ToString(), string.Empty, null),
     };
 

@@ -1,9 +1,13 @@
 # 26 — Modalità Sicurezza (specifica)
 
-Stato: **motore fatto e testato** (Core + servizio App + due comandi CLI, 18 test). **Da fare**: pagina del notch con lo
-stato grafico dal vivo e la pagina Impostazioni › SICUREZZA (vedi *Da fare* in fondo). Completa la categoria **Sicurezza**
-dei connettori (docs/14, docs/18): quelli sono controlli ripetuti e di sola lettura; questa è una **sessione** autorizzata
-che prova attivamente un sito e ne scrive un resoconto da sistemare.
+Stato: **motore e UI del notch fatti**. Motore nel Core + servizio App + due comandi CLI (18 test); pagina **Sicurezza** nel
+notch con campo, conferma dell'autorizzazione, attività dal vivo, conteggio per gravità ed elenco delle debolezze; mentre
+gira, la pillola compatta mostra il lucchetto tinto alla gravità più alta e l'avanzamento; a fine sessione la scheda
+*SICUREZZA: FATTO* con *Apri report*, poi la modalità si spegne. La pagina si accende, si spegne e si riordina da
+Impostazioni › NOTCH come le altre. **Da fare** (opzionale): pagina Impostazioni › SICUREZZA per le opzioni degli scanner e
+un connettore di comodo (vedi in fondo). Completa la categoria **Sicurezza** dei connettori (docs/14, docs/18): quelli sono
+controlli ripetuti e di sola lettura; questa è una **sessione** autorizzata che prova attivamente un sito e ne scrive un
+resoconto da sistemare.
 
 ## Obiettivo
 Provare in modo autorizzato la sicurezza di **un sito proprio** (o per cui si ha il permesso scritto): mandare le richieste
@@ -81,15 +85,22 @@ NothingShell.exe --security-scan <url> <report.md> --confirm
 - **Principi condivisi col resto**: il Core non conosce Windows; i servizi danno **istantanee immutabili** (`record`) via
   callback; fallimenti morbidi (bersaglio irraggiungibile → la sessione fallisce con un motivo, non un'eccezione visibile).
 
-## Da fare (prossimo giro: la parte visibile)
-1. **Pagina del notch** `Sicurezza` (come `DiagnosiPage`/`DevicesPage`): campo per l'indirizzo, pulsante di conferma
-   dell'autorizzazione, poi l'attività dal vivo (fase in corso, avanzamento, conteggio per gravità) e, alla fine, l'elenco
-   delle debolezze con un clic per aprire il report. Aggiungere `NotchPage.Security`, `NotchLayout.IsTall`, registrazione in
-   `NotchWindow` e in `ShellController`.
-2. **Stato grafico dal vivo**: mentre la sessione è in corso la pillola del notch cambia aspetto (colore legato alla
-  gravità più alta trovata, `SecuritySnapshot.Peak`) e a fine sessione una **scheda** *Fatto* con il riassunto e *Apri
-  report*, poi la modalità si spegne da sola.
-3. **Impostazioni › SICUREZZA**: attiva/disattiva la pagina, scelta degli strumenti, sottodomini sì/no, tempo massimo,
-  cartella dei report, link per installare gli scanner mancanti.
-4. **Connettore di comodo** (categoria Sicurezza): «Ricognizione sito» che rifà il recon passivo come controllo ripetuto con
-  avviso quando compare una debolezza nuova (riusa `ReconChecks`).
+## La parte visibile (fatta)
+- **Pagina del notch** `Sicurezza` (`SecurityPage`, come `DiagnosiPage`): campo per l'indirizzo; scritto un indirizzo valido
+  compare la **riga di conferma** dell'autorizzazione («confermi che è tuo?» + *Sì, è mio — esegui*); poi l'attività dal
+  vivo (fase in corso, avanzamento n/m, conteggio per gravità), *Ferma*, e l'elenco delle debolezze (un clic copia titolo,
+  dove e rimedio). Registrata in `NotchWindow` e guidata da `ShellController.Security`.
+- **Stato grafico dal vivo**: mentre la sessione è in corso la pillola compatta mostra un **lucchetto tinto alla gravità più
+  alta** (`SecuritySnapshot.Peak`, `NotchWindow.SecuritySeverityColor`) e l'avanzamento; a fine sessione la **scheda**
+  *SICUREZZA: FATTO/FERMATA/ERRORE* con totale, gravi e *Apri report* (`NotchCards.SecurityFinished`), poi la pillola di
+  sicurezza si spegne.
+- **Impostazioni › NOTCH**: la pagina Sicurezza si accende, si spegne e si riordina come le altre (compare nell'elenco con
+  nome e descrizione).
+
+## Da fare (opzionale)
+1. **Impostazioni › SICUREZZA** dedicate: scelta degli strumenti, sottodomini sì/no, tempo massimo, cartella dei report,
+   link per installare gli scanner mancanti. Oggi si usano i valori di `ScanOptions` di serie (ricognizione + nuclei + ZAP,
+   niente sottodomini, 15 minuti).
+2. **Connettore di comodo** (categoria Sicurezza): «Ricognizione sito» che rifà il recon passivo come controllo ripetuto con
+   avviso quando compare una debolezza nuova (riusa `ReconChecks`).
+3. **Parser per Nikto/testssl**: oggi la loro uscita grezza è salvata accanto al report; manca la trasformazione in `Finding`.
