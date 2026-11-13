@@ -135,6 +135,14 @@ public partial class App : Application
                 File.WriteAllLines(report, await ConnectorHost.CheckAsync(connectors, rest.Contains("--esegui")));
                 Shutdown();
                 return;
+            case ["--security-tools", var report]:
+                File.WriteAllLines(report, await SecurityCli.ToolsAsync());
+                Shutdown();
+                return;
+            case ["--security-scan", var url, var report, .. var rest]:
+                Environment.ExitCode = await SecurityCli.ScanAsync(url, report, rest.Contains("--confirm"));
+                Shutdown();
+                return;
             case ["--agents-check", var report]:
                 AgentsCheck(report);
                 Shutdown();

@@ -64,6 +64,14 @@ richieste lente e portale giù. Dettagli in [docs/24-debug-potenziato.md](docs/2
 solo sui tetti: clic o Spazio per saltare (tenuto, più in alto), crocchette e scatolette fanno punti ma pesano, e più pesa
 meno salta. Bandiere a ogni tappa, record nelle impostazioni. Dettagli in [docs/25-svago.md](docs/25-svago.md).
 
+**Modalità Sicurezza**: prova in modo autorizzato la sicurezza di un **sito tuo** (o per cui hai il permesso). Parte solo
+dopo aver confermato che l'host è tuo e resta sempre dentro quell'host; esegue una ricognizione passiva (intestazioni, TLS,
+cookie, software esposto) e, se installati, gli scanner `nuclei` e OWASP ZAP in modo **non distruttivo** (niente DoS,
+brute-force o esfiltrazione: le prove dimostrano solo che il buco esiste). Alla fine un **resoconto azione-per-azione** con
+dove sta il problema, la gravità (CWE/OWASP) e come si risolve, in `%USERPROFILE%\.nothing-shell\security\`. Si prova anche
+da terminale: `NothingShell.exe --security-scan <url> <report.md> --confirm` (e `--security-tools` per vedere cosa è
+installato). Dettagli in [docs/26-sicurezza.md](docs/26-sicurezza.md).
+
 **Telefono Android** tramite Collegamento al telefono di Windows: chiamata in arrivo come scheda nel notch
 (*Rispondi* apre Collegamento al telefono), chiamate perse e notifiche del telefono come avvisi.
 Con il **collegamento diretto** (protocollo KDE Connect, app KDE Connect sul telefono, Impostazioni ›
