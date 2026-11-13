@@ -288,4 +288,50 @@ public class SecurityReportTests
         var md = SecurityReport.ToMarkdown(snap);
         Assert.Contains("Nessuna debolezza trovata", md);
     }
+
+    [Fact]
+    public void HtmlReportHasTargetAndFindingAndEscapes()
+    {
+        var snap = SecuritySnapshot.Empty with
+        {
+            Status = SessionStatus.Completed,
+            Target = ScopeGuard.Parse("https://miosito.it"),
+            Findings = [new Finding(Severity.High, "XSS <script>", "https://miosito.it/s?q=1", "prova", "fai l'escape")],
+        };
+        var html = SecurityReport.ToHtml(snap);
+        Assert.StartsWith("<!doctype html>", html);
+        Assert.Contains("miosito.it", html);
+        Assert.Contains("fai l'escape", html);
+        Assert.Contains("XSS &lt;script&gt;", html); // il testo è sfuggito, non iniettato
+        Assert.DoesNotContain("<script>", html);
+    }
+}
+
+public class SecurityReportNameTests
+{
+    [Fact]
+    public void StemAndParseRoundTrip()
+    {
+        var at = new DateTimeOffset(2026, 11, 13, 22, 42, 53, TimeSpan.Zero).ToLocalTime();
+        var stem = SecurityReportName.Stem("lastmasteroflife.github.io", at);
+        var parsed = SecurityReportName.Parse(stem);
+        Assert.NotNull(parsed);
+        Assert.Equal("lastmasteroflife.github.io", parsed!.Value.Host);
+        Assert.Equal(at.LocalDateTime, parsed.Value.At);
+    }
+
+    [Fact]
+    public void ParseRejectsNonReportNames()
+    {
+        Assert.Null(SecurityReportName.Parse("random-file"));
+        Assert.Null(SecurityReportName.Parse(""));
+        Assert.Null(SecurityReportName.Parse("host-20261301-999999")); // data non valida
+    }
+
+    [Fact]
+    public void SafeKeepsHostCharactersAndReplacesOthers()
+    {
+        Assert.Equal("a.b-c", SecurityReportName.Safe("a.b-c"));
+        Assert.Equal("a_b_c", SecurityReportName.Safe("a/b:c"));
+    }
 }

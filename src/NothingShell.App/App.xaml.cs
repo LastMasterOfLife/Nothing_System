@@ -1315,6 +1315,32 @@ public partial class App : Application
         {
         }
 
+        public bool SecurityEnabled { get; } = true;
+
+        public void SetSecurityEnabled(bool enabled)
+        {
+        }
+
+        public (bool Nuclei, bool Zap) SecurityToolsPresent() => (true, false);
+
+        public IReadOnlyList<SecurityReportInfo> SecurityReports() =>
+        [
+            new("tuo-sito-di-test.it", DateTime.Now.AddMinutes(-5), "demo.html", "demo.md"),
+            new("lastmasteroflife.github.io", DateTime.Now.AddDays(-1), "demo2.html", "demo2.md"),
+        ];
+
+        public void OpenSecurityReportFile(string path)
+        {
+        }
+
+        public void OpenSecurityFolder()
+        {
+        }
+
+        public void ClearSecurityHistory()
+        {
+        }
+
         public void OpenTerminal()
         {
         }

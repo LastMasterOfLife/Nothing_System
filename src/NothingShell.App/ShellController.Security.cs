@@ -56,12 +56,78 @@ public sealed partial class ShellController
         _notch.ShowCard(NotchCards.SecurityFinished(snapshot, OpenSecurityReport, _notch.DismissCard), CardDuration);
     }
 
-    private void OpenSecurityReport()
+    private void OpenSecurityReport() => OpenSecurityReportFile(_securityReportPath ?? string.Empty);
+
+    // ── Impostazioni › SICUREZZA ───────────────────────────────────────────────
+
+    /// <summary>La Modalità Sicurezza è accesa (la pagina compare nello swipe).</summary>
+    public bool SecurityEnabled => _settings.Security;
+
+    public void SetSecurityEnabled(bool enabled) => Update(_settings with { Security = enabled });
+
+    /// <summary>Gli scanner installati (controllo sincrono per file, per la pagina impostazioni).</summary>
+    public (bool Nuclei, bool Zap) SecurityToolsPresent() =>
+        (SecurityScanService.QuickPresent("nuclei"), SecurityScanService.QuickPresent("zap"));
+
+    /// <summary>Lo storico: i report nella cartella, dal più recente, con bersaglio e data letti dal nome.</summary>
+    public IReadOnlyList<SecurityReportInfo> SecurityReports()
     {
-        // Niente report scritto: apri almeno la cartella dei report.
-        if (_securityReportPath is not { Length: > 0 } path || !File.Exists(path))
+        try
         {
-            DevTools.OpenPath(SecurityScanService.DefaultFolder);
+            if (!Directory.Exists(SecurityScanService.DefaultFolder))
+                return [];
+            var list = new List<SecurityReportInfo>();
+            foreach (var html in Directory.EnumerateFiles(SecurityScanService.DefaultFolder, "*.html"))
+            {
+                if (SecurityReportName.Parse(Path.GetFileNameWithoutExtension(html)) is not { } parsed)
+                    continue;
+                var md = Path.ChangeExtension(html, ".md");
+                list.Add(new SecurityReportInfo(parsed.Host, parsed.At, html, File.Exists(md) ? md : null));
+            }
+            return list.OrderByDescending(r => r.At).ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    public void OpenSecurityFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(SecurityScanService.DefaultFolder);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+        DevTools.OpenPath(SecurityScanService.DefaultFolder);
+    }
+
+    /// <summary>Cancella tutti i report dello storico (html e md).</summary>
+    public void ClearSecurityHistory()
+    {
+        try
+        {
+            if (!Directory.Exists(SecurityScanService.DefaultFolder))
+                return;
+            foreach (var file in Directory.EnumerateFiles(SecurityScanService.DefaultFolder, "*.*")
+                         .Where(f => f.EndsWith(".html", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".md", StringComparison.OrdinalIgnoreCase)))
+                File.Delete(file);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // qualche file in uso: pazienza, gli altri sono stati tolti
+        }
+    }
+
+    /// <summary>Apri un report: il file (il browser apre gli .html); se non si può, mostralo in Esplora risorse.</summary>
+    public void OpenSecurityReportFile(string path)
+    {
+        if (path is not { Length: > 0 } || !File.Exists(path))
+        {
+            OpenSecurityFolder();
             return;
         }
         try
@@ -70,7 +136,6 @@ public sealed partial class ShellController
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
         {
-            // Nessuna app associata ai .md: mostra il file in Esplora risorse, così lo si apre da lì.
             try
             {
                 DevTools.ShowInFolder(path);
@@ -82,3 +147,6 @@ public sealed partial class ShellController
         }
     }
 }
+
+/// <summary>Una voce dello storico delle scansioni: bersaglio, quando, e i file del report.</summary>
+public sealed record SecurityReportInfo(string Host, DateTime At, string HtmlPath, string? MarkdownPath);

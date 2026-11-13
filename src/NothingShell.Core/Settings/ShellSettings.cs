@@ -30,7 +30,8 @@ public sealed record ShellSettings(
     IReadOnlyList<NotchPage>? NotchPageOrder = null,
     IReadOnlyList<NotchPage>? HiddenNotchPages = null,
     NothingShell.Core.PortalDebug.DebugSettings? Debug = null,
-    NothingShell.Core.Leisure.LeisureSettings? Leisure = null)
+    NothingShell.Core.Leisure.LeisureSettings? Leisure = null,
+    bool Security = true)
 {
     public static ShellSettings Default { get; } = new(true, true, []);
 

@@ -282,6 +282,21 @@ public interface IShellSettingsActions
 
     /// <summary>Apre il notch sulla pagina Svago.</summary>
     void OpenLeisure();
+
+    /// <summary>Modalità Sicurezza (docs/26-sicurezza.md): accesa/spenta, scanner installati e storico dei report.</summary>
+    bool SecurityEnabled { get; }
+
+    void SetSecurityEnabled(bool enabled);
+
+    (bool Nuclei, bool Zap) SecurityToolsPresent();
+
+    IReadOnlyList<SecurityReportInfo> SecurityReports();
+
+    void OpenSecurityReportFile(string path);
+
+    void OpenSecurityFolder();
+
+    void ClearSecurityHistory();
 }
 
 /// <summary>Pagine del menù laterale, nell'ordine in cui compaiono.</summary>
@@ -303,6 +318,7 @@ public enum SettingsPage
     Widgets,
     Plugins,
     Leisure,
+    Security,
     Info,
 }
 
@@ -335,6 +351,7 @@ public sealed partial class SettingsWindow : Window
         (SettingsPage.Widgets, "Widget", "Widget sul desktop"),
         (SettingsPage.Plugins, "Plugin", "Widget aggiuntivi"),
         (SettingsPage.Leisure, "Svago", "Un gioco nel notch per le pause"),
+        (SettingsPage.Security, "Sicurezza", "Prova autorizzata di un sito tuo e storico dei report"),
         (SettingsPage.Info, "Info", "Versione e dati"),
     ];
 
@@ -585,6 +602,9 @@ public sealed partial class SettingsWindow : Window
                 break;
             case SettingsPage.Leisure:
                 LeisurePage();
+                break;
+            case SettingsPage.Security:
+                SecurityPage();
                 break;
             case SettingsPage.Info:
                 InfoPage();

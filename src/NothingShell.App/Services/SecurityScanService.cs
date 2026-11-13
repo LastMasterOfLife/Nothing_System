@@ -33,6 +33,9 @@ public sealed class SecurityScanService
 {
     public static string DefaultFolder { get; } = Path.Combine(AtomicFile.DataFolder, "security");
 
+    /// <summary>Dove la shell tiene gli scanner installati per conto suo (senza toccare il PATH): <c>~/.nothing-shell/tools</c>.</summary>
+    public static string ToolsFolder { get; } = Path.Combine(AtomicFile.DataFolder, "tools");
+
     /// <summary>Gli strumenti che la modalità sa guidare, con il perché.</summary>
     public static IReadOnlyList<(string Id, string Exe, string Name, string Why)> Known { get; } =
     [
@@ -48,7 +51,7 @@ public sealed class SecurityScanService
         var tools = new List<ScanTool>();
         foreach (var (id, exe, name, why) in Known)
         {
-            var path = await WhichAsync(exe, token) ?? (exe == "zap.bat" ? await WhichAsync("zap.sh", token) : null);
+            var path = await LocateAsync(id, exe, token);
             tools.Add(new ScanTool(id, name, why, path is not null, path is not null ? await VersionAsync(id, path, token) : null, path));
         }
         return tools;
@@ -284,9 +287,12 @@ public sealed class SecurityScanService
         try
         {
             Directory.CreateDirectory(options.OutputFolder);
-            var file = Path.Combine(options.OutputFolder, $"{SafeName(target.Host)}-{Stamp()}.md");
-            File.WriteAllText(file, SecurityReport.ToMarkdown(snapshot, tools));
-            LastReportPath = file;
+            var stem = SecurityReportName.Stem(target.Host, snapshot.StartedAt ?? DateTimeOffset.Now);
+            // HTML (si apre nel browser, sempre associato) + Markdown (per chi lo preferisce e per la CLI).
+            var html = Path.Combine(options.OutputFolder, stem + ".html");
+            File.WriteAllText(html, SecurityReport.ToHtml(snapshot, tools));
+            File.WriteAllText(Path.Combine(options.OutputFolder, stem + ".md"), SecurityReport.ToMarkdown(snapshot, tools));
+            LastReportPath = html;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -327,6 +333,57 @@ public sealed class SecurityScanService
         return process.ExitCode;
     }
 
+    /// <summary>Dove sta uno strumento: prima i percorsi noti e la cartella degli strumenti della shell, poi il PATH.</summary>
+    private static async Task<string?> LocateAsync(string id, string exe, CancellationToken token)
+    {
+        foreach (var candidate in Candidates(id))
+            if (File.Exists(candidate))
+                return candidate;
+        var folder = Path.Combine(ToolsFolder, id == "zap" ? "ZAP" : id);
+        if (Directory.Exists(folder))
+        {
+            try
+            {
+                if (Directory.EnumerateFiles(folder, Path.GetFileName(exe), SearchOption.AllDirectories).FirstOrDefault() is { } hit)
+                    return hit;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // cartella illeggibile: si prova il PATH
+            }
+        }
+        return await WhichAsync(exe, token);
+    }
+
+    /// <summary>Controllo sincrono e a buon mercato (solo file, niente processi né PATH) se uno strumento è a portata di mano.</summary>
+    public static bool QuickPresent(string id)
+    {
+        foreach (var candidate in Candidates(id))
+            if (File.Exists(candidate))
+                return true;
+        var folder = Path.Combine(ToolsFolder, id == "zap" ? "ZAP" : id);
+        var name = id == "nuclei" ? "nuclei.exe" : "zap.bat";
+        try
+        {
+            return Directory.Exists(folder) && Directory.EnumerateFiles(folder, name, SearchOption.AllDirectories).Any();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static IReadOnlyList<string> Candidates(string id) => id switch
+    {
+        "nuclei" => [Path.Combine(ToolsFolder, "nuclei", "nuclei.exe")],
+        "zap" =>
+        [
+            @"C:\Program Files\ZAP\Zed Attack Proxy\zap.bat",
+            @"C:\Program Files (x86)\ZAP\Zed Attack Proxy\zap.bat",
+        ],
+        _ => [],
+    };
+
     private static async Task<string?> WhichAsync(string exe, CancellationToken token)
     {
         try
@@ -356,15 +413,19 @@ public sealed class SecurityScanService
 
     private static async Task<string?> VersionAsync(string id, string exe, CancellationToken token)
     {
-        var flag = id switch { "zap" => "-version", "testssl" => "--version", _ => "-version" };
+        if (id == "zap")
+            return null; // zap.bat -version avvia la JVM: troppo caro solo per la versione
+        var flag = id switch { "testssl" => "--version", _ => "-version" };
         try
         {
             var captured = new StringBuilder();
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(TimeSpan.FromSeconds(8));
-            await RunProcessAsync(exe, [flag], l => { if (captured.Length < 200) captured.Append(l).Append(' '); }, timeout.Token);
-            var text = captured.ToString().Trim();
-            return text.Length == 0 ? null : Short(text, 60);
+            await RunProcessAsync(exe, [flag], l => { if (captured.Length < 400) captured.Append(l).Append(' '); }, timeout.Token);
+            // via i codici colore ANSI (nuclei li usa) e, se c'è, tieni solo il numero di versione
+            var text = System.Text.RegularExpressions.Regex.Replace(captured.ToString(), "\u001b\\[[0-9;]*m", string.Empty).Trim();
+            var version = System.Text.RegularExpressions.Regex.Match(text, @"v?\d+\.\d+(\.\d+)?");
+            return version.Success ? version.Value : text.Length == 0 ? null : Short(text, 60);
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or OperationCanceledException or IOException or InvalidOperationException)
         {
@@ -373,8 +434,6 @@ public sealed class SecurityScanService
     }
 
     private static string Stamp() => DateTime.Now.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
-
-    private static string SafeName(string host) => new(host.Select(c => char.IsLetterOrDigit(c) || c is '.' or '-' ? c : '_').ToArray());
 
     private static string Short(string? text, int max = 120)
     {

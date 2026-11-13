@@ -97,6 +97,8 @@ public sealed partial class ShellController
             hidden.Add(NotchPage.Debug);
         if (!Leisure.Enabled)
             hidden.Add(NotchPage.Leisure);
+        if (!_settings.Security)
+            hidden.Add(NotchPage.Security);
         ApplyConnected(hidden);
         _featurePages = [.. NotchPager.Pages.Except(hidden)];
         _notch.SetAvailablePages(_settings.NotchPages.Where(p => _featurePages.Contains(p) && _settings.IsNotchPageShown(p)));

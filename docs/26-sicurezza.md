@@ -1,13 +1,13 @@
 # 26 — Modalità Sicurezza (specifica)
 
-Stato: **motore e UI del notch fatti**. Motore nel Core + servizio App + due comandi CLI (18 test); pagina **Sicurezza** nel
-notch con campo, conferma dell'autorizzazione, attività dal vivo, conteggio per gravità ed elenco delle debolezze; mentre
-gira, la pillola compatta mostra il lucchetto tinto alla gravità più alta e l'avanzamento; a fine sessione la scheda
-*SICUREZZA: FATTO* con *Apri report*, poi la modalità si spegne. La pagina si accende, si spegne e si riordina da
-Impostazioni › NOTCH come le altre. **Da fare** (opzionale): pagina Impostazioni › SICUREZZA per le opzioni degli scanner e
-un connettore di comodo (vedi in fondo). Completa la categoria **Sicurezza** dei connettori (docs/14, docs/18): quelli sono
-controlli ripetuti e di sola lettura; questa è una **sessione** autorizzata che prova attivamente un sito e ne scrive un
-resoconto da sistemare.
+Stato: **motore, UI del notch e impostazioni fatti**. Motore nel Core + servizio App + due comandi CLI (22 test); pagina
+**Sicurezza** nel notch con campo, conferma dell'autorizzazione, attività dal vivo, conteggio per gravità ed elenco delle
+debolezze; mentre gira, la pillola compatta mostra il lucchetto tinto alla gravità più alta e l'avanzamento; a fine sessione
+la scheda *SICUREZZA: FATTO* con *Apri report* (HTML nel browser), poi la modalità si spegne. Pagina **Impostazioni ›
+SICUREZZA** con interruttore, stato degli scanner e **storico dei report**. **Da fare** (opzionale): opzioni di scansione
+nelle impostazioni e un connettore di comodo (vedi in fondo). Completa la categoria **Sicurezza** dei connettori (docs/14,
+docs/18): quelli sono controlli ripetuti e di sola lettura; questa è una **sessione** autorizzata che prova attivamente un
+sito e ne scrive un resoconto da sistemare.
 
 ## Obiettivo
 Provare in modo autorizzato la sicurezza di **un sito proprio** (o per cui si ha il permesso scritto): mandare le richieste
@@ -62,10 +62,23 @@ vengono scartate. Nikto/testssl, per ora senza parser dedicato, salvano l'uscita
 nell'azione.
 
 ## Il report
-Markdown in `%USERPROFILE%\.nothing-shell\security\<host>-<data>.md` (puro, testato):
+Scritto in `%USERPROFILE%\.nothing-shell\security\<host>-<yyyyMMdd-HHmmss>` come **HTML** e **Markdown** (puri, testati):
 bersaglio ed esito, **riepilogo per gravità**, **strumenti** usati, **azione per azione** (ogni fase con tempo, esito e
 quante debolezze), e ogni **debolezza** con *dove*, *prova*, *come si risolve*, *riferimento* (CWE/OWASP/template) e *fonte*.
-In fondo la nota che la scansione è stata autorizzata e non distruttiva.
+In fondo la nota che la scansione è stata autorizzata e non distruttiva. *Apri report* apre l'**HTML** nel browser (su
+Windows sempre associato, al contrario dei .md); se non si può, il file viene mostrato in Esplora risorse.
+
+## Scanner e dove si installano
+Gli scanner esterni si cercano, nell'ordine: percorsi noti (ZAP installato in `Program Files`), la cartella della shell
+`%USERPROFILE%\.nothing-shell\tools\` (nuclei in `tools\nuclei\`, ZAP estratto in `tools\ZAP\`), poi il `PATH`. Così si
+possono tenere lì senza toccare il `PATH` di sistema. nuclei è un singolo .exe; ZAP è il pacchetto *Crossplatform* e usa il
+Java già presente.
+
+## Impostazioni › SICUREZZA
+- **Interruttore** per accendere/spegnere la pagina Sicurezza nel notch (si riordina come le altre in Impostazioni › NOTCH).
+- **Scanner**: se nuclei e OWASP ZAP sono installati (controllo per file), con la cartella dove metterli.
+- **Storico**: i report nella cartella, dal più recente, con bersaglio e data letti dal nome del file; *Apri* per ciascuno,
+  *Apri cartella* e *Azzera storico*.
 
 ## Comandi (per provare senza aprire la shell)
 ```
@@ -98,9 +111,9 @@ NothingShell.exe --security-scan <url> <report.md> --confirm
   nome e descrizione).
 
 ## Da fare (opzionale)
-1. **Impostazioni › SICUREZZA** dedicate: scelta degli strumenti, sottodomini sì/no, tempo massimo, cartella dei report,
-   link per installare gli scanner mancanti. Oggi si usano i valori di `ScanOptions` di serie (ricognizione + nuclei + ZAP,
-   niente sottodomini, 15 minuti).
+1. **Opzioni di scansione nelle impostazioni**: scelta degli strumenti, sottodomini sì/no, tempo massimo, cartella dei
+   report. Oggi l'interruttore e lo storico ci sono; le opzioni di scansione usano i valori di `ScanOptions` di serie
+   (ricognizione + nuclei + ZAP, niente sottodomini, 15 minuti).
 2. **Connettore di comodo** (categoria Sicurezza): «Ricognizione sito» che rifà il recon passivo come controllo ripetuto con
    avviso quando compare una debolezza nuova (riusa `ReconChecks`).
 3. **Parser per Nikto/testssl**: oggi la loro uscita grezza è salvata accanto al report; manca la trasformazione in `Finding`.

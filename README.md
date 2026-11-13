@@ -67,10 +67,13 @@ meno salta. Bandiere a ogni tappa, record nelle impostazioni. Dettagli in [docs/
 **Modalità Sicurezza**: prova in modo autorizzato la sicurezza di un **sito tuo** (o per cui hai il permesso). Parte solo
 dopo aver confermato che l'host è tuo e resta sempre dentro quell'host; esegue una ricognizione passiva (intestazioni, TLS,
 cookie, software esposto) e, se installati, gli scanner `nuclei` e OWASP ZAP in modo **non distruttivo** (niente DoS,
-brute-force o esfiltrazione: le prove dimostrano solo che il buco esiste). Alla fine un **resoconto azione-per-azione** con
-dove sta il problema, la gravità (CWE/OWASP) e come si risolve, in `%USERPROFILE%\.nothing-shell\security\`. Si prova anche
-da terminale: `NothingShell.exe --security-scan <url> <report.md> --confirm` (e `--security-tools` per vedere cosa è
-installato). Dettagli in [docs/26-sicurezza.md](docs/26-sicurezza.md).
+brute-force o esfiltrazione: le prove dimostrano solo che il buco esiste). Mentre gira, la pillola del notch mostra il
+lucchetto tinto alla gravità più alta e l'avanzamento; a fine giro una scheda avvisa e lascia il **resoconto
+azione-per-azione** con dove sta il problema, la gravità (CWE/OWASP) e come si risolve, scritto in HTML e Markdown in
+`%USERPROFILE%\.nothing-shell\security\`. In **Impostazioni › Sicurezza** si accende la modalità, si vede se gli scanner sono
+installati (si tengono in `%USERPROFILE%\.nothing-shell\tools\`, senza toccare il PATH) e c'è lo **storico dei report**. Si
+prova anche da terminale: `NothingShell.exe --security-scan <url> <report.md> --confirm` (e `--security-tools`). Dettagli in
+[docs/26-sicurezza.md](docs/26-sicurezza.md).
 
 **Telefono Android** tramite Collegamento al telefono di Windows: chiamata in arrivo come scheda nel notch
 (*Rispondi* apre Collegamento al telefono), chiamate perse e notifiche del telefono come avvisi.
