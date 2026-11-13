@@ -226,8 +226,10 @@ public sealed class SecurityScanService
                 // -jsonl su stdout; esclusi i tag distruttivi; limiti di ritmo e tempo. Niente fuzzing aggressivo.
                 var args = new[]
                 {
-                    "-target", url, "-jsonl", "-silent", "-no-color", "-disable-update-check",
-                    "-exclude-tags", "dos,intrusive,fuzz", "-rate-limit", "25", "-timeout", "10", "-retries", "1",
+                    "-target", url, "-jsonl", "-no-color", "-disable-update-check",
+                    "-exclude-tags", "dos,intrusive,fuzz", "-severity", "low,medium,high,critical", // niente «info»: solo debolezze vere, e più veloce
+                    "-stats", "-stats-interval", "15", // righe di avanzamento periodiche: così il notch non sembra fermo durante i minuti di scansione
+                    "-rate-limit", "25", "-timeout", "10", "-retries", "1",
                 };
                 await RunProcessAsync(exe, args, line =>
                 {
@@ -246,7 +248,8 @@ public sealed class SecurityScanService
                 var json = Path.Combine(options.OutputFolder, $"zap-{Stamp()}.json");
                 Directory.CreateDirectory(options.OutputFolder);
                 // Scansione rapida baseline: passiva + attiva sicura, report JSON standard (site[].alerts[]).
-                var args = new[] { "-cmd", "-quickurl", url, "-quickout", json, "-quickprogress" };
+                // -silent: niente chiamate di aggiornamento/add-on a ogni avvio (più prevedibile e senza rete di troppo).
+                var args = new[] { "-cmd", "-silent", "-quickurl", url, "-quickout", json, "-quickprogress" };
                 await RunProcessAsync(exe, args, line =>
                 {
                     session.NoteActivity($"ZAP: {Short(line, 70)}");
