@@ -69,6 +69,48 @@ public sealed partial class ShellController
     public (bool Nuclei, bool Zap) SecurityToolsPresent() =>
         (SecurityScanService.QuickPresent("nuclei"), SecurityScanService.QuickPresent("zap"));
 
+    /// <summary>Installazioni in corso, per id → ultima frase di avanzamento (sopravvive ai Rebuild della pagina).</summary>
+    public IReadOnlyDictionary<string, string> SecurityInstalls => _securityInstalls;
+
+    /// <summary>Esito dell'ultima installazione fallita, per id (si azzera al tentativo successivo).</summary>
+    public IReadOnlyDictionary<string, string> SecurityInstallErrors => _securityInstallErrors;
+
+    private readonly Dictionary<string, string> _securityInstalls = [];
+    private readonly Dictionary<string, string> _securityInstallErrors = [];
+
+    /// <summary>Installa nuclei o ZAP; <paramref name="changed"/> si chiama sul thread UI a ogni passo e alla fine.</summary>
+    public async Task InstallSecurityToolAsync(string id, Action changed)
+    {
+        if (_securityInstalls.ContainsKey(id))
+            return;
+        _securityInstallErrors.Remove(id);
+        _securityInstalls[id] = "avvio…";
+        changed();
+        var progress = new Progress<string>(text =>
+        {
+            if (_securityInstalls.ContainsKey(id))
+            {
+                _securityInstalls[id] = text;
+                changed();
+            }
+        });
+        string? error;
+        try
+        {
+            error = await Task.Run(() => SecurityToolInstaller.InstallAsync(id, progress, CancellationToken.None));
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            error = ex.Message;
+        }
+        _securityInstalls.Remove(id);
+        if (error is not null)
+            _securityInstallErrors[id] = error;
+        changed();
+    }
+
+    public void OpenZapDownloadPage() => DevTools.OpenPath(SecurityToolInstaller.ZapDownloadPage);
+
     /// <summary>Lo storico: i report nella cartella, dal più recente, con bersaglio e data letti dal nome.</summary>
     public IReadOnlyList<SecurityReportInfo> SecurityReports()
     {

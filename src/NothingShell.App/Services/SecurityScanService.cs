@@ -338,6 +338,8 @@ public sealed class SecurityScanService
         };
         foreach (var a in args)
             start.ArgumentList.Add(a);
+        // un Java (o uno scanner) installato dopo l'avvio della shell non sta nel PATH ereditato
+        start.Environment["PATH"] = SecurityToolInstaller.FreshPath();
 
         using var process = new Process { StartInfo = start };
         process.OutputDataReceived += (_, e) => { if (e.Data is { } t && t.Length > 0) onLine(t); };

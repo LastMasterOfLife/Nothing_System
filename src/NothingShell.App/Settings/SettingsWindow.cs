@@ -296,6 +296,16 @@ public interface IShellSettingsActions
 
     (bool Nuclei, bool Zap) SecurityToolsPresent();
 
+    /// <summary>Installazioni di scanner in corso: id → ultimo passo.</summary>
+    IReadOnlyDictionary<string, string> SecurityInstalls { get; }
+
+    /// <summary>Ultimo errore d'installazione per id.</summary>
+    IReadOnlyDictionary<string, string> SecurityInstallErrors { get; }
+
+    Task InstallSecurityToolAsync(string id, Action changed);
+
+    void OpenZapDownloadPage();
+
     IReadOnlyList<SecurityReportInfo> SecurityReports();
 
     void OpenSecurityReportFile(string path);

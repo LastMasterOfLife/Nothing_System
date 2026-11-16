@@ -1329,6 +1329,16 @@ public partial class App : Application
 
         public (bool Nuclei, bool Zap) SecurityToolsPresent() => (true, false);
 
+        public IReadOnlyDictionary<string, string> SecurityInstalls { get; } = new Dictionary<string, string>();
+
+        public IReadOnlyDictionary<string, string> SecurityInstallErrors { get; } = new Dictionary<string, string>();
+
+        public Task InstallSecurityToolAsync(string id, Action changed) => Task.CompletedTask;
+
+        public void OpenZapDownloadPage()
+        {
+        }
+
         public IReadOnlyList<SecurityReportInfo> SecurityReports() =>
         [
             new("tuo-sito-di-test.it", DateTime.Now.AddMinutes(-5), "demo.html", "demo.md"),
