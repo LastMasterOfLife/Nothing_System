@@ -240,6 +240,12 @@ public interface IShellSettingsActions
     /// <summary>Per i PC potenti: Qwen3.5 9B invece del 4B.</summary>
     bool PowerfulAssistant { get; set; }
 
+    /// <summary>La cartella in cui l'assistente propone di clonare i repository.</summary>
+    string CloneFolder { get; }
+
+    /// <summary>Vuoto torna a quella di serie.</summary>
+    void SetCloneFolder(string? folder);
+
     void InstallAssistantModel();
 
     Task NextAssistantModelAsync();
@@ -991,6 +997,7 @@ public sealed partial class SettingsWindow : Window
         if (!_shell.AssistantModelInstalled)
             actions.Add(_shell.BrainInstalling ? ("ANNULLA DOWNLOAD", Now(_shell.CancelBrainInstall)) : ($"SCARICA IL MODELLO ({(_shell.PowerfulAssistant ? "5,3" : "2,6")} GB)", Now(_shell.InstallAssistantModel)));
         ButtonRow([.. actions]);
+        CloneFolderRow();
 
         Section("COMANDI CRITICI");
         Note("Partono solo dopo una conferma esplicita, anche se sono scorciatoie imparate: nel notch due clic, nel terminale bisogna scrivere SI. " +
@@ -1001,6 +1008,31 @@ public sealed partial class SettingsWindow : Window
             Note(string.Join("  ·  ", group.Commands), Theme.MutedBrush);
         }
         ButtonRow(("AGGIUNGI I TUOI", _shell.OpenCriticalCommands));
+    }
+
+    /// <summary>"Clona https://…" nell'assistente propone questa cartella più il nome del repository, e chiede comunque.</summary>
+    private void CloneFolderRow()
+    {
+        var folder = Field("Cartella dove clonare i repository: l'assistente la propone ogni volta, col nome del repository, e chiede se usare --recursive",
+            _shell.CloneFolder);
+        folder.LostFocus += (_, _) =>
+        {
+            if (folder.Text.Trim() != _shell.CloneFolder)
+                _shell.SetCloneFolder(folder.Text);
+        };
+        ButtonRow(("SCEGLI CARTELLA", () =>
+        {
+            var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Cartella dove clonare i repository", InitialDirectory = System.IO.Directory.Exists(_shell.CloneFolder) ? _shell.CloneFolder : string.Empty };
+            if (dialog.ShowDialog(this) == true)
+            {
+                _shell.SetCloneFolder(dialog.FolderName);
+                folder.Text = _shell.CloneFolder;
+            }
+        }), ("DI SERIE", () =>
+        {
+            _shell.SetCloneFolder(null);
+            folder.Text = _shell.CloneFolder;
+        }));
     }
 
     /// <summary>Le scorciatoie del campo sotto la data nel notch (docs/16-assistente-notch.md).</summary>

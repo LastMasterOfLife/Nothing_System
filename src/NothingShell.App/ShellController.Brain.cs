@@ -83,7 +83,7 @@ public sealed partial class ShellController : IAssistantPanelActions
     public void OpenTerminal() => OpenTerminal(null, null, null);
 
     CommandAssistant IAssistantPanelActions.Assistant => _assistant ??= new CommandAssistant(_brain.Memory, new AssistantRunner(),
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), _brain.ProposeAsync) { Local = LocalRequest };
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), _brain.ProposeAsync) { Local = LocalRequest, CloneFolder = () => _settings.CloneFolder };
 
     /// <summary>Le ore dette a parole si registrano da sole, senza modello: scrivono dati e vanno capite per bene (docs/19-ore-di-lavoro.md).</summary>
     private string? LocalRequest(string text) =>
@@ -100,6 +100,15 @@ public sealed partial class ShellController : IAssistantPanelActions
     };
 
     public IReadOnlyList<string> AssistantModels => _assistantModels;
+
+    /// <summary>Dove l'assistente propone di clonare: quella scelta, altrimenti source\repos o la cartella dell'utente.</summary>
+    public string CloneFolder => _settings.CloneFolder ?? NothingShell.Core.Dev.GitClone.DefaultBase(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+
+    public void SetCloneFolder(string? folder)
+    {
+        folder = folder?.Trim().TrimEnd('\\', '/');
+        Update(_settings with { CloneFolder = string.IsNullOrEmpty(folder) ? null : folder });
+    }
 
     public void OpenAssistant()
     {

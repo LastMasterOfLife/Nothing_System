@@ -80,6 +80,17 @@ Ogni comando dell'assistente, da chiunque arrivi, passa da qui nell'ordine:
 
 *NEL TERMINALE* passa il comando alla console vera, per i programmi interattivi; se è critico lì si deve scrivere SI.
 
+### Clonare un repository
+"clona https://…", "fai il clone di git@…" o `git clone …` (scritto a mano, da una scorciatoia o proposto dal modello)
+non passano dal cancello: compare una scheda che chiede **sempre** in quale cartella e se usare `--recursive`, con due
+pulsanti distinti (*CLONA SENZA --recursive* / *CLONA CON --recursive*); la scheda vale come conferma. La cartella
+proposta è quella delle impostazioni (*Sviluppo → Assistente nel notch → Cartella dove clonare i repository*; di serie
+`source\repos` se c'è, altrimenti la cartella dell'utente) più il nome del repository, e si cambia a mano o con *SCEGLI…*.
+Una cartella che esiste e non è vuota viene rifiutata prima di partire. Le opzioni scritte (`-b`, `--depth`…) restano;
+un `git clone` con pipe, `;` o variabili non è un clone semplice e passa dal cancello come gli altri comandi. git parte
+direttamente con gli argomenti separati (niente PowerShell, che scambierebbe l'avanzamento su stderr per un errore),
+fino a 30 minuti; Esc lo ferma.
+
 ### L'esecutore limitato
 `tools/NothingShell.Agent.ps1` è ciò che rende possibile far partire da solo un comando del modello. Tre barriere:
 

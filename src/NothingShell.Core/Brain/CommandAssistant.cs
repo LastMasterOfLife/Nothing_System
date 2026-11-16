@@ -25,6 +25,10 @@ public interface IAssistantRunner
     Task<AssistantRun> RunReadOnlyAsync(string command, CancellationToken token);
 
     Task<AssistantRun> RunConfirmedAsync(string command, CancellationToken token);
+
+    /// <summary>Un clone già confermato nella sua scheda; di serie come comando confermato.</summary>
+    Task<AssistantRun> RunCloneAsync(GitCloneRequest request, GitCloneChoice choice, CancellationToken token) =>
+        RunConfirmedAsync(GitClone.Command(request, choice), token);
 }
 
 public sealed record AssistantTurn(string Role, string Content);
@@ -103,6 +107,12 @@ public interface IAssistantView
 
     /// <summary>Il comando ha dato da solo la risposta: può diventare una scorciatoia per quella frase.</summary>
     void OfferShortcut(string phrase, string command);
+
+    /// <summary>
+    /// Chiede dove clonare (proposta: <paramref name="folder"/>) e se con --recursive; null se l'utente non vuole.
+    /// Di serie non chiede e quindi non clona.
+    /// </summary>
+    Task<GitCloneChoice?> AskCloneAsync(GitCloneRequest request, string folder, CancellationToken token) => Task.FromResult<GitCloneChoice?>(null);
 }
 
 public enum AssistantReplyKind
@@ -140,6 +150,7 @@ public static partial class AssistantProtocol
         Se un comando è rifiutato o fallisce non hai letto nulla: non scrivere numeri, prova un altro comando o dillo.
         Usa SCELTE quando non si capisce a cosa si riferisce la richiesta. Dopo RISPOSTA puoi aggiungere una riga SCELTE coi passi possibili.
         Se la richiesta chiede di cambiare qualcosa, scrivi il comando che lo fa: decide l'utente se eseguirlo.
+        Per clonare un repository scrivi solo COMANDO: git clone <indirizzo>: cartella e --recursive li chiede l'app all'utente. Se non conosci l'indirizzo chiedilo con RISPOSTA.
 
         Comandi di lettura che partono da soli:
         Get-Process, Get-Service, Get-ChildItem, Get-Content, Get-PSDrive, Get-Volume, Get-CimInstance, Get-NetIPAddress, Get-NetConnectionProfile, Get-NetTCPConnection, Get-Date, Select-Object, Sort-Object, Where-Object, Measure-Object, Select-String, git status, git log, ipconfig.
@@ -328,6 +339,9 @@ public sealed class CommandAssistant
     /// <summary>Richieste che l'app sa fare da sola, senza modello né comandi (le ore di lavoro): restituisce la risposta, o null se non è roba sua.</summary>
     public Func<string, string?>? Local { get; set; }
 
+    /// <summary>Cartella in cui proporre i clone (dalle impostazioni); null usa <see cref="GitClone.DefaultBase"/>.</summary>
+    public Func<string?>? CloneFolder { get; set; }
+
     /// <summary>Dimentica la conversazione: la prossima domanda non dipende dalle precedenti.</summary>
     public void Reset() => _history.Clear();
 
@@ -345,6 +359,11 @@ public sealed class CommandAssistant
         if (!input.StartsWith('>') && Local?.Invoke(input.TrimStart('?').Trim()) is { } local)
         {
             view.Answer(local, verified: true);
+            return;
+        }
+        if (GitClone.From(input.TrimStart('>', '?').Trim()) is { } clone)
+        {
+            await CloneAsync(clone, view, token);
             return;
         }
         if (input.StartsWith('>') || (!input.StartsWith('?') && AssistantProtocol.LooksLikeCommand(input)))
@@ -468,6 +487,11 @@ public sealed class CommandAssistant
                 _history.Add(new AssistantTurn("user", "L'utente ha scelto di non eseguire questo comando."));
                 return;
             }
+            if (GitClone.FromCommand(command) is not null)
+            {
+                _history.Add(new AssistantTurn("user", AssistantProtocol.Result(command, run))); // l'esito l'ha già detto la scheda del clone
+                return;
+            }
             if (origin == Origin.Shortcut)
                 _memory.Record(input, command, run.Status == AssistantRunStatus.Ok, DateTimeOffset.Now);
             if (run.Status == AssistantRunStatus.Rewrite)
@@ -486,6 +510,8 @@ public sealed class CommandAssistant
     /// <summary>Il cancello: da qui passa ogni comando. Null se l'utente non ha voluto eseguirlo.</summary>
     private async Task<AssistantRun?> RunGatedAsync(string command, Origin origin, bool canRewrite, bool showOutput, IAssistantView view, CancellationToken token)
     {
+        if (GitClone.FromCommand(command) is { } clone)
+            return await CloneAsync(clone, view, token);
         AssistantRun run;
         if (CommandSafety.Reason(command) is { } critical)
         {
@@ -514,6 +540,29 @@ public sealed class CommandAssistant
             }
         }
         return Masked(command, run, showOutput, view);
+    }
+
+    /// <summary>Un clone chiede sempre dove e se con --recursive, anche se scritto per intero: la scheda vale come conferma.</summary>
+    private async Task<AssistantRun?> CloneAsync(GitCloneRequest request, IAssistantView view, CancellationToken token)
+    {
+        var baseFolder = CloneFolder?.Invoke() is { Length: > 0 } chosen ? chosen : GitClone.DefaultBase(_home);
+        var choice = await view.AskCloneAsync(request, GitClone.SuggestedFolder(request, baseFolder), token);
+        if (choice is null)
+            return Declined(view);
+        if (GitClone.Problem(choice.Folder) is { } problem)
+        {
+            view.Note($"Non l'ho clonato: {problem}");
+            return null;
+        }
+        var command = GitClone.Command(request, choice);
+        view.Running(command);
+        var run = await _runner.RunCloneAsync(request, choice, token) with { Confirmed = true };
+        var shown = Masked(command, run, showOutput: run.Status != AssistantRunStatus.Ok, view);
+        if (run.Status == AssistantRunStatus.Ok)
+            view.Answer($"Clonato in {choice.Folder.Trim()}{(choice.Recursive ? ", con i sottomoduli" : string.Empty)}.", verified: true);
+        else
+            view.Note("Il clone non è riuscito: qui sopra c'è quello che ha scritto git.");
+        return shown;
     }
 
     private static AssistantRun? Declined(IAssistantView view)

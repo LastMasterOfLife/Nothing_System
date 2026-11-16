@@ -8,6 +8,7 @@ using NothingShell.App.Interop;
 using NothingShell.App.Rendering;
 using NothingShell.Core.Brain;
 using NothingShell.Core.Design;
+using NothingShell.Core.Dev;
 using NothingShell.Core.DotMatrix;
 using NothingShell.Core.Notch;
 
@@ -299,6 +300,27 @@ public sealed class AssistantWindow : Window, IAssistantView
         }
     }
 
+    public async Task<GitCloneChoice?> AskCloneAsync(GitCloneRequest request, string folder, CancellationToken token)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(folder);
+        ClearWaiting();
+        var answer = new TaskCompletionSource<GitCloneChoice?>();
+        using var registration = token.Register(() => answer.TrySetCanceled(token));
+        var card = CloneCard(request, folder, choice => answer.TrySetResult(choice));
+        Add(card);
+        if (IsVisible)
+            Activate();
+        try
+        {
+            return await answer.Task;
+        }
+        finally
+        {
+            _log.Children.Remove(card);
+        }
+    }
+
     public void Answer(string text, bool verified)
     {
         ArgumentNullException.ThrowIfNull(text);
@@ -480,6 +502,105 @@ public sealed class AssistantWindow : Window, IAssistantView
         {
             Child = stack,
             BorderBrush = accent,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(14),
+            Margin = new Thickness(0, 8, 0, 8),
+        };
+    }
+
+    /// <summary>
+    /// Dove clonare (proposta modificabile, o SCEGLI per sfogliare) e con o senza --recursive: sono due pulsanti, così la
+    /// scelta si fa ogni volta. Se la richiesta diceva già --recursive, quel pulsante è il primo.
+    /// </summary>
+    private Border CloneCard(GitCloneRequest request, string folder, Action<GitCloneChoice?> answer)
+    {
+        var title = DevRows.Dots("CLONA REPOSITORY", Theme.Ink, 1.8);
+        title.HorizontalAlignment = HorizontalAlignment.Left;
+        var url = Selectable(request.Url, 12, Theme.InkBrush, MonoFont);
+        url.Margin = new Thickness(0, 8, 0, 0);
+        if (request.Options is { Count: > 0 } options)
+            url.Text += "  " + string.Join(' ', options);
+
+        var caption = NotchUi.Text(12, Theme.MutedBrush, "In quale cartella?");
+        caption.Margin = new Thickness(0, 12, 0, 5);
+        var box = new TextBox
+        {
+            Text = folder,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Foreground = Theme.InkBrush,
+            CaretBrush = Theme.InkBrush,
+            FontFamily = MonoFont,
+            FontSize = 12,
+            VerticalContentAlignment = VerticalAlignment.Center,
+        };
+        var browse = DevRows.Button("SCEGLI…", () =>
+        {
+            var current = box.Text.Trim();
+            var parent = System.IO.Directory.Exists(current) ? current : System.IO.Path.GetDirectoryName(current);
+            var dialog = new Microsoft.Win32.OpenFolderDialog
+            {
+                Title = "Dove clonare il repository",
+                InitialDirectory = parent is not null && System.IO.Directory.Exists(parent) ? parent : string.Empty,
+            };
+            if (dialog.ShowDialog(this) == true)
+                box.Text = System.IO.Path.Combine(dialog.FolderName, GitClone.RepositoryName(request.Url));
+        });
+        browse.Margin = new Thickness(8, 0, 0, 0);
+        var field = new DockPanel();
+        DockPanel.SetDock(browse, Dock.Right);
+        field.Children.Add(browse);
+        field.Children.Add(new Border
+        {
+            Child = box,
+            Background = Theme.SurfaceBrush,
+            BorderBrush = Theme.OutlineBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(8, 5, 8, 5),
+        });
+
+        var question = NotchUi.Text(12, Theme.MutedBrush, "Con i sottomoduli (--recursive)?");
+        question.Margin = new Thickness(0, 12, 0, 0);
+        var problem = NotchUi.Text(12, Theme.CriticalBrush, string.Empty);
+        problem.TextWrapping = TextWrapping.Wrap;
+        problem.TextTrimming = TextTrimming.None;
+        problem.Visibility = Visibility.Collapsed;
+        problem.Margin = new Thickness(0, 8, 0, 0);
+
+        void Clone(bool recursive)
+        {
+            if (GitClone.Problem(box.Text) is { } why)
+            {
+                problem.Text = why;
+                problem.Visibility = Visibility.Visible;
+                return;
+            }
+            answer(new GitCloneChoice(box.Text.Trim(), recursive));
+        }
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        buttons.Children.Add(DevRows.Button("ANNULLA", () => answer(null)));
+        var plain = DevRows.Button("CLONA SENZA --recursive", () => Clone(false));
+        var recursive = DevRows.Button("CLONA CON --recursive", () => Clone(true));
+        if (request.Recursive == true)
+            (plain, recursive) = (recursive, plain); // quello già chiesto sta in fondo, dove si guarda per primo
+        buttons.Children.Add(plain);
+        buttons.Children.Add(recursive);
+
+        var stack = new StackPanel();
+        stack.Children.Add(title);
+        stack.Children.Add(url);
+        stack.Children.Add(caption);
+        stack.Children.Add(field);
+        stack.Children.Add(question);
+        stack.Children.Add(problem);
+        stack.Children.Add(buttons);
+        return new Border
+        {
+            Child = stack,
+            BorderBrush = Theme.MutedBrush,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(4),
             Padding = new Thickness(14),

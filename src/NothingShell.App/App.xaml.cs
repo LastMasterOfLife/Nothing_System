@@ -1251,6 +1251,12 @@ public partial class App : Application
 
         public bool PowerfulAssistant { get; set; }
 
+        public string CloneFolder => @"C:\Users\utente\source\repos";
+
+        public void SetCloneFolder(string? folder)
+        {
+        }
+
         public void InstallAssistantModel()
         {
         }

@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using NothingShell.Core.Brain;
+using NothingShell.Core.Dev;
 
 namespace NothingShell.App.Services;
 
@@ -19,6 +20,7 @@ public sealed class AssistantRunner : IAssistantRunner
     private static readonly string[] Quiet = ["-NoLogo", "-NoProfile", "-NonInteractive"];
     private static readonly TimeSpan ReadOnlyLimit = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan ConfirmedLimit = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan CloneLimit = TimeSpan.FromMinutes(30);
 
     private readonly string _script = Path.Combine(AppContext.BaseDirectory, "tools", "NothingShell.Agent.ps1");
     private readonly string _folder = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -59,6 +61,32 @@ public sealed class AssistantRunner : IAssistantRunner
             : new AssistantRun(AssistantRunStatus.Failed, output.TrimEnd(), errors.Length > 0 ? errors.TrimEnd() : $"uscita con codice {exit}");
     }
 
+    /// <summary>
+    /// git direttamente, con gli argomenti separati: in PowerShell lo stderr di git (dove scrive l'avanzamento) sembrerebbe
+    /// un errore. Senza standard input; le credenziali le chiede, se servono, il Gestore credenziali di Git.
+    /// </summary>
+    public async Task<AssistantRun> RunCloneAsync(GitCloneRequest request, GitCloneChoice choice, CancellationToken token)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(choice);
+        try
+        {
+            if (Path.GetDirectoryName(choice.Folder.Trim()) is { Length: > 0 } parent)
+                Directory.CreateDirectory(parent);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new AssistantRun(AssistantRunStatus.Failed, string.Empty, ex.Message);
+        }
+        var (exit, output, errors) = await RunAsync("git", GitClone.Arguments(request, choice), CloneLimit, token);
+        var text = string.Join('\n', new[] { output, errors }.Where(t => t.Length > 0)).TrimEnd();
+        if (exit is null)
+            return new AssistantRun(AssistantRunStatus.Failed, text, errors.Length > 0 ? $"git non è partito ({errors}): è installato e nel PATH?" : "il clone è durato troppo: è stato fermato");
+        return exit == 0
+            ? new AssistantRun(AssistantRunStatus.Ok, text)
+            : new AssistantRun(AssistantRunStatus.Failed, output.TrimEnd(), errors.Length > 0 ? errors.TrimEnd() : $"uscita con codice {exit}");
+    }
+
     private static AssistantRun? ParseRunner(string output)
     {
         var line = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault();
@@ -85,9 +113,12 @@ public sealed class AssistantRunner : IAssistantRunner
     }
 
     /// <summary>Il codice d'uscita è null se è durato troppo: si chiude tutto l'albero dei processi, anche se annullato.</summary>
-    private async Task<(int? Exit, string Output, string Errors)> RunAsync(string[] arguments, TimeSpan limit, CancellationToken token)
+    private Task<(int? Exit, string Output, string Errors)> RunAsync(string[] arguments, TimeSpan limit, CancellationToken token) =>
+        RunAsync("powershell.exe", Quiet.Concat(arguments), limit, token);
+
+    private async Task<(int? Exit, string Output, string Errors)> RunAsync(string program, IEnumerable<string> arguments, TimeSpan limit, CancellationToken token)
     {
-        var start = new ProcessStartInfo("powershell.exe")
+        var start = new ProcessStartInfo(program)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -95,9 +126,10 @@ public sealed class AssistantRunner : IAssistantRunner
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             StandardOutputEncoding = new UTF8Encoding(false),
+            StandardErrorEncoding = new UTF8Encoding(false),
             WorkingDirectory = _folder,
         };
-        foreach (var argument in Quiet.Concat(arguments))
+        foreach (var argument in arguments)
             start.ArgumentList.Add(argument);
 
         Process? process;
@@ -110,7 +142,7 @@ public sealed class AssistantRunner : IAssistantRunner
             return (null, string.Empty, ex.Message);
         }
         if (process is null)
-            return (null, string.Empty, "PowerShell non è partito");
+            return (null, string.Empty, $"{program} non è partito");
 
         using (process)
         using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
